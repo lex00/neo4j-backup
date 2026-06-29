@@ -62,6 +62,26 @@ k3d-smoke:
 k3d-down:
     ./k3d/down.sh
 
+# install the Airflow adapter into its own venv (uv)
+airflow-install:
+    ./airflow/install.sh
+
+# run Airflow standalone (UI on :8080) wired to the Compose stack
+airflow-standalone:
+    ./airflow/standalone.sh
+
+# Airflow: backup -> verify -> restore -> prune against the stack (dag.test, in-process)
+airflow-smoke:
+    airflow/.venv/bin/python airflow/smoke_e2e.py
+
+# Airflow: real differential chain + point-in-time restore validation
+airflow-pitr:
+    airflow/.venv/bin/python airflow/smoke_pitr.py
+
+# Airflow: k8s execution mode (KubernetesPodOperator) against k3d (needs `just k3d-up`)
+airflow-k8s-smoke:
+    airflow/.venv/bin/python airflow/smoke_k8s.py
+
 # list backup artifacts in object storage
 artifacts prefix="":
     {{compose}} run --rm -T mc "mc alias set local http://minio:9000 $AWS_ACCESS_KEY_ID $AWS_SECRET_ACCESS_KEY >/dev/null && mc ls -r local/$BACKUP_BUCKET/{{prefix}}"

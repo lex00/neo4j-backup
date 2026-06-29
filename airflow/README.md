@@ -11,21 +11,34 @@ same [policy](../POLICY.md) and [recovery](../RECOVERY.md) — pick Dagster *or*
 
 ## Install (uv, Python 3.13)
 
-Airflow needs its constraints file; install into its own venv:
+Airflow needs its constraints file; it goes in its own venv, isolated from Dagster:
 
 ```bash
-uv venv airflow/.venv --python 3.13
-AF=$(curl -s https://pypi.org/pypi/apache-airflow/json | python3 -c "import sys,json;print(json.load(sys.stdin)['info']['version'])")
-uv pip install --python airflow/.venv/bin/python \
-  "apache-airflow[cncf.kubernetes,amazon,neo4j]==$AF" \
-  --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-$AF/constraints-3.13.txt"
-uv pip install --python airflow/.venv/bin/python -e orchestrator --no-deps
-uv pip install --python airflow/.venv/bin/python neo4j
+just airflow-install          # uv venv + pinned Airflow + adapter (no deps) + neo4j + pytest
 ```
 
-## Validate DAGs parse
+Override the pins with `AIRFLOW_VERSION=… PYTHON_VERSION=… just airflow-install`. See
+`airflow/install.sh` for the underlying steps.
+
+## Run it locally
+
+Against the Compose stack (`just up && just bootstrap`):
+
+```bash
+just airflow-smoke        # backup → verify → restore → prune (dag.test, in-process)
+just airflow-pitr         # real full+diff chain + point-in-time restore (seedRestoreUntil)
+just airflow-k8s-smoke    # KubernetesPodOperator mode against k3d (needs `just k3d-up`)
+just airflow-standalone   # scheduler + UI on :8080, DAGs wired to the stack
+```
+
+`dag.test()` runs a DAG in-process against the live stack — the Airflow analogue of
+Dagster's `execute_in_process`, and how the smokes validate without a running scheduler.
+
+## Validate DAGs parse (no stack needed)
 
 ```bash
 AIRFLOW_HOME=/tmp/af NEO4J_BACKUP_POLICY=policies/demo.yaml \
   airflow/.venv/bin/python -m pytest airflow/tests/
 ```
+
+This is the same DagBag import-error check CI runs.
