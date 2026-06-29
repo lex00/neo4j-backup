@@ -26,8 +26,10 @@ live in *your* Dagster deployment. That's the complete list:
 | **4. Code-location entry** | your `workspace.yaml` (OSS) or `dagster_cloud.yaml` (Dagster+) | your Dagster repo | registers this package with Dagster |
 
 Defaults: only `NEO4J_PASSWORD` is required (everything else has sane defaults), so the
-**only file you must write is #1, the policy.** The schema is
-`orchestrator/neo4j_backup_dagster/policy.py`; an annotated example is `policies/demo.yaml`.
+**only file you must write is #1, the policy.** Every policy field is documented in the
+**[Policy reference](orchestrator/README.md#policy-reference-every-field)** (types,
+defaults, and which fields the pipeline acts on); `policies/demo.yaml` is an annotated
+example and `orchestrator/neo4j_backup_dagster/policy.py` is the schema.
 
 **What to put in each →** the step-by-step
 [Configuration walkthrough](orchestrator/README.md) (in the orchestrator README).

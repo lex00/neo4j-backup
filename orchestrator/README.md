@@ -31,12 +31,9 @@ There are **four** config surfaces. Everything else has a default. Start here.
 Do them in order:
 
 1. **Write your policy.** `cp policies/demo.yaml policies/prod.yaml`; edit each group's
-   `id`, `aliases`, `tier`, `retention_days`, and the `tiers` cron. The schema is
-   `neo4j_backup_dagster/policy.py`. Then set `NEO4J_BACKUP_POLICY=policies/prod.yaml`.
-   *(Note: `s3_prefix`, `encryption`, `rpo_minutes`/`rto_minutes`, `owner`, `overrides`
-   are recorded but not acted on by the pipeline today — the bucket comes from
-   `BACKUP_BUCKET`, and SSE-KMS is applied by your bucket. You can leave them at the
-   demo values.)*
+   `id`, `aliases`, `tier`, `retention_days`, and the `tiers` cron. **Every field is in
+   the [Policy reference](#policy-reference-every-field) below** (it marks which fields
+   the pipeline acts on vs. records). Then set `NEO4J_BACKUP_POLICY=policies/prod.yaml`.
 2. **Set the environment** (table below) so the code location reaches your Neo4j (Bolt
    7687 + backup port 6362) and your bucket. On AWS: leave `AWS_ENDPOINT_URL_S3` unset and
    use an IAM role; the only required secret is `NEO4J_PASSWORD`.
@@ -63,6 +60,48 @@ database you back up**.
   change) requires a one-time migration (back up → restore into a uniquely-named
   physical → drop the original name → create the alias), because a database and an alias
   cannot share a name.
+
+## Policy reference (every field)
+
+A policy YAML has two top-level keys: **`db_groups`** (a list) and **`tiers`** (a map).
+Schema: `neo4j_backup_dagster/policy.py`; annotated example: `../policies/demo.yaml`.
+
+**Status** says whether the pipeline acts on a field (**used**) or merely records it
+(**declarative** — accepted and validated, but not yet wired to any behavior).
+
+### `db_groups[]` — one entry per backup group
+
+| Field | Type | Required / default | Status | Meaning |
+|---|---|---|---|---|
+| `id` | string | **required** | used | group identifier; part of the storage path + partition key |
+| `aliases` | list of string | **required** | used | the app-facing Neo4j aliases to back up (one backup unit each); validated against Neo4j alias rules |
+| `tier` | string | **required** | used | which `tiers` entry sets this group's schedule (must exist) |
+| `retention_days` | int | `7` | used | `prune` deletes artifacts older than this (keeps the chain head) |
+| `s3_prefix` | string | **required** | declarative | not read by the pipeline; the bucket comes from `BACKUP_BUCKET` |
+| `owner` | string | `null` | declarative | reporting / ownership tag only |
+| `rpo_minutes` | int | `60` | declarative | target, not enforced |
+| `rto_minutes` | int | `120` | declarative | target, not enforced |
+| `encryption` | object | `{mode: sse-kms}` | declarative | recorded intent; SSE-KMS is applied by your bucket, not the pipeline |
+| `overrides` | map | `{}` | declarative | per-alias cadence overrides; not wired |
+
+### `db_groups[].encryption`
+
+| Field | Type | Required / default | Status | Meaning |
+|---|---|---|---|---|
+| `mode` | `sse-kms` \| `client-side` \| `none` | `sse-kms` | declarative | intended at-rest encryption mode |
+| `kms_key_ref` | string | `null` | declarative | KMS key id/alias for the group |
+
+### `tiers{}` — named schedules referenced by `db_group.tier`
+
+| Field | Type | Required / default | Status | Meaning |
+|---|---|---|---|---|
+| `full_cron` | cron string | **required** | used | when full backups run (the full lane) |
+| `diff_cron` | cron string | **required** | used | when differential backups run (the diff lane) |
+
+**Validation on load:** aliases must be legal Neo4j aliases; every group's `tier` must be
+a key in `tiers` (loading fails otherwise). `s3_prefix` is currently required even though
+it is declarative — set it to anything (e.g. the demo value) until per-group buckets are
+wired.
 
 ## Environment variables
 
