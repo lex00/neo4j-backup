@@ -12,3 +12,4 @@ _site/
 # Generated diagram SVGs are committed (viewable without graphviz). Remove the next
 # line if you prefer to treat them as build artifacts.
 # diagrams/*.svg
+airflow/.venv/

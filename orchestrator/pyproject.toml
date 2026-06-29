@@ -14,6 +14,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "dagster-webserver"]
+# Airflow adapter deps are installed with Airflow's constraints (see airflow/README.md);
+# this extra documents them. neo4j_backup_core needs only neo4j/boto3/pydantic/pyyaml.
+airflow = [
+  "apache-airflow>=3",
+  "apache-airflow-providers-cncf-kubernetes",
+  "apache-airflow-providers-amazon",
+  "apache-airflow-providers-neo4j",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -21,7 +29,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["neo4j_backup_core*", "neo4j_backup_dagster*"]
+include = ["neo4j_backup_core*", "neo4j_backup_dagster*", "neo4j_backup_airflow*"]
 
 # `dagster dev` and the code-location entry resolve the Definitions from here.
 [tool.dagster]

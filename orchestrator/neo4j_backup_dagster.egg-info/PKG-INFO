@@ -12,3 +12,8 @@ Requires-Dist: pyyaml>=6
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Requires-Dist: dagster-webserver; extra == "dev"
+Provides-Extra: airflow
+Requires-Dist: apache-airflow>=3; extra == "airflow"
+Requires-Dist: apache-airflow-providers-cncf-kubernetes; extra == "airflow"
+Requires-Dist: apache-airflow-providers-amazon; extra == "airflow"
+Requires-Dist: apache-airflow-providers-neo4j; extra == "airflow"

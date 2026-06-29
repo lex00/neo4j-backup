@@ -1,5 +1,7 @@
 README.md
 pyproject.toml
+neo4j_backup_airflow/__init__.py
+neo4j_backup_airflow/config.py
 neo4j_backup_core/__init__.py
 neo4j_backup_core/clients.py
 neo4j_backup_core/naming.py
