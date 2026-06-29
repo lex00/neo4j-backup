@@ -29,6 +29,7 @@ def _run_pod(runner, command: list, env: dict) -> None:
     if not runner.image:
         raise RuntimeError("RUNNER_MODE=k8s requires RUNNER_IMAGE")
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+    from airflow.sdk import get_current_context
     from kubernetes.client import models as k8s
 
     env = {**json.loads(runner.extra_env_json or "{}"), **env}
@@ -62,4 +63,6 @@ def _run_pod(runner, command: list, env: dict) -> None:
         on_finish_action="delete_pod",
         get_logs=True,
     )
-    op.execute({})  # synchronous: blocks until the pod terminates, raises on failure
+    # KPO derives its pod labels from the live task context (dag_id/run_id/try_number);
+    # run_admin is only ever called from inside a task, so the context is available.
+    op.execute(get_current_context())  # blocks until the pod terminates, raises on failure
