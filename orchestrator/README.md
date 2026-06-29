@@ -17,6 +17,38 @@ Architecture and the decisions behind it: [`../DESIGN.md`](../DESIGN.md) §6.
 | `resources.py` | `Neo4jResource` (Bolt restore), `ObjectStoreResource`, `RunnerResource` (neo4j-admin + subprocess/k8s mode). |
 | `definitions.py` | The `Definitions`: backup / aggregate / verify / prune assets, restore job, schedules, sensor. |
 
+## Configuration — what you edit, and where
+
+There are **four** config surfaces. Everything else has a default. Start here.
+
+| # | Controls | File you edit | What you set |
+|---|---|---|---|
+| 1 | **What to back up, and when** | a policy YAML — copy `../policies/demo.yaml` → `../policies/<you>.yaml` | your db groups, their `aliases`, a `tier` per group, `retention_days`; and the `tiers` (full/diff cron) |
+| 2 | **Where your Neo4j and bucket are** | **environment variables** on the code location ([table below](#environment-variables)) | `NEO4J_PASSWORD` (only required one), `NEO4J_BOLT_URI`, `BACKUP_BUCKET`, `AWS_REGION`, `NEO4J_BACKUP_SOURCE`, and `NEO4J_BACKUP_POLICY` = path to #1 |
+| 3 | **Backup concurrency (full/diff lanes)** | your Dagster instance's `dagster.yaml` — merge [`deploy/dagster.yaml`](deploy/dagster.yaml) | the `tag_concurrency_limits` |
+| 4 | **Registering this package** | `workspace.yaml` (OSS) or `dagster_cloud.yaml` (Dagster+) — see [`deploy/DEPLOY.md`](deploy/DEPLOY.md) | one code-location entry → `neo4j_backup_dagster.definitions` |
+
+Do them in order:
+
+1. **Write your policy.** `cp policies/demo.yaml policies/prod.yaml`; edit each group's
+   `id`, `aliases`, `tier`, `retention_days`, and the `tiers` cron. The schema is
+   `neo4j_backup_dagster/policy.py`. Then set `NEO4J_BACKUP_POLICY=policies/prod.yaml`.
+   *(Note: `s3_prefix`, `encryption`, `rpo_minutes`/`rto_minutes`, `owner`, `overrides`
+   are recorded but not acted on by the pipeline today — the bucket comes from
+   `BACKUP_BUCKET`, and SSE-KMS is applied by your bucket. You can leave them at the
+   demo values.)*
+2. **Set the environment** (table below) so the code location reaches your Neo4j (Bolt
+   7687 + backup port 6362) and your bucket. On AWS: leave `AWS_ENDPOINT_URL_S3` unset and
+   use an IAM role; the only required secret is `NEO4J_PASSWORD`.
+3. **Add the lanes:** merge `deploy/dagster.yaml` into your instance `dagster.yaml`.
+4. **Register the code location** (snippet in `deploy/DEPLOY.md`), run
+   `dagster definitions validate`, then enable the `reconcile_registry` sensor and the
+   tier schedules (they default to STOPPED).
+
+> None of it is hidden: #1 is a file you copy, #2 is env vars, #3 is a few lines in your
+> existing `dagster.yaml`, #4 is one workspace entry. The full step-by-step (with the
+> dry run and DB-node grants) is the [go-live checklist](#go-live-checklist-against-your-neo4j).
+
 ## Prerequisite: applications connect via aliases
 
 The restore model is an **alias swap** (seed a fresh physical → repoint a stable alias),

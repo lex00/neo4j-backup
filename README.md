@@ -50,9 +50,7 @@ Remove the tooling and you are left with standard Neo4j backups in your own buck
 | [DESIGN.md](DESIGN.md) | The architecture: execution surface, db-group model, naming authority, encryption, runner resources, Dagster pipeline, restore + verification. The main read. |
 | [STACK.md](STACK.md) | The local stack and how to run it (`just fresh` → `backup` → `restore`). |
 | [ROADMAP.md](ROADMAP.md) | Phase-by-phase status and validated findings. |
-| [orchestrator/](orchestrator/README.md) | The `neo4j_backup_dagster` package (the real orchestration), with its own README + `deploy/`. |
-| [RESEARCH.md](RESEARCH.md) | The original landscape research: feature matrix and gaps (native vs commercial vs OSS). |
-| [findings.md](findings.md) · [second-pass-neo4j-docs.md](second-pass-neo4j-docs.md) | The verified claim ledger and docs deep-dive behind the research. |
+| [orchestrator/](orchestrator/README.md) | The `neo4j_backup_dagster` package (the real orchestration), with its own README + `deploy/`. **Includes the configuration walkthrough.** |
 
 ## Diagrams
 

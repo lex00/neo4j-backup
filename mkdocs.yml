@@ -21,10 +21,6 @@ nav:
   - Deploy / adapt: orchestrator/deploy/DEPLOY.md
   - Diagrams: diagrams/README.md
   - Roadmap: ROADMAP.md
-  - Research:
-      - Landscape & matrix: RESEARCH.md
-      - Claim ledger: findings.md
-      - Docs deep-dive: second-pass-neo4j-docs.md
 
 markdown_extensions:
   - admonition

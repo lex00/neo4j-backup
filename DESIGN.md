@@ -1,8 +1,7 @@
 # Neo4j Backup/Restore: Policy-Based Design for Self-Hosted Enterprise
 
-Status: draft, 2026-06-28. Builds on [`RESEARCH.md`](RESEARCH.md) (feature matrix) and
-[`second-pass-neo4j-docs.md`](second-pass-neo4j-docs.md) (verified docs deep-dive).
-All sections verified against the current Neo4j operations manual and NOM docs.
+Status: draft, 2026-06-28. All sections verified against the current Neo4j operations
+manual and Dagster docs.
 
 Diagrams (Graphviz in [`diagrams/`](diagrams/README.md), `just diagrams` to render):
 [architecture](diagrams/architecture.dot), [storage-layout](diagrams/storage-layout.dot),

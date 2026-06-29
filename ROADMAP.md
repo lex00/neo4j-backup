@@ -1,10 +1,10 @@
 # Roadmap
 
 Forward-looking index for the Neo4j backup/restore project. Status as of 2026-06-28.
-Entry point [`README.md`](README.md); architecture [`DESIGN.md`](DESIGN.md); research
-[`RESEARCH.md`](RESEARCH.md), [`findings.md`](findings.md),
-[`second-pass-neo4j-docs.md`](second-pass-neo4j-docs.md); local stack
-[`STACK.md`](STACK.md); diagrams in [`diagrams/`](diagrams/README.md) (`just diagrams`).
+Entry point [`README.md`](README.md); architecture [`DESIGN.md`](DESIGN.md); local stack
+[`STACK.md`](STACK.md); configuration walkthrough
+[`orchestrator/README.md`](orchestrator/README.md); diagrams in
+[`diagrams/`](diagrams/README.md) (`just diagrams`).
 
 Scope note: this project is design + local validation. Cloud provisioning is out of
 scope — teams adapt the runner/placement to their environment (see
@@ -12,14 +12,11 @@ scope — teams adapt the runner/placement to their environment (see
 
 Legend: [x] done · [~] in progress / scaffolded-not-validated · [ ] not started
 
-## Phase 0 — Research (done)
+## Phase 0 — Grounding (done)
 
-- [x] Native vs commercial vs OSS backup landscape + feature matrix (`RESEARCH.md`)
-- [x] Adversarially-verified claim ledger (`findings.md`)
-- [x] Closed the open questions: encryption, cloud targets, RBAC, cluster, monitoring
-      (`second-pass-neo4j-docs.md`)
-- [x] Verified critical-path specifics: seed-from-URI + PITR, alias semantics,
-      MinIO/HTTP, runner memory/scratch, Dagster code-location/placement/concurrency
+- [x] Design grounded in the current Neo4j operations manual + Dagster docs: seed-from-URI
+      + PITR, alias semantics, MinIO/HTTP, runner memory/scratch, and Dagster
+      code-location / placement / concurrency.
 
 ## Phase 1 — Architecture (done)
 
