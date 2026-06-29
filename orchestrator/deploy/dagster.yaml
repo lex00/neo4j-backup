@@ -1,0 +1,20 @@
+# Instance config for the host Dagster deployment (the one shared-surface change a
+# drop-in requires — coordinate with whoever owns the instance). The full/diff backup
+# lanes are enforced here by run-tag concurrency limits.
+
+concurrency:
+  runs:
+    max_concurrent_runs: 25
+    tag_concurrency_limits:
+      # Full backups stage ~DB-sized scratch each; bound by scratch capacity.
+      - key: backup_kind
+        value: full
+        limit: 1
+      # Differentials are tiny (tx-log delta) — run many.
+      - key: backup_kind
+        value: diff
+        limit: 6
+  pools:
+    # Protect the Neo4j source member: the `backup` asset declares pool="neo4j".
+    default_limit: 2
+    granularity: op

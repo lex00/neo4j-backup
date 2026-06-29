@@ -1,0 +1,32 @@
+site_name: Neo4j Policy-Based Backup / Restore
+site_description: Policy-driven, validated Dagster pipelines for self-hosted Neo4j Enterprise backup/restore
+# The markdown lives at the repo root (for GitHub); `mkdocs-stage.sh` copies the curated
+# set into docs/ for the build. Run `just docs` (or the Pages workflow).
+docs_dir: docs
+site_dir: _site
+use_directory_urls: true
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+
+nav:
+  - Home: README.md
+  - Design: DESIGN.md
+  - Local stack: STACK.md
+  - Orchestrator: orchestrator/README.md
+  - Deploy / adapt: orchestrator/deploy/DEPLOY.md
+  - Diagrams: diagrams/README.md
+  - Roadmap: ROADMAP.md
+  - Research:
+      - Landscape & matrix: RESEARCH.md
+      - Claim ledger: findings.md
+      - Docs deep-dive: second-pass-neo4j-docs.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.superfences

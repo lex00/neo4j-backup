@@ -1,0 +1,39 @@
+// Execution surface: the Neo4j instances are agentless. The only component that runs
+// neo4j-admin is the runner; restore is pure Cypher over Bolt. See DESIGN.md §3.
+digraph architecture {
+  rankdir=LR;
+  fontname="Helvetica"; labelloc=t;
+  label="Neo4j backup/restore — execution surface (instances are agentless)";
+  node [fontname="Helvetica", fontsize=10];
+  edge [fontname="Helvetica", fontsize=9];
+
+  apps   [label="Applications", shape=box, style=rounded];
+
+  subgraph cluster_neo4j {
+    label="Neo4j Enterprise (agentless: serves Bolt 7687 + backup 6362)";
+    style=dashed; color="#3366cc"; fontname="Helvetica";
+    primary   [label="primary\n(writer)", shape=box, style=filled, fillcolor="#dbe5ff"];
+    secondary [label="secondary /\nfollower", shape=box, style=filled, fillcolor="#dbe5ff"];
+  }
+
+  subgraph cluster_runner {
+    label="Dagster worker / runner";
+    style=dashed; color="#cc6600"; fontname="Helvetica";
+    dagster [label="Dagster\n(orchestration)", shape=box, style=rounded];
+    admin   [label="neo4j-admin\n(backup / aggregate / check)", shape=box];
+  }
+
+  store [label="Object store\n(per-group bucket, SSE-KMS)", shape=cylinder, style=filled, fillcolor="#e7f5e7"];
+
+  // Serving
+  apps -> primary [label="Bolt via ALIAS\n(read/write)"];
+
+  // Backup: neo4j-admin pulls over 6362 (prefer secondary), writes artifacts to S3
+  admin -> secondary [label="backup pull :6362\n(secondary preferred)", color="#cc6600"];
+  admin -> store     [label="write artifact\n(stage->upload, SSE-KMS)", color="#cc6600"];
+
+  // Restore: pure Cypher over Bolt; the DB nodes pull the seed themselves
+  dagster -> primary [label="Cypher (system db):\nseed-from-URI + ALTER ALIAS", color="#3366cc", style=bold];
+  primary -> store   [label="seed-from-URI pull", color="#3366cc", style=dashed];
+  secondary -> store [label="seed-from-URI pull", color="#3366cc", style=dashed];
+}

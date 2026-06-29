@@ -1,0 +1,80 @@
+set dotenv-load := true
+set shell := ["bash", "-uc"]
+
+compose := "docker compose --env-file .env -f docker/compose.yaml"
+
+# list recipes
+default:
+    @just --list
+
+# create .env from template if missing
+_env:
+    @[ -f .env ] || (cp .env.example .env && echo "created .env from .env.example")
+
+# start the single-node stack (neo4j + minio + runner)
+up: _env
+    {{compose}} up -d --wait
+
+# stop and remove the stack + volumes
+down:
+    {{compose}} --profile tools down -v
+
+# boot the demo group + data from scratch
+bootstrap:
+    ./bootstrap/bootstrap.sh
+
+# up + bootstrap (full from-scratch local environment)
+fresh: up bootstrap
+
+# policy-driven backup of a group to object storage
+backup group="demo":
+    ./bootstrap/backup.sh {{group}}
+
+# restore a group via seed-from-URI; optional PITR timestamp (ISO-8601)
+restore group="demo" until="":
+    ./bootstrap/restore.sh {{group}} "{{until}}"
+
+# demonstrate point-in-time recovery (builds a full->change->diff chain)
+demo-pitr:
+    ./bootstrap/demo_pitr.sh
+
+# render the graphviz diagrams to SVG (requires graphviz)
+diagrams:
+    ./diagrams/render.sh
+
+# build the docs site locally (requires `pip install mkdocs-material`)
+docs:
+    ./mkdocs-stage.sh && mkdocs build
+
+# preview the docs site locally
+docs-serve:
+    ./mkdocs-stage.sh && mkdocs serve
+
+# k3d: create a local cluster to validate RUNNER_MODE=k8s (requires the Compose stack up)
+k3d-up:
+    ./k3d/up.sh
+
+# k3d: run the k8s-mode backup validation (pod runs neo4j-admin in the cluster)
+k3d-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_k8s.py
+
+# k3d: delete the validation cluster
+k3d-down:
+    ./k3d/down.sh
+
+# list backup artifacts in object storage
+artifacts prefix="":
+    {{compose}} run --rm -T mc "mc alias set local http://minio:9000 $AWS_ACCESS_KEY_ID $AWS_SECRET_ACCESS_KEY >/dev/null && mc ls -r local/$BACKUP_BUCKET/{{prefix}}"
+
+# tail logs (optionally for one service)
+logs service="":
+    {{compose}} logs -f {{service}}
+
+# show stack status
+ps:
+    {{compose}} ps
+
+# print service URLs / credentials
+urls:
+    @echo "Neo4j Browser : http://localhost:7474  (neo4j / $NEO4J_PASSWORD)"
+    @echo "MinIO console : http://localhost:9001  ($AWS_ACCESS_KEY_ID / $AWS_SECRET_ACCESS_KEY)"

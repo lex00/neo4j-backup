@@ -1,0 +1,39 @@
+// Per-store storage layout: <group>/<slug>/<physical>/<artifact>.backup
+// A chain lives in one <physical>/ dir (one store). The <slug>/ groups an alias's
+// physicals so "latest for the alias" is the newest artifact across them. DESIGN.md §8.
+digraph storage {
+  rankdir=TB;
+  fontname="Helvetica"; labelloc=t;
+  label="Storage layout — chains are per physical store";
+  node [fontname="Helvetica", fontsize=10, shape=box];
+  edge [fontname="Helvetica", fontsize=9];
+
+  bucket [label="bucket: neo4j-backups-<group>\n(SSE-KMS default key = group's KMS key)",
+          shape=cylinder, style=filled, fillcolor="#e7f5e7"];
+  group  [label="<group>/  (e.g. demo)"];
+  slug   [label="<slug>/  (e.g. acme-orders)\n= db-legal id derived from the alias"];
+
+  phys1  [label="<physical P1>/\nacme-orders-<ts1>", style=filled, fillcolor="#f0f0f0"];
+  phys2  [label="<physical P2>/  (live)\nacme-orders-<ts2>", style=filled, fillcolor="#dbe5ff"];
+
+  // chain inside one physical = full + differentials (a valid chain)
+  chain1 [label="full.backup", shape=note];
+  chain1b[label="diff.backup", shape=note];
+  chain2 [label="full.backup", shape=note];
+  chain2b[label="diff.backup", shape=note];
+  chain2c[label="diff.backup (head)", shape=note, style=filled, fillcolor="#fff3cc"];
+
+  bucket -> group -> slug;
+  slug -> phys1;
+  slug -> phys2;
+  phys1 -> chain1 -> chain1b [label="chain"];
+  phys2 -> chain2 -> chain2b -> chain2c [label="chain (one store)"];
+
+  alias [label="ALIAS acme-orders", shape=box, style="rounded,filled", fillcolor="#ffe0cc"];
+  alias -> phys2 [label="current target", style=bold, color="#cc6600"];
+
+  note [label="latest backup for the alias =\nnewest artifact across P1, P2 (= P2's head).\nRestore seeds a NEW physical -> fresh prefix.",
+        shape=plaintext, fontsize=9];
+  { rank=same; phys2; alias; }
+  phys2 -> note [style=invis];
+}

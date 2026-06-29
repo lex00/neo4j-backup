@@ -1,0 +1,32 @@
+// Restore as alias-swap cutover — pure Cypher over Bolt. DESIGN.md §7.
+digraph restore {
+  rankdir=TB;
+  fontname="Helvetica"; labelloc=t;
+  label="Restore: seed a fresh physical, then move the alias (atomic cutover)";
+  node [fontname="Helvetica", fontsize=10];
+  edge [fontname="Helvetica", fontsize=9];
+
+  start [label="latest artifact for alias\n(s3://.../<slug>/<physical>/<head>.backup)",
+         shape=note, style=filled, fillcolor="#fff3cc"];
+
+  seed  [label="CREATE DATABASE `<slug>-<ts>`\nOPTIONS { seedURI: '...'\n[, seedRestoreUntil: datetime(T)] } WAIT",
+         shape=box];
+  verify[label="verify new db online\n(consistency check + smoke)", shape=box, style=filled, fillcolor="#e7f5e7"];
+  swap  [label="ALTER ALIAS `<alias>`\nSET DATABASE TARGET `<slug>-<ts>`",
+         shape=box, style="filled", fillcolor="#dbe5ff"];
+  done  [label="apps follow the alias to the new physical\n(group-aligned: same T across the group)", shape=box, style=rounded];
+
+  start -> seed [label="cluster pulls seed itself"];
+  seed -> verify;
+  verify -> swap [label="only after verify passes"];
+  swap -> done;
+
+  rollback [label="rollback:\nALTER ALIAS -> previous physical", shape=box, style=dashed, color="#cc0000"];
+  cleanup  [label="after soak:\nDROP DATABASE <old physical>", shape=box, style=dashed];
+  swap -> rollback [style=dashed, color="#cc0000", label="if needed"];
+  done -> cleanup [style=dashed];
+
+  note [label="PITR (seedRestoreUntil) needs a differential CHAIN;\na lone full restores fully only.",
+        shape=plaintext, fontsize=9];
+  seed -> note [style=invis];
+}

@@ -1,0 +1,14 @@
+# Local env / runtime
+.env
+orchestrator/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Generated docs site (mkdocs-stage.sh + mkdocs build)
+docs/
+_site/
+
+# Generated diagram SVGs are committed (viewable without graphviz). Remove the next
+# line if you prefer to treat them as build artifacts.
+# diagrams/*.svg

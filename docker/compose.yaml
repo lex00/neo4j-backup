@@ -1,0 +1,132 @@
+# Base local stack: single Neo4j Enterprise instance + MinIO object store + a
+# node-agentless backup runner. Cluster topologies layer on via compose.cluster.yaml.
+#
+# Placement model (the "control placement of components" requirement):
+#   - `neo4j` network: database members only.
+#   - `ops` network: object storage and orchestration.
+#   - `runner` bridges both — it is the only component that needs to reach the DB
+#     backup port (6362) AND the object store. This mirrors the design's central
+#     backup-runner host; nothing runs on the database nodes themselves.
+
+name: neo4j-backup
+
+networks:
+  neo4j:
+  ops:
+
+volumes:
+  neo4j-data:
+  minio-data:
+  # Runner scratch for --temp-path. In production this is a sized, dedicated volume
+  # (instance-store/PVC) holding up to the largest full backup — several TB — never
+  # the orchestrator's disk. Locally it is just a docker volume.
+  scratch:
+
+services:
+  neo4j:
+    image: neo4j:${NEO4J_VERSION}
+    hostname: neo4j
+    environment:
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "eval"
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD}"
+      DB_PASSWORD: "${NEO4J_PASSWORD}"            # for healthcheck only
+      # Expose the backup port to the runner (defaults to localhost otherwise).
+      NEO4J_server_backup_enabled: "true"
+      NEO4J_server_backup_listen__address: "0.0.0.0:6362"
+      # seed-from-URI restore runs ON this server: it pulls the seed from object
+      # storage itself, so the DB node needs the endpoint override + credentials.
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      AWS_REGION: "${AWS_REGION}"
+      AWS_ENDPOINT_URL_S3: "${AWS_ENDPOINT_URL_S3}"
+    ports:
+      - "7474:7474"      # Neo4j Browser / HTTP
+      - "7687:7687"      # Bolt
+      - "6362:6362"      # backup port (so a k3d pod can reach it via host.k3d.internal)
+    # On both networks: `neo4j` for DB traffic, `ops` because seed-from-URI restore
+    # makes the node pull from object storage. A real cluster's members need the
+    # same object-store egress.
+    networks: [neo4j, ops]
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p $${DB_PASSWORD} 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${AWS_ACCESS_KEY_ID}"
+      MINIO_ROOT_PASSWORD: "${AWS_SECRET_ACCESS_KEY}"
+      # Built-in KMS (single key) standing in for cloud KMS, for SSE-KMS at rest.
+      MINIO_KMS_SECRET_KEY: "${MINIO_KMS_SECRET_KEY}"
+    ports:
+      - "9000:9000"      # S3 API
+      - "9001:9001"      # MinIO console
+    networks: [ops]
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # One-shot: ensure the backup bucket exists, then exit.
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [ops]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        mc alias set local http://minio:9000 "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" &&
+        mc mb --ignore-existing "local/$BACKUP_BUCKET" &&
+        mc encrypt set sse-kms "$KMS_KEY_NAME" "local/$BACKUP_BUCKET" &&
+        echo "bucket $BACKUP_BUCKET ready (SSE-KMS default: $KMS_KEY_NAME)"
+    environment:
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      BACKUP_BUCKET: "${BACKUP_BUCKET}"
+      KMS_KEY_NAME: "${KMS_KEY_NAME}"
+
+  # Node-agentless backup runner: same Neo4j image (for neo4j-admin), but it does not
+  # run a server. It pulls backups over 6362 and writes them to object storage.
+  runner:
+    image: neo4j:${NEO4J_VERSION}
+    hostname: runner
+    entrypoint: ["sleep", "infinity"]
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+    networks: [neo4j, ops]
+    environment:
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "eval"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      AWS_REGION: "${AWS_REGION}"
+      AWS_ENDPOINT_URL_S3: "${AWS_ENDPOINT_URL_S3}"  # MinIO endpoint override (AWS SDK v2)
+      SCRATCH_PATH: "${SCRATCH_PATH}"
+      HEAP_SIZE: "${RUNNER_HEAP_SIZE}"               # caps neo4j-admin JVM heap (verify var)
+    volumes:
+      - scratch:/scratch                              # --temp-path staging (sized for fulls)
+
+  # On-demand MinIO client for inspecting/resolving artifacts. Not started by `up`.
+  mc:
+    image: minio/mc:latest
+    profiles: ["tools"]
+    networks: [ops]
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      BACKUP_BUCKET: "${BACKUP_BUCKET}"

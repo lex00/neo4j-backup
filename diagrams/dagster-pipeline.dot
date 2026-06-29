@@ -1,0 +1,43 @@
+// Dagster code location: assets, jobs, schedules, sensor. DESIGN.md §6.
+digraph pipeline {
+  rankdir=LR;
+  fontname="Helvetica"; labelloc=t;
+  label="Dagster code location (neo4j_backup_dagster)";
+  node [fontname="Helvetica", fontsize=10];
+  edge [fontname="Helvetica", fontsize=9];
+
+  policy [label="policy (YAML)\ngroups, aliases, tiers,\nretention, encryption", shape=note, style=filled, fillcolor="#fff3cc"];
+
+  sensor [label="reconcile sensor\n(policy vs SHOW DATABASES/ALIASES)", shape=box, style=filled, fillcolor="#e7f5e7"];
+  parts  [label="dynamic partitions\n(group, alias)", shape=box, style="rounded,filled", fillcolor="#f0f0f0"];
+
+  subgraph cluster_sched {
+    label="tier schedules (independent lanes)"; style=dashed; color="#cc6600";
+    full [label="full lane\nbackup_kind=full (limit 1)", shape=box];
+    diff [label="diff lane\nbackup_kind=diff (limit 6)", shape=box];
+  }
+
+  subgraph cluster_assets {
+    label="assets / jobs (Pipes -> neo4j-admin; pool=neo4j on backup)"; style=dashed; color="#3366cc";
+    backup    [label="backup (asset)\nneo4j-admin database backup", shape=box, style=filled, fillcolor="#dbe5ff"];
+    aggregate [label="aggregate (asset)\nbackup aggregate (RTO/retention)", shape=box];
+    verify    [label="verify (asset)\ncopy->aggregate->check (non-destructive)", shape=box, style=filled, fillcolor="#e7f5e7"];
+    prune     [label="prune (asset)\nage-based retention", shape=box];
+    restore   [label="restore_group (job)\nBolt: seed-from-URI + ALTER ALIAS", shape=box, style=filled, fillcolor="#ffe0cc"];
+  }
+
+  store [label="object store", shape=cylinder, style=filled, fillcolor="#e7f5e7"];
+
+  policy -> sensor;
+  sensor -> parts [label="add/remove"];
+  policy -> full [style=dotted]; policy -> diff [style=dotted];
+  full -> backup [label="RunRequest(partition)"];
+  diff -> backup [label="RunRequest(partition)"];
+  parts -> backup [style=dotted];
+  parts -> aggregate [style=dotted]; parts -> verify [style=dotted];
+
+  backup -> store;
+  aggregate -> store; verify -> store;
+  prune -> store;
+  store -> restore [label="latest artifact"];
+}

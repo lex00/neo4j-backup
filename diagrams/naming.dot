@@ -1,0 +1,32 @@
+// Naming authority: alias (full set, preserved) -> slug (db-legal) -> physical.
+// Same contract in naming.sh and naming.py. DESIGN.md §7.
+digraph naming {
+  rankdir=LR;
+  fontname="Helvetica"; labelloc=t;
+  label="Naming authority (naming.sh == naming.py)";
+  node [fontname="Helvetica", fontsize=10, shape=box];
+  edge [fontname="Helvetica", fontsize=9];
+
+  alias [label="ALIAS (app-facing)\nNeo4j full alias spec:\nany chars (backtick-quoted),\n<= 65534, no trailing dot,\nno _/system prefix.\nPreserved exactly.",
+         style="rounded,filled", fillcolor="#ffe0cc"];
+
+  slug  [label="SLUG (db-legal, path-safe)\nclean alias -> as-is;\nmessy -> sanitize + 8-char hash\n(so distinct aliases never collide)",
+         style=filled, fillcolor="#fff3cc"];
+
+  phys  [label="PHYSICAL = <slug>-<ts>\nlegal db name:\n[a-z0-9.-], 3-63, lowercase,\nno underscores",
+         style=filled, fillcolor="#dbe5ff"];
+
+  alias -> slug [label="slug()"];
+  slug  -> phys [label="physical(alias, ts)\n+ validate_db()"];
+
+  ex1 [label="acme-orders", shape=plaintext];
+  ex2 [label="acme-orders", shape=plaintext];
+  ex3 [label="acme-orders-20260629t060725", shape=plaintext];
+  ex1 -> ex2 [style=invis]; ex2 -> ex3 [style=invis];
+  { rank=same; alias; ex1; } { rank=same; slug; ex2; } { rank=same; phys; ex3; }
+
+  exm1 [label="Acme_Orders.EU", shape=plaintext];
+  exm2 [label="acme-orders.eu-ff7f3cb5", shape=plaintext];
+  exm1 -> exm2 [style=invis];
+  { rank=same; ex1; exm1; }
+}

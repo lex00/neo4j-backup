@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cheap checks that need no Docker/Neo4j: the naming parity (naming.py == naming.sh)
+# and that the Dagster code location resolves. The full end-to-end smokes need the
+# local stack (see STACK.md) and run on a developer machine, not CI.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e 'orchestrator[dev]'
+      - name: naming parity (naming.py == naming.sh)
+        run: pytest orchestrator/tests/ -q
+      - name: validate Dagster definitions
+        env:
+          NEO4J_PASSWORD: dummy
+        run: dagster definitions validate -m neo4j_backup_dagster.definitions
