@@ -6,7 +6,9 @@ are ordinary `.backup` files in your bucket (restorable with `neo4j-admin` even 
 this package), the policy is plain YAML, and aliases are standard Neo4j. Remove it and
 you still have standard Neo4j backups.
 
-Architecture and the decisions behind it: [`../DESIGN.md`](../DESIGN.md) §6.
+Architecture and the decisions behind it: [`../DESIGN.md`](../DESIGN.md) §6. Prefer
+Airflow? The [Airflow adapter](../airflow/README.md) is the equivalent DAG set over the
+same core and policy.
 
 ## What's here
 

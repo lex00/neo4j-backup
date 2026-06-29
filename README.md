@@ -7,8 +7,10 @@ Neo4j Enterprise — exercised end to end against a real Neo4j Enterprise + obje
 stack. The database instances stay **agentless**: restore is pure Cypher over Bolt
 (seed-from-URI + alias swap), and backup is `neo4j-admin` run from a separate runner.
 
-The deliverable is the orchestration (the [`neo4j_backup_dagster`](orchestrator/README.md)
-package) and its validation. The pipeline is **object-store-agnostic** — it takes a
+The deliverable is the orchestration — a [Dagster](orchestrator/README.md) code location
+and an equivalent [Airflow](airflow/README.md) DAG set over one shared engine
+(`neo4j_backup_core`), pick whichever you run — and its validation. The pipeline is
+**object-store-agnostic** — it takes a
 configurable bucket and writes `<group>/<slug>/<physical>/` prefixes; teams bring their
 own bucket / IAM / KMS structure and adapt the runner placement to their environment
 (see [Adapting](orchestrator/deploy/DEPLOY.md)). Cloud provisioning is out of scope.
@@ -38,7 +40,8 @@ Ops / platform / data-engineering teams that:
 
 - self-host **Neo4j Enterprise** — online backup and seed-from-URI restore are Enterprise
   features (Community has only offline dump/load);
-- already run **Dagster** and want to add backups as a code location;
+- already run **Dagster** or **Airflow** and want to add backups as a code location /
+  DAG set (the two adapters are interchangeable — [Airflow](airflow/README.md));
 - store artifacts in an **S3-compatible object store**;
 - are comfortable operating `neo4j-admin`, Cypher, and Dagster; and
 - have apps connect via Neo4j **aliases**, or are willing to migrate to them
@@ -71,7 +74,8 @@ Remove the tooling and you are left with standard Neo4j backups in your own buck
 | [DESIGN.md](DESIGN.md) | The architecture: execution surface, db-group model, naming authority, encryption, runner resources, Dagster pipeline, restore + verification. The main read. |
 | [STACK.md](STACK.md) | The local stack and how to run it (`just fresh` → `backup` → `restore`). |
 | [ROADMAP.md](ROADMAP.md) | Phase-by-phase status and validated findings. |
-| [orchestrator/](orchestrator/README.md) | The `neo4j_backup_dagster` package (the real orchestration), with its own README + `deploy/`. **Includes the configuration walkthrough.** |
+| [orchestrator/](orchestrator/README.md) | The `neo4j_backup_dagster` package (the Dagster orchestration), with its own README + `deploy/`. **Includes the configuration walkthrough.** |
+| [airflow/](airflow/README.md) | The equivalent Airflow 3.x DAG set over the same core — the DAG inventory, pools-as-lanes, `dag.test()` validation, and the Dagster↔Airflow concept map. |
 
 ## Diagrams
 
@@ -101,8 +105,8 @@ The Dagster package is validated against this same stack — see
 
 ## What's validated
 
-The full loop runs three ways: shell (`just`), Dagster (`orchestrator/smoke_*.py`), and
-PITR. Backups are SSE-KMS encrypted, restore reads them via seed-from-URI over Bolt,
+The full loop runs four ways: shell (`just`), Dagster (`orchestrator/smoke_*.py`), Airflow
+(`airflow/smoke_*.py`), and PITR. Backups are SSE-KMS encrypted, restore reads them via seed-from-URI over Bolt,
 verification consistency-checks artifacts non-destructively, and the per-store layout
 makes differential chains correct. `RUNNER_MODE=k8s` is validated on k3d
 (`just k3d-up` + `just k3d-smoke`). See ROADMAP for phase status and the issues that

@@ -19,7 +19,9 @@ nav:
   - Recovery: RECOVERY.md
   - Design: DESIGN.md
   - Local stack: STACK.md
-  - Orchestrator: orchestrator/README.md
+  - Orchestrators:
+    - Dagster: orchestrator/README.md
+    - Airflow: airflow/README.md
   - Deploy / adapt: orchestrator/deploy/DEPLOY.md
   - Diagrams: diagrams/README.md
   - Roadmap: ROADMAP.md
