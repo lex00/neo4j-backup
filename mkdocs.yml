@@ -16,6 +16,7 @@ theme:
 nav:
   - Home: README.md
   - Policy: POLICY.md
+  - Recovery: RECOVERY.md
   - Design: DESIGN.md
   - Local stack: STACK.md
   - Orchestrator: orchestrator/README.md

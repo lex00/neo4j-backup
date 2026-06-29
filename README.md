@@ -66,6 +66,8 @@ Remove the tooling and you are left with standard Neo4j backups in your own buck
 
 | Doc | What |
 |---|---|
+| [POLICY.md](POLICY.md) | The backup policy — a complete annotated example + every field. |
+| [RECOVERY.md](RECOVERY.md) | The three recovery modes (full / differential / PITR) with exact Cypher. |
 | [DESIGN.md](DESIGN.md) | The architecture: execution surface, db-group model, naming authority, encryption, runner resources, Dagster pipeline, restore + verification. The main read. |
 | [STACK.md](STACK.md) | The local stack and how to run it (`just fresh` → `backup` → `restore`). |
 | [ROADMAP.md](ROADMAP.md) | Phase-by-phase status and validated findings. |

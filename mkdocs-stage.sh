@@ -9,7 +9,7 @@ command -v dot >/dev/null 2>&1 && ./diagrams/render.sh || echo "!! graphviz not 
 rm -rf docs
 mkdir -p docs/orchestrator/deploy docs/diagrams docs/bootstrap
 
-cp README.md POLICY.md DESIGN.md STACK.md ROADMAP.md docs/
+cp README.md POLICY.md RECOVERY.md DESIGN.md STACK.md ROADMAP.md docs/
 cp orchestrator/README.md docs/orchestrator/
 cp orchestrator/deploy/DEPLOY.md orchestrator/deploy/dagster.yaml docs/orchestrator/deploy/
 cp diagrams/README.md diagrams/*.dot diagrams/*.svg docs/diagrams/ 2>/dev/null || true

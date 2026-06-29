@@ -388,7 +388,8 @@ Restore is organized at the **group** level so a tenant's referencing databases 
 back aligned, driven over Cypher (section 3, path A) so no node agent is involved, and
 cut over via **database aliases** for a near-zero-downtime, instantly-reversible swap.
 (Diagrams: [restore-cutover](diagrams/restore-cutover.dot),
-[naming](diagrams/naming.dot).)
+[naming](diagrams/naming.dot).) The three recovery modes (full / differential / PITR)
+with exact Cypher are on the [Recovery](RECOVERY.md) page.
 
 ### Alias-swap cutover (production restore strategy)
 
