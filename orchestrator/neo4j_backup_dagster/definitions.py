@@ -11,8 +11,8 @@ import os
 import dagster as dg
 from dagster_k8s import PipesK8sClient
 
-from . import naming
-from .policy import load_policy, parse_partition_key
+from neo4j_backup_core import naming, paths
+from neo4j_backup_core.policy import load_policy, parse_partition_key
 from .resources import Neo4jResource, ObjectStoreResource, RunnerResource
 
 POLICY_PATH = os.environ.get("NEO4J_BACKUP_POLICY", "policies/demo.yaml")
@@ -36,17 +36,10 @@ def _run_admin(context, runner, command, subprocess_client, k8s_client, env=None
         subprocess_client.run(command=command, env=env, context=context)
 
 
-# --- storage-key helpers (the per-store layout) ----------------------------------
-def _alias_prefix(group_id: str, alias: str) -> str:
-    return f"{group_id}/{naming.slug(alias)}/"
-
-
-def _physical_prefix(group_id: str, alias: str, physical: str) -> str:
-    return f"{_alias_prefix(group_id, alias)}{physical}/"
-
-
-def _physical_of_key(group_id: str, alias: str, key: str) -> str:
-    return key[len(_alias_prefix(group_id, alias)):].split("/")[0]
+# --- storage-key helpers live in core.paths (shared with the Airflow adapter) -----
+_alias_prefix = paths.alias_prefix
+_physical_prefix = paths.physical_prefix
+_physical_of_key = paths.physical_of_key
 
 
 # --- Backup ----------------------------------------------------------------------

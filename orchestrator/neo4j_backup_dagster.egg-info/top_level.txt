@@ -1,1 +1,2 @@
+neo4j_backup_core
 neo4j_backup_dagster

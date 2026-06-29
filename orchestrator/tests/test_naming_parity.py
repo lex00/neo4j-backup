@@ -15,7 +15,7 @@ REPO = Path(__file__).resolve().parents[2]
 NAMING_SH = REPO / "bootstrap" / "naming.sh"
 sys.path.insert(0, str(REPO / "orchestrator"))
 
-from neo4j_backup_dagster import naming  # noqa: E402
+from neo4j_backup_core import naming  # noqa: E402
 
 # Inputs spanning clean, uppercase, underscores, dots, symbols, whitespace, overflow.
 CASES = [

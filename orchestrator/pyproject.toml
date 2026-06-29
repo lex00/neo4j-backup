@@ -21,7 +21,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["neo4j_backup_dagster*"]
+include = ["neo4j_backup_core*", "neo4j_backup_dagster*"]
 
 # `dagster dev` and the code-location entry resolve the Definitions from here.
 [tool.dagster]
