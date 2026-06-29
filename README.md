@@ -80,11 +80,11 @@ Graphviz sources in [`diagrams/`](diagrams/README.md); render to SVG with `just 
 
 | Diagram | Shows |
 |---|---|
-| [architecture](diagrams/architecture.dot) | Execution surface — agentless instances, runner does backup, Cypher does restore |
-| [storage-layout](diagrams/storage-layout.dot) | `<group>/<slug>/<physical>/` layout and per-store chains |
-| [restore-cutover](diagrams/restore-cutover.dot) | Seed a fresh physical → verify → move the alias |
-| [dagster-pipeline](diagrams/dagster-pipeline.dot) | Assets, jobs, schedules, sensor |
-| [naming](diagrams/naming.dot) | alias → slug → physical naming authority |
+| [architecture](diagrams/architecture.svg) | Execution surface — agentless instances, runner does backup, Cypher does restore |
+| [storage-layout](diagrams/storage-layout.svg) | `<group>/<slug>/<physical>/` layout and per-store chains |
+| [restore-cutover](diagrams/restore-cutover.svg) | Seed a fresh physical → verify → move the alias |
+| [dagster-pipeline](diagrams/dagster-pipeline.svg) | Assets, jobs, schedules, sensor |
+| [naming](diagrams/naming.svg) | alias → slug → physical naming authority |
 
 ## Quick start (local)
 
