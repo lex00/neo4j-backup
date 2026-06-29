@@ -21,7 +21,7 @@ live in *your* Dagster deployment. That's the complete list:
 | Config | Exact location | Whose file | What it controls |
 |---|---|---|---|
 | **1. Backup policy** | `policies/demo.yaml` → copy to `policies/<you>.yaml` | this repo (you edit) | which databases/groups to back up, their aliases, schedule tiers, retention |
-| **2. Environment variables** | your code location's environment — locally `.env` (from [`.env.example`](.env.example)); in prod, your Dagster env/secrets | you set them | point at your Neo4j (`NEO4J_BOLT_URI`, `NEO4J_PASSWORD`), your bucket (`BACKUP_BUCKET`, `AWS_REGION`), the backup source, and `NEO4J_BACKUP_POLICY` = path to #1 |
+| **2. Environment variables** | your code location's environment — locally `.env` (from `.env.example`); in prod, your Dagster env/secrets | you set them | point at your Neo4j (`NEO4J_BOLT_URI`, `NEO4J_PASSWORD`), your bucket (`BACKUP_BUCKET`, `AWS_REGION`), the backup source, and `NEO4J_BACKUP_POLICY` = path to #1 |
 | **3. Concurrency lanes** | [`orchestrator/deploy/dagster.yaml`](orchestrator/deploy/dagster.yaml) → merge into your instance's `dagster.yaml` | this repo (copy the lines) | how many full vs diff backups run at once |
 | **4. Code-location entry** | your `workspace.yaml` (OSS) or `dagster_cloud.yaml` (Dagster+) | your Dagster repo | registers this package with Dagster |
 
