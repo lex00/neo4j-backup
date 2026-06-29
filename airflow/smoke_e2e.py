@@ -52,6 +52,7 @@ def main() -> None:
     sys.path.insert(0, os.path.join(REPO, "airflow", "dags"))
     from neo4j_backup_airflow import config
     from neo4j_backup_core import paths
+    import avp_dags as av
     import backup_dag as bd
     import restore_dag as rd
 
@@ -68,6 +69,15 @@ def main() -> None:
     assert after > before, f"no artifact written ({before}->{after})"
     print(f"   backup OK ({before}->{after} artifacts)")
 
+    print("== VERIFY via dag.test() (non-destructive) ==")
+    pre = len(store.list_artifacts(paths.alias_prefix("demo", "acme-orders")))
+    run = av.neo4j_verify_dag.test()
+    assert _ok(run), f"verify DAG state={getattr(run,'state',run)}"
+    post = len(store.list_artifacts(paths.alias_prefix("demo", "acme-orders")))
+    assert post == pre, f"verify mutated prod artifacts ({pre}->{post})"
+    assert not store.list_artifacts("_verify/"), "verify scratch not cleaned"
+    print("   verify OK (consistent, prod chain intact, scratch cleaned)")
+
     expected = neo.count_nodes(phys)
     print("== RESTORE via dag.test(run_conf=group_id=demo) ==")
     run = rd.neo4j_restore_dag.test(run_conf={"group_id": "demo"})
@@ -75,7 +85,13 @@ def main() -> None:
     n = neo.count_nodes("acme-orders")
     assert n == expected, f"restored {n} != expected {expected}"
     print(f"   restore OK ({n} nodes via alias)")
-    print("PASS: Airflow backup + restore validated end to end (dag.test)")
+
+    print("== PRUNE via dag.test() ==")
+    run = av.neo4j_prune_dag.test()
+    assert _ok(run), f"prune DAG state={getattr(run,'state',run)}"
+    print("   prune OK")
+
+    print("PASS: Airflow backup + verify + restore + prune validated end to end (dag.test)")
 
 
 if __name__ == "__main__":
