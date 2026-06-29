@@ -13,3 +13,4 @@ _site/
 # line if you prefer to treat them as build artifacts.
 # diagrams/*.svg
 airflow/.venv/
+.airflow_home/
