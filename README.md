@@ -13,6 +13,25 @@ configurable bucket and writes `<group>/<slug>/<physical>/` prefixes; teams brin
 own bucket / IAM / KMS structure and adapt the runner placement to their environment
 (see [Adapting](orchestrator/deploy/DEPLOY.md)). Cloud provisioning is out of scope.
 
+## Configuration: every config, and exactly where it lives
+
+There are **four** configs — no more. Two are files in *this* repo you copy/edit; two
+live in *your* Dagster deployment. That's the complete list:
+
+| Config | Exact location | Whose file | What it controls |
+|---|---|---|---|
+| **1. Backup policy** | `policies/demo.yaml` → copy to `policies/<you>.yaml` | this repo (you edit) | which databases/groups to back up, their aliases, schedule tiers, retention |
+| **2. Environment variables** | your code location's environment — locally `.env` (from [`.env.example`](.env.example)); in prod, your Dagster env/secrets | you set them | point at your Neo4j (`NEO4J_BOLT_URI`, `NEO4J_PASSWORD`), your bucket (`BACKUP_BUCKET`, `AWS_REGION`), the backup source, and `NEO4J_BACKUP_POLICY` = path to #1 |
+| **3. Concurrency lanes** | [`orchestrator/deploy/dagster.yaml`](orchestrator/deploy/dagster.yaml) → merge into your instance's `dagster.yaml` | this repo (copy the lines) | how many full vs diff backups run at once |
+| **4. Code-location entry** | your `workspace.yaml` (OSS) or `dagster_cloud.yaml` (Dagster+) | your Dagster repo | registers this package with Dagster |
+
+Defaults: only `NEO4J_PASSWORD` is required (everything else has sane defaults), so the
+**only file you must write is #1, the policy.** The schema is
+`orchestrator/neo4j_backup_dagster/policy.py`; an annotated example is `policies/demo.yaml`.
+
+**What to put in each →** the step-by-step
+[Configuration walkthrough](orchestrator/README.md) (in the orchestrator README).
+
 ## Who this is for
 
 Ops / platform / data-engineering teams that:
