@@ -73,7 +73,6 @@ Remove the tooling and you are left with standard Neo4j backups in your own buck
 | [RECOVERY.md](RECOVERY.md) | The three recovery modes (full / differential / PITR) with exact Cypher. |
 | [DESIGN.md](DESIGN.md) | The architecture: execution surface, db-group model, naming authority, encryption, runner resources, Dagster pipeline, restore + verification. The main read. |
 | [STACK.md](STACK.md) | The local stack and how to run it (`just fresh` → `backup` → `restore`). |
-| [ROADMAP.md](ROADMAP.md) | Phase-by-phase status and validated findings. |
 | [orchestrator/](orchestrator/README.md) | The `neo4j_backup_dagster` package (the Dagster orchestration), with its own README + `deploy/`. **Includes the configuration walkthrough.** |
 | [airflow/](airflow/README.md) | The equivalent Airflow 3.x DAG set over the same core — the DAG inventory, pools-as-lanes, `dag.test()` validation, and the Dagster↔Airflow concept map. |
 
@@ -108,14 +107,15 @@ The Dagster package is validated against this same stack — see
 The full loop runs four ways: shell (`just`), Dagster (`orchestrator/smoke_*.py`), Airflow
 (`airflow/smoke_*.py`), and PITR. Backups are SSE-KMS encrypted, restore reads them via seed-from-URI over Bolt,
 verification consistency-checks artifacts non-destructively, and the per-store layout
-makes differential chains correct. `RUNNER_MODE=k8s` is validated on k3d
-(`just k3d-up` + `just k3d-smoke`). See ROADMAP for phase status and the issues that
-running it surfaced.
+makes differential chains correct. `RUNNER_MODE=k8s` is validated on k3d for both adapters
+(`just k3d-smoke` for Dagster, `just airflow-k8s-smoke` for Airflow). Decisions locked and
+open risks are in [DESIGN.md §13](DESIGN.md).
 
 ## CI & docs site
 
-- **CI** (`.github/workflows/ci.yml`): naming parity (`naming.py` == `naming.sh`) and
-  Dagster definitions validation on every push — no Docker/Neo4j needed.
+- **CI** (`.github/workflows/ci.yml`): naming parity (`naming.py` == `naming.sh`), Dagster
+  definitions validation, and the Airflow DAG import-error check on every push — no
+  Docker/Neo4j needed.
 - **Docs** (`.github/workflows/pages.yml`): this documentation + rendered diagrams
   publish to GitHub Pages. One-time: repo Settings → Pages → Source = "GitHub Actions".
   Build locally with `just docs` (needs `pip install mkdocs-material`).

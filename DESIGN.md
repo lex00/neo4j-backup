@@ -246,6 +246,13 @@ dropped into the team's existing Dagster with minimal shared surface. API names 
 are current (verified against docs.dagster.io). (Diagram:
 [dagster-pipeline](diagrams/dagster-pipeline.dot).)
 
+> The orchestration logic lives in a framework-free `neo4j_backup_core` (naming, policy,
+> Bolt client, object store, runner command-building + pod spec). Dagster and Airflow are
+> **interchangeable adapters** over it — same policy, naming, artifacts, and recovery
+> model. This section describes the Dagster binding; the Airflow binding mirrors it 1:1
+> (dynamic task mapping for the partition fan-out, pools for the lanes, `dag.test()` for
+> in-process validation) — see [`airflow/README.md`](airflow/README.md).
+
 ### 6.1 Why a dedicated code location
 
 Code locations load in isolated processes — "errors in user code can't impact Dagster
@@ -633,3 +640,39 @@ Still to choose:
 - Whether to provision the **dedicated read-only secondary** now or defer until backup
   concurrency justifies it (section 5).
 - **Multi-cluster sharding** threshold if database counts approach ~1000 (section 9).
+
+## 13. Status, decisions locked, and open risks
+
+Delivered and validated against the local stack (2026-06-29): the policy engine, the local
+stack, and **both orchestrator adapters** — Dagster (`orchestrator/`) and Airflow
+(`airflow/`) over the shared `neo4j_backup_core`. The full loop (backup → verify → restore
+→ PITR) and the `RUNNER_MODE=k8s` path (on k3d) are validated for both. Cloud provisioning
+is out of scope — teams adapt the runner placement, bucket/IAM/KMS, and scratch volume to
+their environment (see [`orchestrator/deploy/DEPLOY.md`](orchestrator/deploy/DEPLOY.md)).
+
+Decisions locked:
+
+| Decision | Choice |
+|---|---|
+| Start scope | Single node; cluster deferred |
+| Local env | Docker Compose first; k3d for k8s-mode validation |
+| Restore | Pure Cypher seed-from-URI + alias-swap (path A) |
+| Encryption | SSE-KMS, cloud KMS, per-group bucket/key |
+| Tenancy unit | db-group primary; customer optional tag |
+| Naming | alias (full set, preserved) / slug / physical, one authority |
+| Orchestration | Dagster **or** Airflow adapter over a shared core — pick one |
+| Runner memory | HEAP_SIZE + `--pagecache` explicit; check out-of-band |
+| Scratch | Configurable volume, sized to largest full (multi-TB) |
+
+Open risks / findings:
+
+- PITR requires a differential **chain**; a lone full cannot be point-in-time restored
+  (`seedRestoreUntil` errors without one).
+- Cross-group transactional consistency is not native (bounded skew only).
+- Orchestrator cross-version skew (code location / worker vs host) is not a documented
+  guarantee — pin the adapter's runtime close to the host.
+- MinIO plain-HTTP seed, path-style addressing, and SSE-KMS read via seed-from-URI are all
+  validated working — no TLS proxy or `MINIO_DOMAIN` needed.
+
+Deferred / optional: cluster topologies (back up from a secondary/follower); NOM for
+cluster monitoring only (not a backup feature).

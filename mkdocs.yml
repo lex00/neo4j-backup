@@ -24,7 +24,6 @@ nav:
     - Airflow: airflow/README.md
   - Deploy / adapt: orchestrator/deploy/DEPLOY.md
   - Diagrams: diagrams/README.md
-  - Roadmap: ROADMAP.md
 
 markdown_extensions:
   - admonition
