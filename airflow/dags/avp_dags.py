@@ -6,19 +6,14 @@
 - prune: age-based retention (boto3 only), keep the chain head.
 """
 
-import os
-import subprocess
 from datetime import datetime, timedelta, timezone
 
 from airflow.sdk import dag, task
 
 from neo4j_backup_airflow import config
+from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import paths
 from neo4j_backup_core.policy import load_policy
-
-
-def _run(cmd, runner):
-    subprocess.run(cmd, check=True, env={**os.environ, **runner.env()})
 
 
 def aggregate_one(group_alias: str) -> dict:
@@ -29,7 +24,7 @@ def aggregate_one(group_alias: str) -> dict:
         raise RuntimeError(f"no artifact for {group_id}/{alias}")
     physical = paths.physical_of_key(group_id, alias, head)
     prefix = paths.physical_prefix(group_id, alias, physical)
-    _run(runner.aggregate_command(physical, store.s3_uri(prefix)), runner)
+    run_admin(runner.aggregate_command(physical, store.s3_uri(prefix)))
     return {"physical": physical, "full": store.latest_artifact_key(prefix)}
 
 
@@ -44,9 +39,9 @@ def verify_one(group_alias: str) -> dict:
     scratch = f"_verify/{group_id}/{physical}/"
     try:
         store.copy_prefix(src, scratch)
-        _run(runner.aggregate_command(physical, store.s3_uri(scratch)), runner)
+        run_admin(runner.aggregate_command(physical, store.s3_uri(scratch)))
         full = store.latest_artifact_key(scratch)
-        _run(runner.check_command(physical, store.s3_uri(full)), runner)
+        run_admin(runner.check_command(physical, store.s3_uri(full)))
     finally:
         store.delete_prefix(scratch)
     return {"alias": alias, "physical": physical, "consistent": True}

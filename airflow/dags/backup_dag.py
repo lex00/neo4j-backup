@@ -2,16 +2,17 @@
 
 Mirrors the Dagster `backup` asset: back up the physical DB each alias currently targets,
 into its per-store prefix `<group>/<slug>/<physical>/`. neo4j-admin is the only non-Cypher
-step; it runs as a subprocess (k8s mode is #7). Airflow 3.x Task SDK + dynamic mapping.
+step; it runs via the execution dispatcher (subprocess or k8s pod per RUNNER_MODE — see
+neo4j_backup_airflow.execution). Airflow 3.x Task SDK + dynamic mapping.
 """
 
 import os
-import subprocess
 from datetime import datetime
 
 from airflow.sdk import dag, task
 
 from neo4j_backup_airflow import config
+from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import paths
 from neo4j_backup_core.policy import load_policy
 
@@ -25,7 +26,7 @@ def backup_one(group_alias: str, kind: str) -> dict:
         raise RuntimeError(f"alias {alias!r} has no target — bootstrap the group first")
     prefix = paths.physical_prefix(group_id, alias, physical)
     cmd = runner.backup_command(physical, store.s3_uri(prefix), kind=kind)
-    subprocess.run(cmd, check=True, env={**os.environ, **runner.env()})  # non-zero -> fail
+    run_admin(cmd)  # subprocess or k8s pod per RUNNER_MODE; non-zero exit -> fail
     artifact = store.latest_artifact_key(prefix)
     return {"group": group_id, "alias": alias, "physical": physical, "artifact": artifact}
 
