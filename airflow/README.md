@@ -18,6 +18,7 @@ runner command-building + pod spec); each adapter is a thin binding. Architectur
 | `dags/backup_dag.py` | One backup DAG per **(tier, lane)** — `neo4j_backup_<tier>_<full\|diff>`. Fans out over the tier's `(group, alias)` via dynamic task mapping. |
 | `dags/restore_dag.py` | `neo4j_restore` — manual, params `group_id` + `restore_until`. Group-aligned seed-from-URI then alias swap (pure Cypher). |
 | `dags/avp_dags.py` | `neo4j_aggregate`, `neo4j_verify` (non-destructive), `neo4j_prune` — retention / consistency. |
+| `dags/metadata_dag.py` | `neo4j_metadata_backup` / `neo4j_metadata_restore` — agentless DBMS metadata export/replay (#14). |
 | `dags/scaffold_dag.py` | Trivial policy-loading DAG (smoke of the wiring). |
 | `neo4j_backup_airflow/config.py` | Env → core clients (the [Dagster env table](../orchestrator/README.md#environment-variables), verbatim). |
 | `neo4j_backup_airflow/execution.py` | `run_admin` — subprocess or KubernetesPodOperator per `RUNNER_MODE`. |
@@ -32,6 +33,8 @@ runner command-building + pod spec); each adapter is a thin binding. Architectur
 | `neo4j_aggregate` | weekly | collapse each chain into one recovered full (in place). |
 | `neo4j_verify` | daily | **non-destructive** consistency check — copy chain to a scratch prefix, aggregate + `neo4j-admin database check`, then delete the copy. |
 | `neo4j_prune` | weekly | age-based retention; always keep the chain head. |
+| `neo4j_metadata_backup` | daily | export users/roles/privileges/aliases as replayable Cypher to `_dbms/` (pure Bolt). |
+| `neo4j_metadata_restore` | manual | replay the latest (or a given `key`) against `system` over Bolt. |
 
 One backup DAG is generated per tier × lane from the policy at parse time, so adding a tier
 or changing a cron is a policy edit — no DAG code changes.

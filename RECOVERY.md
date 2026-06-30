@@ -81,6 +81,39 @@ just demo-pitr                          # builds a full→change→diff chain an
 **Validated end to end:** `smoke_phase6` restores from a **differential** head and
 reproduces the exact state; `just demo-pitr` recovers to a point inside a full→diff chain.
 
+## The metadata layer (users, roles, privileges, aliases)
+
+The three modes above recover **database data**. They do not recover the DBMS-wide metadata
+that lives in the `system` database — users, roles, privileges, and alias definitions —
+because seed-from-URI cannot target `system` (you cannot `CREATE DATABASE system`).
+
+For that there is a separate **agentless logical export**: capture the metadata as
+replayable Cypher and replay it against `system` over Bolt on a rebuilt cluster — no node
+access, the same agentless surface as data restore.
+
+- **Backup** — `metadata_export` (Dagster) / `neo4j_metadata_backup` (Airflow) writes one
+  `_dbms/metadata-<ts>.cypher` artifact (SSE-KMS, same bucket).
+- **Restore** — `metadata_restore` / `neo4j_metadata_restore` replays the latest (or a given
+  `key`): `CREATE ROLE/USER … IF NOT EXISTS`, `GRANT ROLE …`, the `SHOW PRIVILEGES AS
+  COMMANDS` statements, and `CREATE ALIAS … IF NOT EXISTS` — idempotent and additive.
+
+**Limits (verified, by design):**
+
+- **Native passwords are not exported.** Cypher redacts them (`SHOW USERS` → `***`) and raw
+  system reads are rejected, so users are recreated with a random placeholder + `CHANGE
+  REQUIRED` — reset them post-restore. SSO/LDAP users carry no local secret, so nothing is
+  lost there. An *exact* password restore needs the binary `system` backup (path B).
+- **Remote-alias driver credentials** are not returned by `SHOW ALIASES`; those statements
+  are rendered with a `<<SUPPLY>>` placeholder and skipped on replay until supplied.
+- **Alias → physical targets are a point-in-time snapshot.** In a full DR the data restore
+  seeds fresh physicals and repoints user-database aliases itself; the export's `IF NOT
+  EXISTS` aliases won't clobber that.
+
+**Full-cluster restore order:** re-provision nodes → replay the metadata export (security +
+aliases) → restore each user database (seed-from-URI, modes 1–3). **Validated:**
+`smoke_metadata` round-trips capture → store → replay (role/user/membership/privilege/alias)
+through both adapters.
+
 ## Caveats
 
 - **PITR needs differentials.** Point-in-time is only reachable if the chain has the diffs

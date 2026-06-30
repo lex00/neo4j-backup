@@ -17,7 +17,7 @@ same core and policy.
 | `naming.py` | Naming authority — Python port of `bootstrap/naming.sh` (alias / slug / physical). Parity-tested. |
 | `policy.py` | Pydantic models + loader for `policies/*.yaml`. |
 | `resources.py` | `Neo4jResource` (Bolt restore), `ObjectStoreResource`, `RunnerResource` (neo4j-admin + subprocess/k8s mode). |
-| `definitions.py` | The `Definitions`: backup / aggregate / verify / prune assets, restore job, schedules, sensor. |
+| `definitions.py` | The `Definitions`: backup / aggregate / verify / prune / metadata_export assets, restore + metadata_restore jobs, schedules, sensor. |
 
 ## Configuration — what you edit, and where
 
