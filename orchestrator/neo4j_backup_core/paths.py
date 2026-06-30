@@ -17,3 +17,13 @@ def physical_prefix(group_id: str, alias: str, physical: str) -> str:
 
 def physical_of_key(group_id: str, alias: str, key: str) -> str:
     return key[len(alias_prefix(group_id, alias)):].split("/")[0]
+
+
+# DBMS-wide logical metadata export (users/roles/privileges/aliases) — not per-group, so
+# it lives under a reserved prefix alongside the per-group backup trees.
+def metadata_prefix() -> str:
+    return "_dbms/"
+
+
+def metadata_key(ts: str) -> str:
+    return f"{metadata_prefix()}metadata-{ts}.cypher"

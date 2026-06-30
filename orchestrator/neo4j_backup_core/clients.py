@@ -132,6 +132,29 @@ class ObjectStore:
     def s3_uri(self, key: str) -> str:
         return f"s3://{self.bucket}/{key}"
 
+    # --- text artifacts (the logical metadata export; .cypher, not .backup) ---
+    # No SSE header is set here: the bucket's default encryption (SSE-KMS) applies, exactly
+    # as it does to the neo4j-admin .backup writes. The export carries no plaintext secrets
+    # (passwords are not exported), but it is encrypted at rest like everything else.
+    def put_text(self, key: str, text: str) -> str:
+        self._client().put_object(
+            Bucket=self.bucket, Key=key, Body=text.encode(),
+            ContentType="text/plain; charset=utf-8",
+        )
+        return key
+
+    def get_text(self, key: str) -> str:
+        return self._client().get_object(Bucket=self.bucket, Key=key)["Body"].read().decode()
+
+    def latest_text_key(self, prefix: str, suffix: str = ".cypher") -> str | None:
+        latest, ts = None, None
+        paginator = self._client().get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for o in page.get("Contents", []):
+                if o["Key"].endswith(suffix) and (ts is None or o["LastModified"] > ts):
+                    latest, ts = o["Key"], o["LastModified"]
+        return latest
+
 
 class BackupRunner:
     """neo4j-admin command building + the validated memory/scratch caps (DESIGN.md §5.5)

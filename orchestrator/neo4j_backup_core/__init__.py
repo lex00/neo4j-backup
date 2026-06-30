@@ -5,3 +5,4 @@ own (its parity test runs without either orchestrator installed).
 """
 
 from . import naming  # noqa: F401
+from . import metadata  # noqa: F401
