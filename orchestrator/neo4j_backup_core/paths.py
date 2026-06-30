@@ -27,3 +27,10 @@ def metadata_prefix() -> str:
 
 def metadata_key(ts: str) -> str:
     return f"{metadata_prefix()}metadata-{ts}.cypher"
+
+
+# Binary `system`-database backup (#15) — exact metadata restore (native passwords) via the
+# offline node-local path. DBMS-wide, so it sits under the reserved prefix; system's physical
+# name is fixed ("system"), so this is the chain directory.
+def system_prefix() -> str:
+    return "_dbms/system/"

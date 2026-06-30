@@ -62,6 +62,8 @@ def prune_all() -> int:
             stale = [k for (k, _s, m) in arts if m < cutoff and k != newest]
             deleted += store.delete_keys(stale)
     deleted += metadata.prune(store)  # keep the newest N DBMS metadata exports
+    sysarts = sorted(store.list_artifacts(paths.system_prefix()), key=lambda t: t[2])
+    deleted += store.delete_keys([k for (k, _s, _m) in sysarts[:-14]])  # keep newest 14 system fulls
     return deleted
 
 

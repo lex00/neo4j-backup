@@ -38,6 +38,10 @@ restore group="demo" until="":
 demo-pitr:
     ./bootstrap/demo_pitr.sh
 
+# offline restore of the `system` database (exact metadata: native passwords/roles/privileges)
+restore-system key="":
+    ./bootstrap/restore_system.sh "{{key}}"
+
 # render the graphviz diagrams to SVG (requires graphviz)
 diagrams:
     ./diagrams/render.sh

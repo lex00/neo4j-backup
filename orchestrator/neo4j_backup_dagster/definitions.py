@@ -170,10 +170,34 @@ def prune(context: dg.AssetExecutionContext, store: ObjectStoreResource):
     deleted_total += meta_pruned
     if meta_pruned:
         detail["_dbms/metadata"] = meta_pruned
+    sysarts = sorted(store.list_artifacts(paths.system_prefix()), key=lambda t: t[2])
+    sys_pruned = store.delete_keys([k for (k, _s, _m) in sysarts[:-14]])  # keep newest 14
+    deleted_total += sys_pruned
+    if sys_pruned:
+        detail["_dbms/system"] = sys_pruned
     context.log.info(f"pruned {deleted_total} artifacts")
     return dg.MaterializeResult(
         metadata={"deleted": deleted_total, **{k: dg.MetadataValue.int(v) for k, v in detail.items()}}
     )
+
+
+# --- System-database binary backup (#15): exact metadata restore (native passwords) ----
+@dg.asset(group_name="neo4j_backup")
+def system_backup(
+    context: dg.AssetExecutionContext,
+    store: ObjectStoreResource,
+    runner: RunnerResource,
+    pipes_subprocess_client: dg.PipesSubprocessClient,
+    pipes_k8s_client: PipesK8sClient,
+) -> dg.MaterializeResult:
+    """Binary backup of the `system` database to the reserved `_dbms/system/` prefix (FULL).
+    Restore is offline + node-local (path B) — see bootstrap/restore_system.sh, not a job."""
+    prefix = paths.system_prefix()
+    cmd = runner.backup_command("system", store.s3_uri(prefix), kind="FULL")
+    _run_admin(context, runner, cmd, pipes_subprocess_client, pipes_k8s_client, env=runner.env())
+    key = store.latest_artifact_key(prefix)
+    context.log.info(f"system backup -> {key}")
+    return dg.MaterializeResult(metadata={"key": key or ""})
 
 
 # --- DBMS metadata export (#14): agentless users/roles/privileges/aliases ---------
@@ -302,7 +326,7 @@ def _build_schedules() -> list:
 
 
 defs = dg.Definitions(
-    assets=[backup, aggregate, verify, prune, metadata_export],
+    assets=[backup, aggregate, verify, prune, metadata_export, system_backup],
     jobs=[backup_job, restore_group, metadata_restore],
     schedules=_build_schedules(),
     sensors=[reconcile_registry],
