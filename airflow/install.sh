@@ -9,7 +9,9 @@ cd "$REPO"
 
 PY="${PYTHON_VERSION:-3.13}"
 AF="${AIRFLOW_VERSION:-3.2.2}"   # the version this project is validated against
-EXTRAS="cncf.kubernetes,amazon,neo4j"
+# cncf.kubernetes is only needed for RUNNER_MODE=k8s (the KPO import is lazy). EC2/VM
+# subprocess users can drop it: AIRFLOW_EXTRAS=amazon,neo4j ./airflow/install.sh
+EXTRAS="${AIRFLOW_EXTRAS:-cncf.kubernetes,amazon,neo4j}"
 
 echo "==> uv venv airflow/.venv (python $PY)"
 uv venv airflow/.venv --python "$PY"

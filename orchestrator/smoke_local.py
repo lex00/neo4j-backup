@@ -19,7 +19,6 @@ from neo4j_backup_dagster.resources import (
     ObjectStoreResource,
     RunnerResource,
 )
-from dagster_k8s import PipesK8sClient
 
 # Local: run neo4j-admin inside the runner container. Prod leaves exec_prefix empty.
 EXEC_PREFIX = [
@@ -40,7 +39,6 @@ RESOURCES = {
         pagecache="512M", heap_size="2G", exec_prefix=EXEC_PREFIX,
     ),
     "pipes_subprocess_client": dg.PipesSubprocessClient(),
-    "pipes_k8s_client": PipesK8sClient(),
 }
 
 

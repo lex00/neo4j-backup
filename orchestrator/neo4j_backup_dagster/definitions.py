@@ -9,7 +9,6 @@ the newest artifact across them. This is the Phase 5 fix for chain-mixing.
 import os
 
 import dagster as dg
-from dagster_k8s import PipesK8sClient
 
 from neo4j_backup_core import metadata, naming, paths
 from neo4j_backup_core.policy import load_policy, parse_partition_key
@@ -20,15 +19,25 @@ POLICY_PATH = os.environ.get("NEO4J_BACKUP_POLICY", "policies/demo.yaml")
 targets = dg.DynamicPartitionsDefinition(name="backup_targets")
 
 
-def _run_admin(context, runner, command, subprocess_client, k8s_client, env=None):
+def _run_admin(context, runner, command, subprocess_client, env=None):
     """Run a neo4j-admin command via Pipes — subprocess (VM/EC2, validated) or a k8s
     pod, per `runner.mode`. Non-zero exit raises; neo4j-admin is not Pipes-instrumented
-    so callers emit their own result."""
+    so callers emit their own result.
+
+    `dagster-k8s` is imported only when RUNNER_MODE=k8s, so a subprocess-only (EC2/VM)
+    deployment doesn't need it installed — `pip install 'neo4j-backup-dagster[k8s]'` adds it."""
     env = env or {}
     if runner.mode == "k8s":
         if not runner.image:
             raise dg.Failure("runner.mode='k8s' requires runner.image")
-        k8s_client.run(
+        try:
+            from dagster_k8s import PipesK8sClient
+        except ImportError as e:
+            raise dg.Failure(
+                "RUNNER_MODE=k8s needs the 'dagster-k8s' package — "
+                "pip install 'neo4j-backup-dagster[k8s]'"
+            ) from e
+        PipesK8sClient().run(
             context=context, image=runner.image, command=command,
             base_pod_spec=runner.k8s_pod_spec(env),
         )
@@ -55,7 +64,6 @@ def backup(
     store: ObjectStoreResource,
     runner: RunnerResource,
     pipes_subprocess_client: dg.PipesSubprocessClient,
-    pipes_k8s_client: PipesK8sClient,
 ) -> dg.MaterializeResult:
     """Back up the physical database the alias currently targets, into that physical's
     own prefix — so repeated backups of the alias form a real chain (same store)."""
@@ -67,7 +75,7 @@ def backup(
     prefix = _physical_prefix(group_id, alias, physical)
     to_path = store.s3_uri(prefix)
     cmd = runner.backup_command(physical, to_path, kind=config.kind)
-    _run_admin(context, runner, cmd, pipes_subprocess_client, pipes_k8s_client, env=runner.env())
+    _run_admin(context, runner, cmd, pipes_subprocess_client, env=runner.env())
 
     artifact = store.latest_artifact_key(prefix)
     size = store.object_size(artifact) if artifact else 0
@@ -92,7 +100,6 @@ def aggregate(
     store: ObjectStoreResource,
     runner: RunnerResource,
     pipes_subprocess_client: dg.PipesSubprocessClient,
-    pipes_k8s_client: PipesK8sClient,
 ) -> dg.MaterializeResult:
     """Collapse the live physical's chain into one recovered full, IN PLACE. RTO lever
     and retention — trades intra-chain PITR, so run on a retention cadence."""
@@ -103,7 +110,7 @@ def aggregate(
     physical = _physical_of_key(group_id, alias, head)
     prefix = _physical_prefix(group_id, alias, physical)
     _run_admin(context, runner, runner.aggregate_command(physical, store.s3_uri(prefix)),
-               pipes_subprocess_client, pipes_k8s_client, env=runner.env())
+               pipes_subprocess_client, env=runner.env())
     full = store.latest_artifact_key(prefix)
     return dg.MaterializeResult(metadata={"physical": physical, "full": full or ""})
 
@@ -115,7 +122,6 @@ def verify(
     store: ObjectStoreResource,
     runner: RunnerResource,
     pipes_subprocess_client: dg.PipesSubprocessClient,
-    pipes_k8s_client: PipesK8sClient,
 ) -> dg.MaterializeResult:
     """Prove the latest backup is restorable+consistent without touching the prod chain:
     copy it to a scratch prefix, aggregate the COPY into a recovered full, and
@@ -130,10 +136,10 @@ def verify(
     try:
         copied = store.copy_prefix(src, scratch)
         _run_admin(context, runner, runner.aggregate_command(physical, store.s3_uri(scratch)),
-                   pipes_subprocess_client, pipes_k8s_client, env=runner.env())
+                   pipes_subprocess_client, env=runner.env())
         full = store.latest_artifact_key(scratch)
         _run_admin(context, runner, runner.check_command(physical, store.s3_uri(full)),
-                   pipes_subprocess_client, pipes_k8s_client, env=runner.env())
+                   pipes_subprocess_client, env=runner.env())
     finally:
         store.delete_prefix(scratch)
     context.log.info(f"verified {physical}: consistent ({copied} artifacts checked)")
@@ -188,13 +194,12 @@ def system_backup(
     store: ObjectStoreResource,
     runner: RunnerResource,
     pipes_subprocess_client: dg.PipesSubprocessClient,
-    pipes_k8s_client: PipesK8sClient,
 ) -> dg.MaterializeResult:
     """Binary backup of the `system` database to the reserved `_dbms/system/` prefix (FULL).
     Restore is offline + node-local (path B) — see bootstrap/restore_system.sh, not a job."""
     prefix = paths.system_prefix()
     cmd = runner.backup_command("system", store.s3_uri(prefix), kind="FULL")
-    _run_admin(context, runner, cmd, pipes_subprocess_client, pipes_k8s_client, env=runner.env())
+    _run_admin(context, runner, cmd, pipes_subprocess_client, env=runner.env())
     key = store.latest_artifact_key(prefix)
     context.log.info(f"system backup -> {key}")
     return dg.MaterializeResult(metadata={"key": key or ""})
@@ -358,6 +363,5 @@ defs = dg.Definitions(
             extra_env_json=os.environ.get("RUNNER_EXTRA_ENV", "{}"),
         ),
         "pipes_subprocess_client": dg.PipesSubprocessClient(),
-        "pipes_k8s_client": PipesK8sClient(),
     },
 )

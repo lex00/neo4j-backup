@@ -15,7 +15,6 @@ import dagster as dg
 
 from neo4j_backup_dagster.definitions import aggregate_chain, verify
 from neo4j_backup_dagster.resources import ObjectStoreResource, RunnerResource
-from dagster_k8s import PipesK8sClient
 
 EXEC_PREFIX = [
     "docker", "compose", "--env-file", ".env", "-f", "docker/compose.yaml",
@@ -29,7 +28,6 @@ RESOURCES = {
         scratch_path="/scratch", pagecache="512M", exec_prefix=EXEC_PREFIX
     ),
     "pipes_subprocess_client": dg.PipesSubprocessClient(),
-    "pipes_k8s_client": PipesK8sClient(),
 }
 CFG = {"database": "pitr-demo", "prefix": "pitr/pitr-demo"}
 

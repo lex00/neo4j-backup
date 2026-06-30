@@ -81,7 +81,9 @@ model, and per-group encryption are identical and documented once on the
 - `RUNNER_MODE=k8s` — each command runs in its own `KubernetesPodOperator` pod with a fresh
   ephemeral scratch PVC, built from the same core `BackupRunner` fields the Dagster adapter
   feeds `PipesK8sClient` (`RUNNER_IMAGE` + the k8s vars in the env table). Validated against
-  k3d by `smoke_k8s.py`.
+  k3d by `smoke_k8s.py`. The `KubernetesPodOperator` import is **lazy** (only when
+  `RUNNER_MODE=k8s`), so EC2/VM (subprocess) deployments parse the DAGs without the
+  `cncf.kubernetes` provider — drop it from the install extras if you never use k8s.
 
 Restore is always pure Cypher over Bolt — no runner needed.
 

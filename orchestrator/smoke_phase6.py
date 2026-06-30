@@ -15,7 +15,6 @@ import dagster as dg
 
 from neo4j_backup_dagster import definitions as D
 from neo4j_backup_dagster.resources import Neo4jResource, ObjectStoreResource, RunnerResource
-from dagster_k8s import PipesK8sClient
 
 EXEC_PREFIX = [
     "docker", "compose", "--env-file", ".env", "-f", "docker/compose.yaml",
@@ -26,7 +25,6 @@ RES = {
     "store": ObjectStoreResource(bucket="neo4j-backups", endpoint_url="http://localhost:9000", region="us-east-1"),
     "runner": RunnerResource(backup_source="neo4j:6362", scratch_path="/scratch", pagecache="512M", exec_prefix=EXEC_PREFIX),
     "pipes_subprocess_client": dg.PipesSubprocessClient(),
-    "pipes_k8s_client": PipesK8sClient(),
 }
 ALIASES = ["acme-orders", "acme-graph", "acme-audit"]
 

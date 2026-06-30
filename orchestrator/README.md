@@ -97,10 +97,13 @@ AWS credentials come from the environment or an IAM role (no static keys needed 
 
 - `RUNNER_MODE=subprocess` (default, validated) — runs on the Dagster worker. The worker
   needs `neo4j-admin`, the scratch volume, network to 6362, and S3/KMS access. (Locally
-  the smokes set `RunnerResource.exec_prefix` to run it in the demo container.)
+  the smokes set `RunnerResource.exec_prefix` to run it in the demo container.) **No k8s
+  dependency** — `dagster-k8s` is not required for this mode.
 - `RUNNER_MODE=k8s` — each backup runs in its own pod (`PipesK8sClient`) with a fresh
-  ephemeral scratch PVC. Set `RUNNER_IMAGE` + the k8s vars above. Authored against the
-  API; validate on your cluster.
+  ephemeral scratch PVC. Set `RUNNER_IMAGE` + the k8s vars above, and install the extra:
+  `pip install 'neo4j-backup-dagster[k8s]'`. The import is lazy, so EC2/VM (subprocess)
+  deployments load the code location without `dagster-k8s` installed; only this mode pulls
+  it in. Authored against the API; validate on your cluster.
 
 Restore is always pure Cypher over Bolt — no runner needed.
 

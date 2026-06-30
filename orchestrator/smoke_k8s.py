@@ -16,7 +16,6 @@ os.environ.setdefault("AWS_ACCESS_KEY_ID", "minioadmin")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "minioadmin")
 
 import dagster as dg
-from dagster_k8s import PipesK8sClient
 
 from neo4j_backup_dagster import definitions as D
 from neo4j_backup_dagster.resources import Neo4jResource, ObjectStoreResource, RunnerResource
@@ -58,7 +57,6 @@ RES = {
         }),
     ),
     "pipes_subprocess_client": dg.PipesSubprocessClient(),
-    "pipes_k8s_client": PipesK8sClient(),
 }
 
 
