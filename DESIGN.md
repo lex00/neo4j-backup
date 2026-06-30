@@ -668,10 +668,11 @@ Open risks / findings:
 
 - PITR requires a differential **chain**; a lone full cannot be point-in-time restored
   (`seedRestoreUntil` errors without one).
-- The `system` database (users/roles/privileges/aliases) has no seed-from-URI restore —
-  covered by an agentless **logical export** (replayable Cypher, RECOVERY.md), except native
-  password hashes, which Cypher does not expose (exact passwords need the binary `system`
-  backup, path B).
+- The `system` database (users/roles/privileges/aliases) has no seed-from-URI restore. Two
+  options (RECOVERY.md): an agentless **logical export** (replayable Cypher) — default, but
+  cannot carry native passwords (Cypher redacts them); and a **binary `system` backup** with
+  an offline node-local restore (path B) — exact passwords, for native-auth teams. External-
+  auth (SSO/LDAP) teams need only the logical export.
 - Cross-group transactional consistency is not native (bounded skew only).
 - Orchestrator cross-version skew (code location / worker vs host) is not a documented
   guarantee — pin the adapter's runtime close to the host.

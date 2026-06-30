@@ -87,9 +87,12 @@ The three modes above recover **database data**. They do not recover the DBMS-wi
 that lives in the `system` database — users, roles, privileges, and alias definitions —
 because seed-from-URI cannot target `system` (you cannot `CREATE DATABASE system`).
 
-For that there is a separate **agentless logical export**: capture the metadata as
-replayable Cypher and replay it against `system` over Bolt on a rebuilt cluster — no node
-access, the same agentless surface as data restore.
+There are two ways to recover it, with different trade-offs.
+
+### Option B — logical export (agentless, default)
+
+Capture the metadata as replayable Cypher and replay it against `system` over Bolt on a
+rebuilt cluster — no node access, the same agentless surface as data restore.
 
 - **Backup** — `metadata_export` (Dagster) / `neo4j_metadata_backup` (Airflow) writes one
   `_dbms/metadata-<ts>.cypher` artifact (SSE-KMS, same bucket).
@@ -97,22 +100,43 @@ access, the same agentless surface as data restore.
   `key`): `CREATE ROLE/USER … IF NOT EXISTS`, `GRANT ROLE …`, the `SHOW PRIVILEGES AS
   COMMANDS` statements, and `CREATE ALIAS … IF NOT EXISTS` — idempotent and additive.
 
-**Limits (verified, by design):**
+Limits (verified, by design): **native passwords are not exported** — Cypher redacts them
+(`SHOW USERS` → `***`) and raw system reads are rejected, so users come back with a random
+placeholder + `CHANGE REQUIRED` (reset them post-restore). **SSO/LDAP users carry no local
+secret, so external-auth teams lose nothing here.** Remote-alias driver credentials aren't
+returned either (`<<SUPPLY>>` placeholder, skipped on replay). Alias→physical targets are a
+point-in-time snapshot — in a full DR the data restore repoints user-database aliases itself.
 
-- **Native passwords are not exported.** Cypher redacts them (`SHOW USERS` → `***`) and raw
-  system reads are rejected, so users are recreated with a random placeholder + `CHANGE
-  REQUIRED` — reset them post-restore. SSO/LDAP users carry no local secret, so nothing is
-  lost there. An *exact* password restore needs the binary `system` backup (path B).
-- **Remote-alias driver credentials** are not returned by `SHOW ALIASES`; those statements
-  are rendered with a `<<SUPPLY>>` placeholder and skipped on replay until supplied.
-- **Alias → physical targets are a point-in-time snapshot.** In a full DR the data restore
-  seeds fresh physicals and repoints user-database aliases itself; the export's `IF NOT
-  EXISTS` aliases won't clobber that.
+### Option A — binary `system` backup (exact, offline)
 
-**Full-cluster restore order:** re-provision nodes → replay the metadata export (security +
-aliases) → restore each user database (seed-from-URI, modes 1–3). **Validated:**
-`smoke_metadata` round-trips capture → store → replay (role/user/membership/privilege/alias)
-through both adapters.
+For **native-auth** teams that need exact password/role/privilege recovery. Back up the
+binary `system` store and restore it offline.
+
+- **Backup** — `system_backup` (Dagster) / `neo4j_system_backup` (Airflow) runs
+  `neo4j-admin database backup system` (FULL) to `_dbms/system/` (SSE-KMS, retained).
+- **Restore** — offline + node-local (path B): `system` cannot be seed-from-URI'd or
+  `STOP`ped, so the DBMS must be **down**. `bootstrap/restore_system.sh` (`just
+  restore-system`) reads the latest artifact straight from object storage
+  (`neo4j-admin database restore --from-path=s3://…`), restores with the DBMS offline,
+  restarts, and applies the `restore_metadata.cypher` neo4j-admin emits (database-access
+  privileges). On a cluster this is per-member / designated-seeder + reseed — adapt it.
+
+### Which to use
+
+| | Option B (logical) | Option A (binary `system`) |
+|---|---|---|
+| Surface | agentless, pure Cypher over Bolt | offline, node-local (DBMS down) |
+| Native passwords | reset (placeholder + CHANGE REQUIRED) | **exact** |
+| External auth (SSO/LDAP) | fully sufficient | unnecessary |
+| Runs as | a DAG / asset | a runbook, not a DAG |
+
+Many teams run **both**: B for routine agentless metadata snapshots, A as the exact-restore
+escalation. **Validated:** `smoke_metadata` round-trips B through both adapters;
+`bootstrap/restore_system.sh` round-trips A end to end — a dropped native user returns and
+its **exact password authenticates**.
+
+**Full-cluster restore order:** re-provision nodes → restore the metadata layer (replay B,
+or offline-restore A) → restore each user database (seed-from-URI, modes 1–3).
 
 ## Caveats
 
