@@ -146,14 +146,18 @@ class ObjectStore:
     def get_text(self, key: str) -> str:
         return self._client().get_object(Bucket=self.bucket, Key=key)["Body"].read().decode()
 
-    def latest_text_key(self, prefix: str, suffix: str = ".cypher") -> str | None:
-        latest, ts = None, None
+    def list_text_keys(self, prefix: str, suffix: str = ".cypher"):
+        out = []
         paginator = self._client().get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             for o in page.get("Contents", []):
-                if o["Key"].endswith(suffix) and (ts is None or o["LastModified"] > ts):
-                    latest, ts = o["Key"], o["LastModified"]
-        return latest
+                if o["Key"].endswith(suffix):
+                    out.append((o["Key"], o["LastModified"]))
+        return out
+
+    def latest_text_key(self, prefix: str, suffix: str = ".cypher") -> str | None:
+        arts = self.list_text_keys(prefix, suffix)
+        return max(arts, key=lambda t: t[1])[0] if arts else None
 
 
 class BackupRunner:

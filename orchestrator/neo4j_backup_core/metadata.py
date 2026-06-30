@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import secrets
 
+from . import paths
+
 # Built-in roles exist on a fresh DBMS; don't re-CREATE them (PUBLIC can't be created at
 # all). Their privileges/memberships still replay fine via the statements below.
 BUILTIN_ROLES = {"PUBLIC", "admin", "architect", "editor", "publisher", "reader"}
@@ -127,6 +129,14 @@ def statements(cypher_text: str) -> list[str]:
         if s and not s.startswith("//"):
             out.append(s)
     return out
+
+
+def prune(store, keep: int = 14) -> int:
+    """Keep the newest `keep` metadata exports under `_dbms/`, delete the rest. Bounded
+    history rather than per-group age (metadata is DBMS-wide and tiny)."""
+    arts = sorted(store.list_text_keys(paths.metadata_prefix()), key=lambda t: t[1])
+    stale = [k for (k, _m) in arts[:-keep]] if keep > 0 else [k for (k, _m) in arts]
+    return store.delete_keys(stale)
 
 
 def replay(neo, cypher_text: str) -> dict:

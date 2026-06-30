@@ -166,6 +166,10 @@ def prune(context: dg.AssetExecutionContext, store: ObjectStoreResource):
             deleted_total += n
             if n:
                 detail[f"{g.id}/{a}"] = n
+    meta_pruned = metadata.prune(store)  # keep the newest N DBMS metadata exports
+    deleted_total += meta_pruned
+    if meta_pruned:
+        detail["_dbms/metadata"] = meta_pruned
     context.log.info(f"pruned {deleted_total} artifacts")
     return dg.MaterializeResult(
         metadata={"deleted": deleted_total, **{k: dg.MetadataValue.int(v) for k, v in detail.items()}}

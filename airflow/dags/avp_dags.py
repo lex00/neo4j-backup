@@ -12,7 +12,7 @@ from airflow.sdk import dag, task
 
 from neo4j_backup_airflow import config
 from neo4j_backup_airflow.execution import run_admin
-from neo4j_backup_core import paths
+from neo4j_backup_core import metadata, paths
 from neo4j_backup_core.policy import load_policy
 
 
@@ -61,6 +61,7 @@ def prune_all() -> int:
             newest = max(arts, key=lambda t: t[2])[0]  # keep the chain head
             stale = [k for (k, _s, m) in arts if m < cutoff and k != newest]
             deleted += store.delete_keys(stale)
+    deleted += metadata.prune(store)  # keep the newest N DBMS metadata exports
     return deleted
 
 
