@@ -1,5 +1,5 @@
 site_name: Neo4j Policy-Based Backup / Restore
-site_description: Policy-driven, validated Dagster pipelines for self-hosted Neo4j Enterprise backup/restore
+site_description: Policy-driven, validated backup/restore for self-hosted Neo4j Enterprise — Dagster and Airflow orchestrators over a shared core
 # The markdown lives at the repo root (for GitHub); `mkdocs-stage.sh` copies the curated
 # set into docs/ for the build. Run `just docs` (or the Pages workflow).
 docs_dir: docs
