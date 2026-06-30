@@ -81,6 +81,15 @@ class ObjectStoreResource(dg.ConfigurableResource):
     def s3_uri(self, *a, **k):
         return self._core().s3_uri(*a, **k)
 
+    def put_text(self, *a, **k):
+        return self._core().put_text(*a, **k)
+
+    def get_text(self, *a, **k):
+        return self._core().get_text(*a, **k)
+
+    def latest_text_key(self, *a, **k):
+        return self._core().latest_text_key(*a, **k)
+
 
 class RunnerResource(dg.ConfigurableResource):
     backup_source: str = "neo4j:6362"

@@ -11,7 +11,7 @@ import os
 import dagster as dg
 from dagster_k8s import PipesK8sClient
 
-from neo4j_backup_core import naming, paths
+from neo4j_backup_core import metadata, naming, paths
 from neo4j_backup_core.policy import load_policy, parse_partition_key
 from .resources import Neo4jResource, ObjectStoreResource, RunnerResource
 
@@ -172,6 +172,48 @@ def prune(context: dg.AssetExecutionContext, store: ObjectStoreResource):
     )
 
 
+# --- DBMS metadata export (#14): agentless users/roles/privileges/aliases ---------
+@dg.asset(group_name="neo4j_backup")
+def metadata_export(
+    context: dg.AssetExecutionContext,
+    neo4j: Neo4jResource,
+    store: ObjectStoreResource,
+) -> dg.MaterializeResult:
+    """Capture the DBMS metadata layer as replayable Cypher (pure Bolt, no runner) and
+    store it under the reserved `_dbms/` prefix. Restore is `metadata_restore`."""
+    ts = naming.ts()
+    key = paths.metadata_key(ts)
+    cypher = metadata.render(metadata.capture(neo4j), ts=ts)
+    store.put_text(key, cypher)
+    context.log.info(f"metadata export -> {key} ({len(cypher)} bytes)")
+    return dg.MaterializeResult(metadata={"key": key, "bytes": dg.MetadataValue.int(len(cypher))})
+
+
+class MetadataRestoreConfig(dg.Config):
+    key: str | None = None  # default: the latest _dbms/ artifact
+
+
+@dg.op
+def metadata_restore_op(
+    context: dg.OpExecutionContext,
+    config: MetadataRestoreConfig,
+    neo4j: Neo4jResource,
+    store: ObjectStoreResource,
+):
+    key = config.key or store.latest_text_key(paths.metadata_prefix())
+    if not key:
+        raise dg.Failure("no metadata artifact — materialize metadata_export first")
+    result = metadata.replay(neo4j, store.get_text(key))
+    context.log.info(f"replayed {result['applied']} statements from {key}; "
+                     f"skipped {len(result['skipped'])}")
+    return result
+
+
+@dg.job
+def metadata_restore():
+    metadata_restore_op()
+
+
 # --- Restore (group-aligned alias-swap, pure Cypher) -----------------------------
 class RestoreConfig(dg.Config):
     group_id: str
@@ -256,8 +298,8 @@ def _build_schedules() -> list:
 
 
 defs = dg.Definitions(
-    assets=[backup, aggregate, verify, prune],
-    jobs=[backup_job, restore_group],
+    assets=[backup, aggregate, verify, prune, metadata_export],
+    jobs=[backup_job, restore_group, metadata_restore],
     schedules=_build_schedules(),
     sensors=[reconcile_registry],
     resources={
