@@ -49,8 +49,7 @@ def main() -> None:
 
         print("== mutate live store + DIFFERENTIAL backup of acme-orders ==")
         phys = neo4j.alias_target("acme-orders")
-        with neo4j._driver() as d, d.session(database=phys) as s:
-            s.run("CREATE (:Customer {id:'C9', name:'Grace'})")
+        neo4j.run_on(phys, "CREATE (:Customer {id:'C9', name:'Grace'})")
         mat(D.backup, "demo/acme-orders", inst, kind="DIFF")
         expected = neo4j.count_nodes(phys)  # state captured by the diff backup
 

@@ -76,13 +76,11 @@ def main() -> None:
         bd.backup_one(f"demo/{a}", "FULL")
 
     print("== mutate acme-orders, bracket a PITR timestamp, mutate again ==")
-    with neo._driver() as d, d.session(database=phys) as s:
-        s.run("CREATE (:Pitr {tag:'first'})")
+    neo.run_on(phys, "CREATE (:Pitr {tag:'first'})")
     time.sleep(2)
     t_mid = datetime.now(timezone.utc).isoformat()  # after #1, before #2
     time.sleep(2)
-    with neo._driver() as d, d.session(database=phys) as s:
-        s.run("CREATE (:Pitr {tag:'second'})")
+    neo.run_on(phys, "CREATE (:Pitr {tag:'second'})")
     tip = neo.count_nodes(phys)  # base + 2
     assert tip == base + 2, f"expected base+2 live nodes, got {tip}"
 
