@@ -8,6 +8,7 @@ this module pulls in no Airflow — only `neo4j_backup_core`.
 import json
 import os
 
+from neo4j_backup_core import secrets
 from neo4j_backup_core.clients import BackupRunner, Neo4jClient, ObjectStore
 
 
@@ -16,10 +17,14 @@ def policy_path() -> str:
 
 
 def neo4j() -> Neo4jClient:
+    # Credential via a secret provider (#18), resolved lazily per connect. Default
+    # SECRET_PROVIDER=env reads NEO4J_PASSWORD; aws-sm uses NEO4J_PASSWORD_REF (secret id/ARN).
+    provider = secrets.from_env()
+    ref = os.environ.get("NEO4J_PASSWORD_REF")
     return Neo4jClient(
         os.environ.get("NEO4J_BOLT_URI", "neo4j://localhost:7687"),
         os.environ.get("NEO4J_USER", "neo4j"),
-        os.environ.get("NEO4J_PASSWORD", ""),
+        lambda: provider.resolve(ref),
     )
 
 

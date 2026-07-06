@@ -13,10 +13,22 @@ from neo4j_backup_core.clients import BackupRunner, Neo4jClient, ObjectStore
 class Neo4jResource(dg.ConfigurableResource):
     uri: str = "neo4j://localhost:7687"
     user: str = "neo4j"
-    password: str
+    # Credential resolution (#18): `secret_provider` selects the backend (env | aws-sm),
+    # `password_ref` is the provider-specific reference (env var name, or secret id/ARN).
+    # `password` is an optional explicit override (e.g. dg.EnvVar) that wins when set — kept
+    # for back-compat. Resolution is lazy (per connect) unless an explicit string is given.
+    secret_provider: str = "env"
+    password_ref: str | None = None
+    password: str | None = None
 
     def _core(self) -> Neo4jClient:
-        return Neo4jClient(self.uri, self.user, self.password)
+        if self.password is not None:
+            return Neo4jClient(self.uri, self.user, self.password)
+        from neo4j_backup_core import secrets
+
+        provider = secrets.build(self.secret_provider)
+        ref = self.password_ref
+        return Neo4jClient(self.uri, self.user, lambda: provider.resolve(ref))
 
     def _driver(self):
         return self._core()._driver()
