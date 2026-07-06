@@ -15,8 +15,6 @@ import json
 import os
 import subprocess
 import sys
-import time
-from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(REPO)
@@ -53,6 +51,15 @@ def _ok(run) -> bool:
     return str(getattr(run, "state", run)).split(".")[-1].lower() == "success"
 
 
+def _wait_until_after(neo, db, t):
+    """Block until the server clock is strictly past `t`, so the next write commits after it.
+    A bounded condition poll, not a fixed sleep (each Bolt round-trip exceeds clock resolution)."""
+    for _ in range(50):
+        if neo.run_on(db, "RETURN datetime() > datetime($t) AS past", t=t)[0]["past"]:
+            return
+    raise RuntimeError(f"server clock did not advance past {t}")
+
+
 def main() -> None:
     _af("db", "migrate")
     _af("pools", "set", "neo4j_full", "1", "full lane")
@@ -77,9 +84,8 @@ def main() -> None:
 
     print("== mutate acme-orders, bracket a PITR timestamp, mutate again ==")
     neo.run_on(phys, "CREATE (:Pitr {tag:'first'})")
-    time.sleep(2)
-    t_mid = datetime.now(timezone.utc).isoformat()  # after #1, before #2
-    time.sleep(2)
+    t_mid = neo.run_on(phys, "RETURN toString(datetime()) AS t")[0]["t"]  # server clock, after #1
+    _wait_until_after(neo, phys, t_mid)  # ensure #2 commits strictly after t_mid
     neo.run_on(phys, "CREATE (:Pitr {tag:'second'})")
     tip = neo.count_nodes(phys)  # base + 2
     assert tip == base + 2, f"expected base+2 live nodes, got {tip}"

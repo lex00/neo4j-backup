@@ -31,10 +31,9 @@ cyp -d "$DB" "CREATE (:Customer {id:'C1',name:'Ada'}),(:Customer {id:'C2',name:'
 echo ">> [backup] FULL -> s3://$BUCKET/$PREFIX/"
 bkp
 
-sleep 2
-T0="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+T0="$(server_now)"   # server clock, after state A's commit — no guessed sleep
 echo ">> [mark] T0 = $T0   (state A is before T0; state B will be after)"
-sleep 2
+wait_until_after "$T0"   # ensure state B commits strictly after T0
 
 echo ">> [state B] add a 3rd customer (Grace) AFTER T0"
 cyp -d "$DB" "CREATE (:Customer {id:'C3',name:'Grace'});" >/dev/null
