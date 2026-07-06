@@ -74,8 +74,7 @@ def main() -> None:
         "WHERE name = 'acme-orders' RETURN database"
     )
     target = rows[0]["database"] if rows else None
-    with neo4j._driver() as d, d.session(database="acme-orders") as s:
-        n = s.run("MATCH (c:Customer) RETURN count(c) AS n").single()["n"]
+    n = neo4j.run_on("acme-orders", "MATCH (c:Customer) RETURN count(c) AS n")[0]["n"]
     print(f"== VERIFY: alias acme-orders -> {target}, {n} customers via alias ==")
     assert n >= 2, f"expected restored data, got {n}"
     print("PASS: backup + restore driven through Dagster against the live stack")

@@ -396,6 +396,12 @@ Retryability is classified by exception **type** and Neo4j status **code** (`err
 version-dependent and localizable. The rule extends to subprocess/loader steps: decide
 outcomes by exit code and structured output, not stdout greps.
 
+**One Bolt path.** All Bolt access goes through `Neo4jClient` — `run_on(database, cypher)` for
+an arbitrary database, `run_system` for the `system` DB, plus the typed helpers
+(`seed_database`, `alter_alias`, `count_nodes`, …). Callers never open raw driver sessions, so
+retry (#19), credential resolution (#18), and future contracts apply uniformly. The adapters'
+resources/config carry configuration only; the logic lives once in the client.
+
 ### Why Pipes (not a bare op)
 
 `neo4j-admin` is a long external process with meaningful exit codes and logs. Pipes

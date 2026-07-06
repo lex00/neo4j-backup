@@ -33,14 +33,20 @@ class Neo4jClient:
         finally:
             driver.close()
 
-    def run_system(self, cypher: str, **params):
-        # Retry transient Bolt failures (leader re-election, dropped session, expired token —
-        # see retry.py / #19). Each attempt rebuilds the driver via _driver(), which also
-        # re-resolves the credential once #18 lands, so no explicit on_auth_expired is needed.
+    def run_on(self, database: str, cypher: str, **params):
+        """Run Cypher against `database`, returning row dicts, with the transient-retry
+        contract (retry.py / #19) and lazy credential resolution (#18). This is the single
+        Bolt path — callers use it (or `run_system`) instead of opening raw sessions, so
+        retry/credential handling is never bypassed (#24). Each retry rebuilds the driver via
+        _driver(), which re-resolves the credential, so no explicit on_auth_expired is needed.
+        """
         def _op():
-            with self._driver() as d, d.session(database="system") as s:
+            with self._driver() as d, d.session(database=database) as s:
                 return [r.data() for r in s.run(cypher, **params)]
         return retry_bolt(_op)
+
+    def run_system(self, cypher: str, **params):
+        return self.run_on("system", cypher, **params)
 
     # CloudSeedProvider takes region/endpoint from server env; no seedConfig, and
     # `existingData` is deprecated — both omitted (validated, see RECOVERY.md).
@@ -78,10 +84,7 @@ class Neo4jClient:
         self.run_system(f"DROP DATABASE `{name}` IF EXISTS WAIT")
 
     def count_nodes(self, database: str) -> int:
-        def _op():
-            with self._driver() as d, d.session(database=database) as s:
-                return s.run("MATCH (n) RETURN count(n) AS n").single()["n"]
-        return retry_bolt(_op)
+        return self.run_on(database, "MATCH (n) RETURN count(n) AS n")[0]["n"]
 
     def list_databases(self) -> list[str]:
         return [r["name"] for r in self.run_system("SHOW DATABASES YIELD name")]

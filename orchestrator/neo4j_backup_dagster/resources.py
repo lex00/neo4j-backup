@@ -33,6 +33,9 @@ class Neo4jResource(dg.ConfigurableResource):
     def _driver(self):
         return self._core()._driver()
 
+    def run_on(self, *a, **k):
+        return self._core().run_on(*a, **k)
+
     def run_system(self, *a, **k):
         return self._core().run_system(*a, **k)
 
