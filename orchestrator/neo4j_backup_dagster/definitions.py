@@ -337,11 +337,14 @@ defs = dg.Definitions(
     schedules=_build_schedules(),
     sensors=[reconcile_registry],
     resources={
-        # Only NEO4J_PASSWORD is strictly required; everything else has sane defaults.
+        # Credential via a secret provider (#18): default SECRET_PROVIDER=env resolves
+        # NEO4J_PASSWORD lazily at connect time (same as before, now rotation-friendly); set
+        # SECRET_PROVIDER=aws-sm + NEO4J_PASSWORD_REF=<secret id/ARN> for AWS Secrets Manager.
         "neo4j": Neo4jResource(
             uri=os.environ.get("NEO4J_BOLT_URI", "neo4j://localhost:7687"),
             user=os.environ.get("NEO4J_USER", "neo4j"),
-            password=dg.EnvVar("NEO4J_PASSWORD"),
+            secret_provider=os.environ.get("SECRET_PROVIDER", "env"),
+            password_ref=os.environ.get("NEO4J_PASSWORD_REF"),
         ),
         "store": ObjectStoreResource(
             bucket=os.environ.get("BACKUP_BUCKET", "neo4j-backups"),

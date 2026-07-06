@@ -16,14 +16,18 @@ class Neo4jClient:
     agentless restore surface — pure Cypher, nothing on the instance (DESIGN.md §3)."""
 
     def __init__(self, uri: str = "neo4j://localhost:7687", user: str = "neo4j",
-                 password: str = ""):
+                 password="") -> None:
+        # `password` is a str OR a zero-arg callable resolving one (a secret provider, #18).
+        # A callable is invoked per connect in _driver(), so a rotated secret is picked up on
+        # the next connection.
         self.uri, self.user, self.password = uri, user, password
 
     @contextmanager
     def _driver(self):
         from neo4j import GraphDatabase
 
-        driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
+        pw = self.password() if callable(self.password) else self.password
+        driver = GraphDatabase.driver(self.uri, auth=(self.user, pw))
         try:
             yield driver
         finally:
