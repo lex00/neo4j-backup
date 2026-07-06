@@ -52,6 +52,12 @@ After any of these: bring the new database online, optionally verify it, then cu
 `ALTER ALIAS \`orders\` SET DATABASE TARGET \`orders-<ts>\``. Roll back by repointing the
 alias to the previous physical; drop the old one after a soak.
 
+**Pluggable cutover.** The alias swap is the default strategy. Teams that route apps through
+an external layer (proxy / service discovery / DNS / router) set `CUTOVER_STRATEGY=external`
+and `CUTOVER_HOOK=<url|command>`; the orchestrator calls the hook with the new/old physical so
+that layer repoints, and the Neo4j alias is left untouched. Rollback is then the router's
+concern (repoint back to the old physical). Default `CUTOVER_STRATEGY=alias-swap` is unchanged.
+
 **Cluster topology.** When the group declares a `topology:` (POLICY.md), the orchestrator
 adds it to the seed so the restored physical comes up with the intended redundancy rather
 than the DBMS default — otherwise a restore after losing servers can silently reduce your
