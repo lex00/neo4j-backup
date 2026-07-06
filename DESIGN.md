@@ -382,6 +382,20 @@ live in the shared `dagster.yaml`; coordinate that one change with whoever owns 
 instance. And pin the location's `dagster` version close to the host webserver/daemon —
 cross-version skew is not a documented guarantee.
 
+### 6.9 Bolt resilience (retry + typed errors)
+
+The restore/seed surface is Cypher over Bolt against the `system` database, which on a
+cluster routinely hits transient conditions — a leader re-election, a dropped session, an
+expired auth token. `neo4j_backup_core.retry` wraps every client Bolt call in bounded
+exponential backoff (`NEO4J_RETRY_ATTEMPTS`/`_BASE`/`_CAP`), retrying **only** known-transient
+failures and re-raising everything else immediately. Each attempt rebuilds the driver, so the
+next try re-resolves credentials once secret providers land.
+
+Retryability is classified by exception **type** and Neo4j status **code** (`err.code`, e.g.
+`Neo.ClientError.Cluster.NotALeader`) — **never by matching message text**, which is
+version-dependent and localizable. The rule extends to subprocess/loader steps: decide
+outcomes by exit code and structured output, not stdout greps.
+
 ### Why Pipes (not a bare op)
 
 `neo4j-admin` is a long external process with meaningful exit codes and logs. Pipes

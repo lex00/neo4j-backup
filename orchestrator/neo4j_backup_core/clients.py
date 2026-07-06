@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 
+from .retry import retry_bolt
+
 
 class Neo4jClient:
     """Bolt client for system-database operations: seed-from-URI and alias swap. The
@@ -28,8 +30,13 @@ class Neo4jClient:
             driver.close()
 
     def run_system(self, cypher: str, **params):
-        with self._driver() as d, d.session(database="system") as s:
-            return [r.data() for r in s.run(cypher, **params)]
+        # Retry transient Bolt failures (leader re-election, dropped session, expired token —
+        # see retry.py / #19). Each attempt rebuilds the driver via _driver(), which also
+        # re-resolves the credential once #18 lands, so no explicit on_auth_expired is needed.
+        def _op():
+            with self._driver() as d, d.session(database="system") as s:
+                return [r.data() for r in s.run(cypher, **params)]
+        return retry_bolt(_op)
 
     # CloudSeedProvider takes region/endpoint from server env; no seedConfig, and
     # `existingData` is deprecated — both omitted (validated, see RECOVERY.md).
@@ -67,8 +74,10 @@ class Neo4jClient:
         self.run_system(f"DROP DATABASE `{name}` IF EXISTS WAIT")
 
     def count_nodes(self, database: str) -> int:
-        with self._driver() as d, d.session(database=database) as s:
-            return s.run("MATCH (n) RETURN count(n) AS n").single()["n"]
+        def _op():
+            with self._driver() as d, d.session(database=database) as s:
+                return s.run("MATCH (n) RETURN count(n) AS n").single()["n"]
+        return retry_bolt(_op)
 
     def list_databases(self) -> list[str]:
         return [r["name"] for r in self.run_system("SHOW DATABASES YIELD name")]
