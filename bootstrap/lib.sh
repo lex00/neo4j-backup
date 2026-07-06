@@ -43,9 +43,10 @@ wait_for_neo4j() {
 
 # Server-side UTC timestamp (sub-second), strictly after all prior commits — for bracketing a
 # PITR point off the SERVER clock (which PITR compares tx timestamps against) instead of the
-# host clock plus a guessed sleep.
+# host clock plus a guessed sleep. Runs on the default `neo4j` database: the `system` database
+# rejects general RETURN queries.
 server_now() {
-  cyp -d system --format plain "RETURN toString(datetime());" | tail -1 | tr -d '" \r'
+  cyp --format plain "RETURN toString(datetime());" | tail -1 | tr -d '" \r'
 }
 
 # Block until the server clock is strictly past $1 (an ISO datetime), so the next write commits
@@ -54,7 +55,8 @@ server_now() {
 wait_until_after() {
   local t="$1" r
   for _ in $(seq 1 50); do
-    r="$(cyp -d system --format plain "RETURN datetime() > datetime('$t');" | tail -1 | tr -d ' \r')"
+    # cypher-shell --format plain prints booleans as TRUE/FALSE — normalize to lower case.
+    r="$(cyp --format plain "RETURN datetime() > datetime('$t');" | tail -1 | tr -d ' \r' | tr '[:upper:]' '[:lower:]')"
     [ "$r" = "true" ] && return 0
   done
   echo "!! server clock did not advance past $t" >&2; return 1
