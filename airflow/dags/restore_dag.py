@@ -8,11 +8,11 @@ from datetime import datetime
 from airflow.sdk import Param, dag, get_current_context, task
 
 from neo4j_backup_airflow import config
-from neo4j_backup_core import naming, paths
+from neo4j_backup_core import cutover, naming, paths
+from neo4j_backup_core.policy import load_policy
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
 _layout = paths.get_layout()
-from neo4j_backup_core.policy import load_policy
 
 
 @dag(
@@ -48,17 +48,19 @@ def neo4j_restore():
         if not key:
             raise RuntimeError(f"no artifact for {plan['group_id']}/{alias} — back up first")
         group = load_policy(config.policy_path()).group(plan["group_id"])
+        old = neo.alias_target(alias)  # captured before cutover (for external routing #17)
         newdb = naming.physical(alias, plan["ts"])
         neo.seed_database(newdb, store.s3_uri(key), restore_until=plan["restore_until"],
                           topology=group.topology_for(alias))
-        return {"alias": alias, "newdb": newdb}
+        return {"alias": alias, "newdb": newdb, "old": old}
 
     @task
     def swap(seeded: list[dict]):  # barrier: runs once, after every seed completes
         neo = config.neo4j()
+        strategy = cutover.from_env()  # alias-swap (default) or external routing (#17)
         for s in seeded:
-            neo.alter_alias(s["alias"], s["newdb"])
-            print(f"alias {s['alias']} -> {s['newdb']}")
+            strategy.cutover(neo, s["alias"], s["newdb"], s.get("old"))
+            print(f"cutover {s['alias']} -> {s['newdb']}")
 
     p = plan()
     swap(seed.partial(plan=p).expand(alias=aliases(p)))

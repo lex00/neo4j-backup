@@ -10,7 +10,7 @@ import os
 
 import dagster as dg
 
-from neo4j_backup_core import metadata, naming, paths
+from neo4j_backup_core import cutover, metadata, naming, paths
 from neo4j_backup_core.policy import load_policy, parse_partition_key
 from .resources import Neo4jResource, ObjectStoreResource, RunnerResource
 
@@ -275,9 +275,10 @@ def restore_group_op(
                             topology=group.topology_for(alias))
         planned.append((alias, newdb, neo4j.alias_target(alias)))
         context.log.info(f"seeded {newdb} <= {key}")
+    strategy = cutover.from_env()  # alias-swap (default) or external routing (#17)
     for alias, newdb, old in planned:
-        neo4j.alter_alias(alias, newdb)
-        context.log.info(f"alias {alias}: {old} -> {newdb}")
+        strategy.cutover(neo4j, alias, newdb, old)
+        context.log.info(f"cutover {alias}: {old} -> {newdb}")
     return planned
 
 
