@@ -269,7 +269,8 @@ def restore_group_op(
         if not key:
             raise dg.Failure(f"no artifact for {group.id}/{alias} — back up first")
         newdb = naming.physical(alias, ts)
-        neo4j.seed_database(newdb, store.s3_uri(key), restore_until=config.restore_until)
+        neo4j.seed_database(newdb, store.s3_uri(key), restore_until=config.restore_until,
+                            topology=group.topology_for(alias))
         planned.append((alias, newdb, neo4j.alias_target(alias)))
         context.log.info(f"seeded {newdb} <= {key}")
     for alias, newdb, old in planned:

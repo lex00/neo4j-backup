@@ -52,6 +52,20 @@ After any of these: bring the new database online, optionally verify it, then cu
 `ALTER ALIAS \`orders\` SET DATABASE TARGET \`orders-<ts>\``. Roll back by repointing the
 alias to the previous physical; drop the old one after a soak.
 
+**Cluster topology.** When the group declares a `topology:` (POLICY.md), the orchestrator
+adds it to the seed so the restored physical comes up with the intended redundancy rather
+than the DBMS default — otherwise a restore after losing servers can silently reduce your
+primary count. The three commands above gain a clause before `OPTIONS`:
+
+```cypher
+CREATE DATABASE `orders-20260629t120000`
+  TOPOLOGY 3 PRIMARIES 0 SECONDARIES
+  OPTIONS { seedURI: 's3://<bucket>/<group>/<slug>/<physical>/<full>.backup' } WAIT
+```
+
+Omit `topology:` on standalone/single-instance — the clause is illegal there. Changing the
+value and restoring reshapes the store on cutover (e.g. `primaries: 3 → 5`).
+
 ## Recovery modes at a glance
 
 | Mode | `seedURI` points at | Extra option | Recovers to | Needs a chain? |

@@ -33,11 +33,18 @@ class Neo4jClient:
 
     # CloudSeedProvider takes region/endpoint from server env; no seedConfig, and
     # `existingData` is deprecated — both omitted (validated, see RECOVERY.md).
-    def seed_database(self, name: str, seed_uri: str, restore_until: str | None = None):
+    # `topology` (any object exposing .primaries/.secondaries — e.g. policy.Topology) adds
+    # the clustered `TOPOLOGY n PRIMARIES m SECONDARIES` clause; omit for standalone.
+    def seed_database(self, name: str, seed_uri: str, restore_until: str | None = None,
+                      topology=None):
+        topo = ""
+        if topology is not None:
+            topo = (f" TOPOLOGY {topology.primaries} PRIMARIES "
+                    f"{topology.secondaries} SECONDARIES")
         opts = f"seedURI: '{seed_uri}'"
         if restore_until:
             opts += f", seedRestoreUntil: datetime('{restore_until}')"
-        self.run_system(f"CREATE DATABASE `{name}` OPTIONS {{ {opts} }} WAIT")
+        self.run_system(f"CREATE DATABASE `{name}`{topo} OPTIONS {{ {opts} }} WAIT")
 
     def alter_alias(self, alias: str, target: str):
         self.run_system(f"ALTER ALIAS `{alias}` SET DATABASE TARGET `{target}`")

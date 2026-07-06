@@ -20,6 +20,17 @@ class Encryption(BaseModel):
     kms_key_ref: str | None = None
 
 
+class Topology(BaseModel):
+    """Cluster shape for a seeded database: `CREATE DATABASE … TOPOLOGY n PRIMARIES m
+    SECONDARIES` (DESIGN.md §3). Applied at seed time (restore or bulk import), so a
+    restored physical keeps its redundancy instead of the DBMS default. Omitted entirely
+    when a group declares no topology — required for standalone/single-instance DBMS,
+    where the clause is illegal."""
+
+    primaries: int = Field(default=1, ge=1)
+    secondaries: int = Field(default=0, ge=0)
+
+
 class DbGroup(BaseModel):
     id: str
     owner: str | None = None
@@ -30,6 +41,7 @@ class DbGroup(BaseModel):
     rpo_minutes: int = 60
     rto_minutes: int = 120
     encryption: Encryption = Field(default_factory=Encryption)
+    topology: Topology | None = None
     overrides: dict[str, dict] = Field(default_factory=dict)
 
     @field_validator("aliases")
@@ -38,6 +50,14 @@ class DbGroup(BaseModel):
         for a in v:
             naming.validate_alias(a)  # raises on illegal alias
         return v
+
+    def topology_for(self, alias: str) -> Topology | None:
+        """Seed topology for an alias: a per-alias `overrides[alias].topology` wins over
+        the group's, else the group's (or None -> no TOPOLOGY clause)."""
+        ov = self.overrides.get(alias, {}).get("topology")
+        if ov is not None:
+            return Topology.model_validate(ov)
+        return self.topology
 
 
 class Tier(BaseModel):

@@ -24,7 +24,12 @@ db_groups:
     encryption:
       mode: sse-kms
       kms_key_ref: demo-group-key   # cloud KMS key id/alias; local: MinIO key name
-    overrides: {}                   # per-alias cadence overrides (optional)
+    # Seed topology (DESIGN.md §3): the cluster shape a restore/bulk-import seeds into,
+    # so recovery keeps its redundancy instead of the DBMS default. OMITTED here because
+    # the local stack is single-node — the TOPOLOGY clause is illegal on standalone. On a
+    # cluster, uncomment:
+    #   topology: { primaries: 3, secondaries: 0 }
+    overrides: {}                   # per-alias cadence / topology overrides (optional)
 
 tiers:
   gold:   { full_cron: "0 2 * * *",   diff_cron: "0 * * * *" }    # daily full, hourly diff

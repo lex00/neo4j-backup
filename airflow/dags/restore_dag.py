@@ -44,8 +44,10 @@ def neo4j_restore():
         key = store.latest_artifact_key(paths.alias_prefix(plan["group_id"], alias))
         if not key:
             raise RuntimeError(f"no artifact for {plan['group_id']}/{alias} — back up first")
+        group = load_policy(config.policy_path()).group(plan["group_id"])
         newdb = naming.physical(alias, plan["ts"])
-        neo.seed_database(newdb, store.s3_uri(key), restore_until=plan["restore_until"])
+        neo.seed_database(newdb, store.s3_uri(key), restore_until=plan["restore_until"],
+                          topology=group.topology_for(alias))
         return {"alias": alias, "newdb": newdb}
 
     @task
