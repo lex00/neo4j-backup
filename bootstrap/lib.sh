@@ -41,6 +41,25 @@ wait_for_neo4j() {
   echo "!! neo4j did not become ready" >&2; return 1
 }
 
+# Server-side UTC timestamp (sub-second), strictly after all prior commits — for bracketing a
+# PITR point off the SERVER clock (which PITR compares tx timestamps against) instead of the
+# host clock plus a guessed sleep.
+server_now() {
+  cyp -d system --format plain "RETURN toString(datetime());" | tail -1 | tr -d '" \r'
+}
+
+# Block until the server clock is strictly past $1 (an ISO datetime), so the next write commits
+# after it. A bounded condition poll, not a fixed sleep: each Bolt round-trip already exceeds
+# the clock resolution, so this returns on the first re-check.
+wait_until_after() {
+  local t="$1" r
+  for _ in $(seq 1 50); do
+    r="$(cyp -d system --format plain "RETURN datetime() > datetime('$t');" | tail -1 | tr -d ' \r')"
+    [ "$r" = "true" ] && return 0
+  done
+  echo "!! server clock did not advance past $t" >&2; return 1
+}
+
 # The physical database an alias currently targets.
 alias_target() {
   local a="$1"
