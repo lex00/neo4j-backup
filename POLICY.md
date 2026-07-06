@@ -35,7 +35,11 @@ db_groups:
     encryption:                     # [decl] recorded intent; SSE-KMS is applied by your bucket
       mode: sse-kms                 #        one of: sse-kms | client-side | none
       kms_key_ref: acme-key         #        KMS key id/alias for this group
+    topology:                       # [used] cluster shape a restore seeds into (omit on standalone)
+      primaries: 3                  #        CREATE DATABASE … TOPOLOGY 3 PRIMARIES 0 SECONDARIES
+      secondaries: 0
     overrides: {}                   # [decl] per-alias cadence overrides; not wired
+                                    #        (may carry `topology:` per alias — that IS wired)
 
   # ----- a second group on a lighter tier (minimal: only the [used] fields + s3_prefix) -----
   - id: globex
@@ -72,7 +76,8 @@ The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, a
 | `rpo_minutes` | int | `60` | decl | target, not enforced |
 | `rto_minutes` | int | `120` | decl | target, not enforced |
 | `encryption` | object | `{mode: sse-kms}` | decl | recorded intent; SSE-KMS applied by your bucket |
-| `overrides` | map | `{}` | decl | per-alias cadence overrides; not wired |
+| `topology` | object | `null` | used | cluster shape seeded on restore/import; omit for standalone |
+| `overrides` | map | `{}` | decl | per-alias cadence overrides; not wired (but `overrides[alias].topology` **is** — it overrides the group topology for that alias) |
 
 **`db_groups[].encryption`**
 
@@ -80,6 +85,15 @@ The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, a
 |---|---|---|---|---|
 | `mode` | `sse-kms` \| `client-side` \| `none` | `sse-kms` | decl | intended at-rest encryption mode |
 | `kms_key_ref` | string | `null` | decl | KMS key id/alias for the group |
+
+**`db_groups[].topology`** — omit entirely for standalone/single-instance (the `TOPOLOGY`
+clause is illegal there); set it on a cluster so a restore keeps the intended redundancy
+instead of the DBMS default (see [RECOVERY.md](RECOVERY.md), DESIGN.md §3).
+
+| Field | Type | Required / default | Status | Meaning |
+|---|---|---|---|---|
+| `primaries` | int (≥1) | `1` | used | primary count in the seeded `TOPOLOGY` clause |
+| `secondaries` | int (≥0) | `0` | used | secondary count in the seeded `TOPOLOGY` clause |
 
 **`tiers{}`** (named schedules referenced by `db_group.tier`)
 
@@ -90,6 +104,7 @@ The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, a
 
 ## What you actually tune
 
-The **used** fields: `id`, `aliases`, `tier`, `retention_days`, and the `tiers` crons.
+The **used** fields: `id`, `aliases`, `tier`, `retention_days`, `topology` (on clusters),
+and the `tiers` crons.
 The **decl** fields are accepted and validated but don't change behavior yet — leave them
 at sane values. (`s3_prefix` would become live if per-group buckets are wired.)
