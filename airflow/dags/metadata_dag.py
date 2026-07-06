@@ -13,6 +13,9 @@ from airflow.sdk import Param, dag, get_current_context, task
 from neo4j_backup_airflow import config
 from neo4j_backup_core import metadata, naming, paths
 
+# storage-key layout instance (#21) — swappable via PATH_LAYOUT
+_layout = paths.get_layout()
+
 
 @dag(dag_id="neo4j_metadata_backup", schedule="0 2 * * *", start_date=datetime(2025, 1, 1),
      catchup=False, tags=["neo4j-backup", "metadata"])
@@ -21,7 +24,7 @@ def neo4j_metadata_backup():
     def export() -> str:
         neo, store = config.neo4j(), config.store()
         ts = naming.ts()
-        key = paths.metadata_key(ts)
+        key = _layout.metadata_key(ts)
         store.put_text(key, metadata.render(metadata.capture(neo), ts=ts))
         return key
 
@@ -35,7 +38,7 @@ def neo4j_metadata_restore():
     @task
     def restore() -> dict:
         neo, store = config.neo4j(), config.store()
-        key = get_current_context()["params"]["key"] or store.latest_text_key(paths.metadata_prefix())
+        key = get_current_context()["params"]["key"] or store.latest_text_key(_layout.metadata_prefix())
         if not key:
             raise RuntimeError("no metadata artifact — run neo4j_metadata_backup first")
         result = metadata.replay(neo, store.get_text(key))

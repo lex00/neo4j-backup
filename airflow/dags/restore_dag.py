@@ -9,6 +9,9 @@ from airflow.sdk import Param, dag, get_current_context, task
 
 from neo4j_backup_airflow import config
 from neo4j_backup_core import naming, paths
+
+# storage-key layout instance (#21) — swappable via PATH_LAYOUT
+_layout = paths.get_layout()
 from neo4j_backup_core.policy import load_policy
 
 
@@ -41,7 +44,7 @@ def neo4j_restore():
     @task
     def seed(plan: dict, alias: str) -> dict:
         store, neo = config.store(), config.neo4j()
-        key = store.latest_artifact_key(paths.alias_prefix(plan["group_id"], alias))
+        key = store.latest_artifact_key(_layout.alias_prefix(plan["group_id"], alias))
         if not key:
             raise RuntimeError(f"no artifact for {plan['group_id']}/{alias} — back up first")
         group = load_policy(config.policy_path()).group(plan["group_id"])

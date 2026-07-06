@@ -14,6 +14,9 @@ from airflow.sdk import dag, task
 from neo4j_backup_airflow import config
 from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import paths
+
+# storage-key layout instance (#21) — swappable via PATH_LAYOUT
+_layout = paths.get_layout()
 from neo4j_backup_core.policy import load_policy
 
 
@@ -24,7 +27,7 @@ def backup_one(group_alias: str, kind: str) -> dict:
     physical = neo.alias_target(alias)
     if not physical:
         raise RuntimeError(f"alias {alias!r} has no target — bootstrap the group first")
-    prefix = paths.physical_prefix(group_id, alias, physical)
+    prefix = _layout.physical_prefix(group_id, alias, physical)
     cmd = runner.backup_command(physical, store.s3_uri(prefix), kind=kind)
     run_admin(cmd)  # subprocess or k8s pod per RUNNER_MODE; non-zero exit -> fail
     artifact = store.latest_artifact_key(prefix)

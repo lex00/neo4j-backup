@@ -45,10 +45,12 @@ def _run_admin(context, runner, command, subprocess_client, env=None):
         subprocess_client.run(command=command, env=env, context=context)
 
 
-# --- storage-key helpers live in core.paths (shared with the Airflow adapter) -----
-_alias_prefix = paths.alias_prefix
-_physical_prefix = paths.physical_prefix
-_physical_of_key = paths.physical_of_key
+# --- storage-key layout: an injected PathLayout instance (#21), not module aliases. A
+# deployment selects a custom scheme with PATH_LAYOUT=module.Class; default is unchanged.
+_layout = paths.get_layout()
+_alias_prefix = _layout.alias_prefix
+_physical_prefix = _layout.physical_prefix
+_physical_of_key = _layout.physical_of_key
 
 
 # --- Backup ----------------------------------------------------------------------
@@ -176,7 +178,7 @@ def prune(context: dg.AssetExecutionContext, store: ObjectStoreResource):
     deleted_total += meta_pruned
     if meta_pruned:
         detail["_dbms/metadata"] = meta_pruned
-    sysarts = sorted(store.list_artifacts(paths.system_prefix()), key=lambda t: t[2])
+    sysarts = sorted(store.list_artifacts(_layout.system_prefix()), key=lambda t: t[2])
     sys_pruned = store.delete_keys([k for (k, _s, _m) in sysarts[:-14]])  # keep newest 14
     deleted_total += sys_pruned
     if sys_pruned:
@@ -197,7 +199,7 @@ def system_backup(
 ) -> dg.MaterializeResult:
     """Binary backup of the `system` database to the reserved `_dbms/system/` prefix (FULL).
     Restore is offline + node-local (path B) — see bootstrap/restore_system.sh, not a job."""
-    prefix = paths.system_prefix()
+    prefix = _layout.system_prefix()
     cmd = runner.backup_command("system", store.s3_uri(prefix), kind="FULL")
     _run_admin(context, runner, cmd, pipes_subprocess_client, env=runner.env())
     key = store.latest_artifact_key(prefix)
@@ -215,7 +217,7 @@ def metadata_export(
     """Capture the DBMS metadata layer as replayable Cypher (pure Bolt, no runner) and
     store it under the reserved `_dbms/` prefix. Restore is `metadata_restore`."""
     ts = naming.ts()
-    key = paths.metadata_key(ts)
+    key = _layout.metadata_key(ts)
     cypher = metadata.render(metadata.capture(neo4j), ts=ts)
     store.put_text(key, cypher)
     context.log.info(f"metadata export -> {key} ({len(cypher)} bytes)")
@@ -233,7 +235,7 @@ def metadata_restore_op(
     neo4j: Neo4jResource,
     store: ObjectStoreResource,
 ):
-    key = config.key or store.latest_text_key(paths.metadata_prefix())
+    key = config.key or store.latest_text_key(_layout.metadata_prefix())
     if not key:
         raise dg.Failure("no metadata artifact — materialize metadata_export first")
     result = metadata.replay(neo4j, store.get_text(key))

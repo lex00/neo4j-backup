@@ -16,6 +16,9 @@ from neo4j_backup_airflow import config
 from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import paths
 
+# storage-key layout instance (#21) — swappable via PATH_LAYOUT
+_layout = paths.get_layout()
+
 
 @dag(dag_id="neo4j_system_backup", schedule="0 1 * * *", start_date=datetime(2025, 1, 1),
      catchup=False, tags=["neo4j-backup", "system"])
@@ -23,7 +26,7 @@ def neo4j_system_backup():
     @task
     def backup() -> str:
         store, runner = config.store(), config.runner()
-        prefix = paths.system_prefix()
+        prefix = _layout.system_prefix()
         run_admin(runner.backup_command("system", store.s3_uri(prefix), kind="FULL"))
         key = store.latest_artifact_key(prefix)
         print(f"system backup -> {key}")
