@@ -24,9 +24,10 @@ def backup_one(group_alias: str, kind: str) -> dict:
     """Resolve the alias's live physical and back it up to its per-store prefix."""
     group_id, alias = group_alias.split("/", 1)
     neo, store, runner = config.neo4j(), config.store(), config.runner()
-    physical = neo.alias_target(alias)
+    # Accept either an alias (-> its current target) or a physical database name directly.
+    physical = neo.resolve_physical(alias)
     if not physical:
-        raise RuntimeError(f"alias {alias!r} has no target — bootstrap the group first")
+        raise RuntimeError(f"{alias!r} resolves to no physical database — bootstrap the group first")
     prefix = _layout.physical_prefix(group_id, alias, physical)
     cmd = runner.backup_command(physical, store.s3_uri(prefix), kind=kind)
     run_admin(cmd)  # subprocess or k8s pod per RUNNER_MODE; non-zero exit -> fail

@@ -51,6 +51,12 @@ class Neo4jResource(dg.ConfigurableResource):
     def alias_target(self, *a, **k):
         return self._core().alias_target(*a, **k)
 
+    def resolve_physical(self, *a, **k):
+        return self._core().resolve_physical(*a, **k)
+
+    def database_exists(self, *a, **k):
+        return self._core().database_exists(*a, **k)
+
     def stop_database(self, *a, **k):
         return self._core().stop_database(*a, **k)
 
