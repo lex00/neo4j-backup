@@ -102,6 +102,9 @@ class ObjectStoreResource(dg.ConfigurableResource):
     def get_text(self, *a, **k):
         return self._core().get_text(*a, **k)
 
+    def list_text_keys(self, *a, **k):
+        return self._core().list_text_keys(*a, **k)
+
     def latest_text_key(self, *a, **k):
         return self._core().latest_text_key(*a, **k)
 
