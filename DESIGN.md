@@ -72,7 +72,9 @@ CREATE DATABASE foo
 -- NOTES (validated end-to-end):
 --   * CloudSeedProvider (s3/gs/azb) does NOT accept `seedConfig`; region/endpoint
 --     come from the server's AWS_REGION / AWS_ENDPOINT_URL_S3 env.
---   * `existingData: 'use'` is deprecated (removed without replacement) — omit it.
+--   * `existingData: 'use'` is REQUIRED in Cypher 5 and DEPRECATED in Cypher 25. It is
+--     coupled to the pinned language: SEED_CYPHER_VERSION unset (Cypher-25 default) omits
+--     it (validated); SEED_CYPHER_VERSION=5 emits `CYPHER 5 …` + `existingData: 'use'`.
 ```
 
 - URI schemes `s3:` / `gs:` / `azb:` are served by the CloudSeedProvider.

@@ -48,20 +48,26 @@ class Neo4jClient:
     def run_system(self, cypher: str, **params):
         return self.run_on("system", cypher, **params)
 
-    # CloudSeedProvider takes region/endpoint from server env; no seedConfig, and
-    # `existingData` is deprecated — both omitted (validated, see RECOVERY.md).
+    # CloudSeedProvider takes region/endpoint from server env; no seedConfig (rejected).
+    # `existingData: 'use'` with seedURI is REQUIRED in Cypher 5 and DEPRECATED in Cypher 25
+    # (Neo4j docs), so it is coupled to the pinned language version: cypher_version=None
+    # (default) emits no CYPHER prefix and omits existingData — the validated behavior on a
+    # Cypher-25 cluster (2025+); set cypher_version="5" on a Cypher-5 cluster.
     # `topology` (any object exposing .primaries/.secondaries — e.g. policy.Topology) adds
     # the clustered `TOPOLOGY n PRIMARIES m SECONDARIES` clause; omit for standalone.
     def seed_database(self, name: str, seed_uri: str, restore_until: str | None = None,
-                      topology=None):
+                      topology=None, cypher_version: str | None = None):
+        prefix = f"CYPHER {cypher_version} " if cypher_version else ""
         topo = ""
         if topology is not None:
             topo = (f" TOPOLOGY {topology.primaries} PRIMARIES "
                     f"{topology.secondaries} SECONDARIES")
         opts = f"seedURI: '{seed_uri}'"
+        if cypher_version == "5":
+            opts += ", existingData: 'use'"
         if restore_until:
             opts += f", seedRestoreUntil: datetime('{restore_until}')"
-        self.run_system(f"CREATE DATABASE `{name}`{topo} OPTIONS {{ {opts} }} WAIT")
+        self.run_system(f"{prefix}CREATE DATABASE `{name}`{topo} OPTIONS {{ {opts} }} WAIT")
 
     def alter_alias(self, alias: str, target: str):
         self.run_system(f"ALTER ALIAS `{alias}` SET DATABASE TARGET `{target}`")

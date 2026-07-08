@@ -13,9 +13,14 @@ applies them automatically. You never assemble the chain by hand.
 ## The three recovery modes
 
 All three are the same `CREATE DATABASE … seedURI` command; they differ only in which
-artifact you point at and whether you add `seedRestoreUntil`. (No `seedConfig`, no
-`existingData` — those are rejected/deprecated; region + endpoint come from the server's
-`AWS_REGION` / `AWS_ENDPOINT_URL_S3` env.)
+artifact you point at and whether you add `seedRestoreUntil`. (No `seedConfig` — rejected;
+region + endpoint come from the server's `AWS_REGION` / `AWS_ENDPOINT_URL_S3` env.)
+
+**Cypher version.** `existingData: 'use'` is **required in Cypher 5** and **deprecated in
+Cypher 25**, so the orchestrator couples it to the pinned language: `SEED_CYPHER_VERSION`
+unset (Cypher-25 default) omits it — the examples below; `SEED_CYPHER_VERSION=5` emits
+`CYPHER 5 CREATE DATABASE … OPTIONS { seedURI: …, existingData: 'use' }`. Set it to match
+your cluster's Cypher version.
 
 ### 1. Restore from a full
 

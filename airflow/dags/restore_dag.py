@@ -3,6 +3,7 @@
 seed fan-out is mapped, the swap is a single downstream barrier task.
 """
 
+import os
 from datetime import datetime
 
 from airflow.sdk import Param, dag, get_current_context, task
@@ -13,6 +14,8 @@ from neo4j_backup_core.policy import load_policy
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
 _layout = paths.get_layout()
+# Cypher language for the seed statement (unset = Cypher-25 default; "5" for a Cypher-5 cluster)
+_SEED_CYPHER_VERSION = os.environ.get("SEED_CYPHER_VERSION") or None
 
 
 @dag(
@@ -51,7 +54,8 @@ def neo4j_restore():
         old = neo.alias_target(alias)  # captured before cutover (for external routing #17)
         newdb = naming.physical(alias, plan["ts"])
         neo.seed_database(newdb, store.s3_uri(key), restore_until=plan["restore_until"],
-                          topology=group.topology_for(alias))
+                          topology=group.topology_for(alias),
+                          cypher_version=_SEED_CYPHER_VERSION)
         return {"alias": alias, "newdb": newdb, "old": old}
 
     @task

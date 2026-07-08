@@ -15,6 +15,9 @@ from neo4j_backup_core.policy import load_policy, parse_partition_key
 from .resources import Neo4jResource, ObjectStoreResource, RunnerResource
 
 POLICY_PATH = os.environ.get("NEO4J_BACKUP_POLICY", "policies/demo.yaml")
+# Cypher language for the seed statement: unset (Cypher-25 default, omit existingData) or "5"
+# on a Cypher-5 cluster (existingData required). See Neo4jClient.seed_database.
+SEED_CYPHER_VERSION = os.environ.get("SEED_CYPHER_VERSION") or None
 
 targets = dg.DynamicPartitionsDefinition(name="backup_targets")
 
@@ -272,7 +275,8 @@ def restore_group_op(
             raise dg.Failure(f"no artifact for {group.id}/{alias} — back up first")
         newdb = naming.physical(alias, ts)
         neo4j.seed_database(newdb, store.s3_uri(key), restore_until=config.restore_until,
-                            topology=group.topology_for(alias))
+                            topology=group.topology_for(alias),
+                            cypher_version=SEED_CYPHER_VERSION)
         planned.append((alias, newdb, neo4j.alias_target(alias)))
         context.log.info(f"seeded {newdb} <= {key}")
     strategy = cutover.from_env()  # alias-swap (default) or external routing (#17)
