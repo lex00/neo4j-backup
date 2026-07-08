@@ -73,9 +73,10 @@ def backup(
     """Back up the physical database the alias currently targets, into that physical's
     own prefix — so repeated backups of the alias form a real chain (same store)."""
     group_id, alias = parse_partition_key(context.partition_key)
-    physical = neo4j.alias_target(alias)
+    # Accept either an alias (-> its current target) or a physical database name directly.
+    physical = neo4j.resolve_physical(alias)
     if not physical:
-        raise dg.Failure(f"alias {alias!r} has no target — bootstrap the group first")
+        raise dg.Failure(f"{alias!r} resolves to no physical database — bootstrap the group first")
 
     prefix = _physical_prefix(group_id, alias, physical)
     to_path = store.s3_uri(prefix)

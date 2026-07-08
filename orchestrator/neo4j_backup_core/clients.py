@@ -83,6 +83,21 @@ class Neo4jClient:
         )
         return rows[0]["database"] if rows else None
 
+    def database_exists(self, name: str) -> bool:
+        rows = self.run_system(
+            "SHOW DATABASES YIELD name WHERE name = $n RETURN name", n=name
+        )
+        return bool(rows)
+
+    def resolve_physical(self, name: str) -> str | None:
+        """Resolve `name` to a physical database: an alias -> its current target; an existing
+        database -> itself; otherwise None. Lets callers accept either an alias or a physical
+        name instead of assuming an alias."""
+        target = self.alias_target(name)
+        if target:
+            return target
+        return name if self.database_exists(name) else None
+
     def stop_database(self, name: str):
         self.run_system(f"STOP DATABASE `{name}` WAIT")
 
