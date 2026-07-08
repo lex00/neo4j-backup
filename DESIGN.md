@@ -496,6 +496,13 @@ the bucket/KMS config does the rest. Restore via seed-from-URI still works uncha
 because any caller with KMS decrypt permission reads cleartext transparently. The DB
 nodes already have S3 access for seeding; grant them KMS decrypt too.
 
+The pipeline's own boto3 writes (metadata export, verify copy) rely on bucket default
+encryption by default, but for a bucket whose policy **requires** an explicit SSE header on
+PutObject, set `S3_SSE=aws:kms` / `S3_SSE_KMS_KEY_ID` (or `S3_WRITE_ARGS` JSON) so those
+PUT/COPY calls send it. `neo4j-admin`'s `.backup` uploads still take the bucket default /
+its own S3 config — so a strict-SSE bucket must also allow those (or configure neo4j-admin's
+S3 integration accordingly).
+
 - Pro: keeps the whole loop node-agentless; no decrypt step; minimal pipeline change.
 - Con: "per-group key" granularity with bucket default encryption realistically means
   **one bucket (or KMS key) per group**, since S3 default encryption is bucket-wide and

@@ -104,6 +104,8 @@ All default to today's behaviour; set only what you need. Shared by both adapter
 | `CUTOVER_STRATEGY` / `CUTOVER_HOOK` | `alias-swap` / — | Restore cutover. `alias-swap` (default) does `ALTER ALIAS`; `external` invokes `CUTOVER_HOOK` (http(s) URL or command) so an external router repoints. |
 | `PATH_LAYOUT` | unset | Custom object-store key layout class (`module.Class`); unset = the default `<group>/<slug>/<physical>/` scheme. |
 | `NEO4J_RETRY_ATTEMPTS` / `_BASE` / `_CAP` | `5` / `0.2` / `5.0` | Bounded exponential backoff for transient Bolt failures (leader re-election, dropped session, expired token). |
+| `S3_SSE` / `S3_SSE_KMS_KEY_ID` | unset | Explicit encryption header on the pipeline's boto3 PUT/COPY (metadata export, verify copy). Set `S3_SSE=aws:kms` (+ key id) for buckets that **require** it on PutObject; unset = bucket default. (neo4j-admin's `.backup` uploads are governed separately.) |
+| `S3_WRITE_ARGS` | `{}` | JSON escape hatch merged into those PUT/COPY calls for any other arg (`BucketKeyEnabled`, `ACL`, …). |
 
 ## Execution modes
 

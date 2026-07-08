@@ -359,6 +359,10 @@ defs = dg.Definitions(
             # Unset on real AWS S3 (use AWS endpoints); set only for MinIO/S3-compatible.
             endpoint_url=os.environ.get("AWS_ENDPOINT_URL_S3") or None,
             region=os.environ.get("AWS_REGION", "us-east-1"),
+            # Explicit encryption header for PUT/COPY (buckets that require it); default: bucket default.
+            sse=os.environ.get("S3_SSE") or None,
+            sse_kms_key_id=os.environ.get("S3_SSE_KMS_KEY_ID") or None,
+            write_args_json=os.environ.get("S3_WRITE_ARGS", "{}"),
         ),
         "runner": RunnerResource(
             backup_source=os.environ.get("NEO4J_BACKUP_SOURCE", "neo4j:6362"),

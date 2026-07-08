@@ -118,11 +118,25 @@ class Neo4jClient:
 
 
 class ObjectStore:
-    """S3-compatible object store (boto3). Per-group bucket with SSE-KMS default encryption."""
+    """S3-compatible object store (boto3).
+
+    `write_args` are merged into every boto3 PUT/COPY the pipeline issues (put_text, copy_prefix).
+    A bucket whose policy *requires* an explicit encryption header on PutObject (e.g. deny unless
+    `x-amz-server-side-encryption = aws:kms`) needs this — otherwise the default is the bucket's
+    own default encryption. Convenience: `sse`/`sse_kms_key_id` fill in ServerSideEncryption /
+    SSEKMSKeyId; `write_args_json` is a JSON escape hatch for any other PUT/COPY arg
+    (BucketKeyEnabled, ACL, …). Note: neo4j-admin's own `.backup` uploads are governed separately
+    (its S3 config / the bucket default), not by this."""
 
     def __init__(self, bucket: str, endpoint_url: str | None = None,
-                 region: str = "us-east-1"):
+                 region: str = "us-east-1", sse: str | None = None,
+                 sse_kms_key_id: str | None = None, write_args_json: str = "{}"):
         self.bucket, self.endpoint_url, self.region = bucket, endpoint_url, region
+        self.write_args: dict = json.loads(write_args_json or "{}")
+        if sse:
+            self.write_args["ServerSideEncryption"] = sse
+        if sse_kms_key_id:
+            self.write_args["SSEKMSKeyId"] = sse_kms_key_id
 
     def _client(self):
         import boto3
@@ -166,6 +180,7 @@ class ObjectStore:
                 Bucket=self.bucket,
                 CopySource={"Bucket": self.bucket, "Key": key},
                 Key=dst,
+                **self.write_args,
             )
             n += 1
         return n
@@ -177,13 +192,15 @@ class ObjectStore:
         return f"s3://{self.bucket}/{key}"
 
     # --- text artifacts (the logical metadata export; .cypher, not .backup) ---
-    # No SSE header is set here: the bucket's default encryption (SSE-KMS) applies, exactly
-    # as it does to the neo4j-admin .backup writes. The export carries no plaintext secrets
-    # (passwords are not exported), but it is encrypted at rest like everything else.
+    # Encryption follows `write_args`: unset -> the bucket's default encryption applies (as for
+    # the neo4j-admin .backup writes); set S3_SSE/S3_SSE_KMS_KEY_ID to send an explicit header
+    # for buckets that require one. The export carries no plaintext secrets (passwords aren't
+    # exported), but it is encrypted at rest like everything else.
     def put_text(self, key: str, text: str) -> str:
         self._client().put_object(
             Bucket=self.bucket, Key=key, Body=text.encode(),
             ContentType="text/plain; charset=utf-8",
+            **self.write_args,
         )
         return key
 

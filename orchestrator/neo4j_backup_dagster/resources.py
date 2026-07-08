@@ -77,9 +77,15 @@ class ObjectStoreResource(dg.ConfigurableResource):
     bucket: str
     endpoint_url: str | None = None
     region: str = "us-east-1"
+    # Encryption / extra args for the pipeline's boto3 PUT/COPY (buckets that require an
+    # explicit SSE header on PutObject). Unset -> bucket default encryption.
+    sse: str | None = None
+    sse_kms_key_id: str | None = None
+    write_args_json: str = "{}"
 
     def _core(self) -> ObjectStore:
-        return ObjectStore(self.bucket, self.endpoint_url, self.region)
+        return ObjectStore(self.bucket, self.endpoint_url, self.region,
+                           self.sse, self.sse_kms_key_id, self.write_args_json)
 
     def list_artifacts(self, *a, **k):
         return self._core().list_artifacts(*a, **k)
