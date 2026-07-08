@@ -360,6 +360,7 @@ defs = dg.Definitions(
             scratch_path=os.environ.get("SCRATCH_PATH", "/scratch"),
             pagecache=os.environ.get("RUNNER_PAGECACHE", "512M"),
             heap_size=os.environ.get("RUNNER_HEAP_SIZE", "2G"),
+            neo4j_admin=os.environ.get("RUNNER_NEO4J_ADMIN", "neo4j-admin"),
             # Execution mode: "subprocess" (VM/EC2, validated) or "k8s".
             mode=os.environ.get("RUNNER_MODE", "subprocess"),
             image=os.environ.get("RUNNER_IMAGE", ""),
