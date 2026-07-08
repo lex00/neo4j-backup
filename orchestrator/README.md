@@ -51,9 +51,10 @@ Do them in order:
 ## Prerequisite: applications connect via aliases
 
 The restore model is an **alias swap** (seed a fresh physical → repoint a stable alias),
-so apps must connect using a Neo4j **alias**, not a database name directly. The backup
-asset also resolves the alias's current target, so **an alias must exist for each
-database you back up**.
+so apps must connect using a Neo4j **alias**, not a database name directly. Backup resolves
+each target to a physical database — an **alias** (→ its current target) or a physical
+database name directly — so an alias isn't strictly required to *back up*, but it is for the
+alias-swap *restore*.
 
 - New databases: create them behind an alias from the start.
 - Existing databases your apps hit **directly**: adopt them with
@@ -84,12 +85,25 @@ Only `NEO4J_PASSWORD` is strictly required; the rest default sensibly.
 | `SCRATCH_PATH` | `/scratch` | `/scratch` | mounted volume path |
 | `RUNNER_PAGECACHE` | `512M` | `512M` | size for your DBs |
 | `RUNNER_HEAP_SIZE` | `2G` | `2G` | size for your DBs |
+| `RUNNER_NEO4J_ADMIN` | `neo4j-admin` | `neo4j-admin` | path to the binary |
 | `RUNNER_MODE` | `subprocess` | `subprocess` | `subprocess` or `k8s` |
 | `NEO4J_BACKUP_POLICY` | `policies/demo.yaml` | demo | path to your policy |
 
 k8s mode also reads `RUNNER_IMAGE`, `RUNNER_NODE_SELECTOR` (JSON),
 `RUNNER_MEMORY_LIMIT`, `RUNNER_SCRATCH_STORAGE`, `RUNNER_SERVICE_ACCOUNT`.
 AWS credentials come from the environment or an IAM role (no static keys needed on AWS).
+
+### Optional feature toggles
+
+All default to today's behaviour; set only what you need. Shared by both adapters.
+
+| Var | Default | What it does |
+|---|---|---|
+| `SECRET_PROVIDER` / `NEO4J_PASSWORD_REF` | `env` / — | Credential source: `env` reads `NEO4J_PASSWORD`; `aws-sm` fetches `NEO4J_PASSWORD_REF` (secret id/ARN, optional `#json_key`) per connect. |
+| `SEED_CYPHER_VERSION` | unset | Pin the restore seed language. `5` emits `CYPHER 5 … existingData: 'use'` (required in Cypher 5); `25` omits it; unset = server default. Set to match your cluster. |
+| `CUTOVER_STRATEGY` / `CUTOVER_HOOK` | `alias-swap` / — | Restore cutover. `alias-swap` (default) does `ALTER ALIAS`; `external` invokes `CUTOVER_HOOK` (http(s) URL or command) so an external router repoints. |
+| `PATH_LAYOUT` | unset | Custom object-store key layout class (`module.Class`); unset = the default `<group>/<slug>/<physical>/` scheme. |
+| `NEO4J_RETRY_ATTEMPTS` / `_BASE` / `_CAP` | `5` / `0.2` / `5.0` | Bounded exponential backoff for transient Bolt failures (leader re-election, dropped session, expired token). |
 
 ## Execution modes
 
