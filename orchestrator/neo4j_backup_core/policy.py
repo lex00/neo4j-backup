@@ -6,6 +6,9 @@ The db_group is the policy + PITR-alignment unit; aliases are the app-facing nam
 
 from __future__ import annotations
 
+import logging
+import os
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -13,6 +16,8 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from . import naming
+
+_log = logging.getLogger(__name__)
 
 
 class Encryption(BaseModel):
@@ -95,6 +100,46 @@ def parse_partition_key(key: str) -> tuple[str, str]:
     return group_id, alias
 
 
-def load_policy(path: str | Path) -> Policy:
-    data = yaml.safe_load(Path(path).read_text())
-    return Policy.model_validate(data)
+# In-process cache keyed by source; also the last-known-good store. Dagster's daemon and run
+# workers are separate processes, so each keeps its own cache — expected.
+_cache: dict[str, tuple[Policy, float]] = {}
+
+
+def _read_source(source: str) -> str:
+    """Read the raw policy YAML from a local path or an s3:// URI (#43)."""
+    if source.startswith("s3://"):
+        import boto3  # lazy — only when an s3 source is used
+
+        bucket, _, key = source[len("s3://"):].partition("/")
+        client = boto3.client(
+            "s3",
+            endpoint_url=os.environ.get("AWS_ENDPOINT_URL_S3") or None,  # MinIO/local override
+            region_name=os.environ.get("AWS_REGION", "us-east-1"),
+        )
+        return client.get_object(Bucket=bucket, Key=key)["Body"].read().decode()
+    path = source[len("file://"):] if source.startswith("file://") else source
+    return Path(path).read_text()
+
+
+def load_policy(source: str | Path, *, force: bool = False) -> Policy:
+    """Load + validate the policy from a local path or `s3://bucket/key.yaml` (#43).
+
+    Cached for `POLICY_CACHE_TTL` seconds (default 60; `0` = always fetch); `force=True` bypasses
+    the cache (the reconcile sensor uses it, since it gates whether a new database gets a
+    partition). On a fetch/parse failure the last successfully-loaded policy is returned
+    (last-known-good) with a warning; a cold start with nothing cached re-raises.
+    """
+    source = str(source)
+    ttl = float(os.environ.get("POLICY_CACHE_TTL", "60"))
+    hit = _cache.get(source)
+    if hit and not force and (time.monotonic() - hit[1]) < ttl:
+        return hit[0]
+    try:
+        policy = Policy.model_validate(yaml.safe_load(_read_source(source)))
+        _cache[source] = (policy, time.monotonic())
+        return policy
+    except Exception as e:  # noqa: BLE001 — last-known-good fallback, or re-raise on cold start
+        if hit:
+            _log.warning("policy reload from %s failed (%s); using last known good", source, e)
+            return hit[0]
+        raise
