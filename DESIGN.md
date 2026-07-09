@@ -658,6 +658,35 @@ tiers:
   bronze: { full_cron: "0 4 * * 0",   diff_cron: "0 0 * * *" }    # weekly full, daily diff
 ```
 
+## 11.5 Configurable seams and resilience
+
+Deployment-specific behaviour is exposed as seams in the shared `neo4j_backup_core`, so both
+adapters inherit them and each defaults to the validated behaviour (full env list:
+[`orchestrator/README.md`](orchestrator/README.md#environment-variables)). The pattern
+throughout: a small interface plus a `Default*` implementation selected via env/policy, with
+any third-party SDK imported lazily so nothing is pulled unless the non-default is chosen.
+
+| Seam | Default | Override |
+|---|---|---|
+| **Secret provider** | `env` (reads `NEO4J_PASSWORD`) | `SECRET_PROVIDER=aws-sm` + `NEO4J_PASSWORD_REF`; resolved per connect (rotation) |
+| **Cutover** | alias swap (`ALTER ALIAS`) | `CUTOVER_STRATEGY=external` + `CUTOVER_HOOK` (external router) |
+| **Path layout** | `<group>/<slug>/<physical>/` | `PATH_LAYOUT=module.Class` |
+| **Seed topology** | DBMS default | policy `topology:` → `TOPOLOGY n PRIMARIES m SECONDARIES` |
+| **Seed Cypher version** | server default | `SEED_CYPHER_VERSION=5` (adds `existingData`) / `25` |
+| **S3 write args** | bucket default encryption | `S3_SSE` / `S3_SSE_KMS_KEY_ID` / `S3_WRITE_ARGS` on boto3 PUT/COPY |
+| **Backup upload** | neo4j-admin → `s3://` | `BACKUP_UPLOAD=pipeline`: neo4j-admin → local, boto3 does every S3 write (SSE-KMS) |
+| **Runner binary** | `neo4j-admin` | `RUNNER_NEO4J_ADMIN` |
+
+**Resilience.** All Bolt access goes through one client (`Neo4jClient.run_on`/`run_system`), so
+retry, credential resolution, and future contracts apply uniformly — no caller opens a raw
+session (§6.9). Retry is bounded exponential backoff over a transient set classified by
+exception **type** and Neo4j status **code** (never message text); the same typed-code rule
+governs subprocess/loader outcomes (exit code + structured output, not stdout parsing).
+Readiness/settling waits are bounded condition polls (or `… WAIT`), never fixed sleeps.
+
+**Backup target resolution.** Backup accepts an alias (→ its current target) or a physical
+database name directly (`resolve_physical`); the alias is required only for the restore swap.
+
 ## 12. Decisions and remaining choices
 
 Resolved:
@@ -682,12 +711,15 @@ Still to choose:
 
 ## 13. Status, decisions locked, and open risks
 
-Delivered and validated against the local stack (2026-06-29): the policy engine, the local
-stack, and **both orchestrator adapters** — Dagster (`orchestrator/`) and Airflow
-(`airflow/`) over the shared `neo4j_backup_core`. The full loop (backup → verify → restore
-→ PITR) and the `RUNNER_MODE=k8s` path (on k3d) are validated for both. Cloud provisioning
-is out of scope — teams adapt the runner placement, bucket/IAM/KMS, and scratch volume to
-their environment (see [`orchestrator/deploy/DEPLOY.md`](orchestrator/deploy/DEPLOY.md)).
+Delivered and validated against the local stack: the policy engine, the local stack, and
+**both orchestrator adapters** — Dagster (`orchestrator/`) and Airflow (`airflow/`) over the
+shared `neo4j_backup_core`. The full loop (backup → verify → restore → PITR) and the
+`RUNNER_MODE=k8s` path (on k3d) are validated for both. A later hardening pass added the
+configurable seams and resilience in §11.5 (secret provider, retry, cutover, path layout, seed
+topology/Cypher-version, S3 write args + `BACKUP_UPLOAD=pipeline`), each with tests and, where
+it touches S3/Bolt, live validation on the stack. Cloud provisioning is out of scope — teams
+adapt the runner placement, bucket/IAM/KMS, and scratch volume to their environment (see
+[`orchestrator/deploy/DEPLOY.md`](orchestrator/deploy/DEPLOY.md)).
 
 Decisions locked:
 

@@ -65,13 +65,36 @@ It is just orchestration around standard pieces:
 
 Remove the tooling and you are left with standard Neo4j backups in your own bucket.
 
+## Configurable & resilient (optional)
+
+Beyond the four configs, the pipeline exposes optional knobs — **all default to the validated
+behaviour**, and the full list is the
+[env table](orchestrator/README.md#environment-variables). Every seam lives in the shared core,
+so both adapters inherit it:
+
+- **Credentials** — `SECRET_PROVIDER` pulls the Neo4j password from AWS Secrets Manager (or a
+  custom provider), resolved per connection so rotation needs no redeploy.
+- **Bolt resilience** — automatic bounded retry on transient cluster failures (leader
+  re-election, dropped sessions, expired tokens), classified by Neo4j **status code**, not
+  message text.
+- **Seed topology** — declare `TOPOLOGY n PRIMARIES m SECONDARIES` in policy so a restore comes
+  back with its intended redundancy, not the DBMS default.
+- **Cypher version** — `SEED_CYPHER_VERSION=5` on a Cypher-5 cluster (adds the required
+  `existingData`; Cypher 25 omits it).
+- **Cutover** — default alias swap, or repoint an external router/proxy via
+  `CUTOVER_STRATEGY=external`.
+- **Path layout** — bring your own object-store key scheme via `PATH_LAYOUT`.
+- **Encryption on every write** — `S3_SSE` sets the SSE-KMS header on the pipeline's boto3
+  PUT/COPY; `BACKUP_UPLOAD=pipeline` routes neo4j-admin's writes through boto3 too (it has no
+  SSE setting of its own), so **strict buckets that deny header-less PutObject** work end to end.
+
 ## Documentation map
 
 | Doc | What |
 |---|---|
 | [POLICY.md](POLICY.md) | The backup policy — a complete annotated example + every field. |
 | [RECOVERY.md](RECOVERY.md) | The three recovery modes (full / differential / PITR) with exact Cypher. |
-| [DESIGN.md](DESIGN.md) | The architecture: execution surface, db-group model, naming authority, encryption, runner resources, Dagster pipeline, restore + verification. The main read. |
+| [DESIGN.md](DESIGN.md) | The architecture: execution surface, db-group model, naming authority, encryption, runner resources, Dagster pipeline, restore + verification, and the configurable seams + resilience (§11.5). The main read. |
 | [STACK.md](STACK.md) | The local stack and how to run it (`just fresh` → `backup` → `restore`). |
 | [orchestrator/](orchestrator/README.md) | The `neo4j_backup_dagster` package (the Dagster orchestration), with its own README + `deploy/`. **Includes the configuration walkthrough.** |
 | [airflow/](airflow/README.md) | The equivalent Airflow 3.x DAG set over the same core — the DAG inventory, pools-as-lanes, `dag.test()` validation, and the Dagster↔Airflow concept map. |
