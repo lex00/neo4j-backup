@@ -6,7 +6,6 @@ step; it runs via the execution dispatcher (subprocess or k8s pod per RUNNER_MOD
 neo4j_backup_airflow.execution). Airflow 3.x Task SDK + dynamic mapping.
 """
 
-import os
 from datetime import datetime
 
 from airflow.sdk import dag, task
@@ -58,9 +57,13 @@ def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str):
 
 
 # Generate one DAG per (tier, lane) from the policy, at module scope (Airflow discovers
-# DAGs in module globals). Guard so a missing policy doesn't break DAG parsing.
-if os.path.exists(config.policy_path()):
+# DAGs in module globals). Try/except so a missing/unreachable policy doesn't break DAG
+# parsing — and so an s3:// source works (os.path.exists would be False for it) (#43).
+try:
     _pol = load_policy(config.policy_path())
+except Exception:  # noqa: BLE001 — no policy yet / source unreachable; skip DAG generation
+    _pol = None
+if _pol is not None:
     for _tier, _t in _pol.tiers.items():
         globals()[f"neo4j_backup_{_tier}_full"] = make_backup_dag(_tier, "full", _t.full_cron, "FULL")
         globals()[f"neo4j_backup_{_tier}_diff"] = make_backup_dag(_tier, "diff", _t.diff_cron, "DIFF")

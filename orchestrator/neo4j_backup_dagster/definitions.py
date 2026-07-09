@@ -344,7 +344,9 @@ def restore_group():
 # --- Sensor + schedules ----------------------------------------------------------
 @dg.sensor(job=backup_job, minimum_interval_seconds=300)
 def reconcile_registry(context: dg.SensorEvaluationContext):
-    policy = load_policy(POLICY_PATH)
+    # Force a fresh read — the sensor gates whether a new database gets a partition, so its
+    # freshness sets churn latency (#43).
+    policy = load_policy(POLICY_PATH, force=True)
     desired = set(policy.partition_keys())
     existing = set(context.instance.get_dynamic_partitions(targets.name))
     add = sorted(desired - existing)
@@ -374,6 +376,9 @@ def _build_schedules() -> list:
             )
             def _sched(context, _tier=tier_name, _lane=lane, _kind=kind):
                 pol = load_policy(POLICY_PATH)
+                # Only request partitions that currently exist — a policy read that's ahead of
+                # (or behind) the reconcile sensor must not request a non-existent partition (#43).
+                existing = set(context.instance.get_dynamic_partitions(targets.name))
                 return [
                     dg.RunRequest(
                         partition_key=f"{g.id}/{a}",
@@ -382,6 +387,7 @@ def _build_schedules() -> list:
                     )
                     for g in pol.groups_for_tier(_tier)
                     for a in g.aliases
+                    if f"{g.id}/{a}" in existing
                 ]
 
             schedules.append(_sched)
