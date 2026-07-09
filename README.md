@@ -86,7 +86,8 @@ so both adapters inherit it:
 - **Path layout** — bring your own object-store key scheme via `PATH_LAYOUT`.
 - **Policy source** — point `NEO4J_BACKUP_POLICY` at `s3://…` (not just a local file) to change
   what/whom is backed up without a redeploy; a `POLICY_CACHE_TTL` cache with last-known-good
-  fallback keeps it safe. Getting the file to S3 is your deployment's job.
+  fallback keeps it safe. Getting the file to S3 is your deployment's job. For an **authenticated
+  endpoint** (Vault, config API), override the fetch with `POLICY_LOADER=module.callable`.
 - **Encryption on every write** — `S3_SSE` sets the SSE-KMS header on the pipeline's boto3
   PUT/COPY; `BACKUP_UPLOAD=pipeline` routes neo4j-admin's writes through boto3 too (it has no
   SSE setting of its own), so **strict buckets that deny header-less PutObject** work end to end.

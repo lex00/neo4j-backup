@@ -106,7 +106,22 @@ _cache: dict[str, tuple[Policy, float]] = {}
 
 
 def _read_source(source: str) -> str:
-    """Read the raw policy YAML from a local path or an s3:// URI (#43)."""
+    """Read the raw policy YAML from a local path or an s3:// URI (#43), or via a team-supplied
+    fetcher for authenticated/custom delivery (#46).
+
+    `POLICY_LOADER=module.callable` names an importable `(source: str) -> str` that returns the
+    raw YAML — the override for an authenticated endpoint / Vault / config API (it does its own
+    auth; this repo ships none). Selected exactly like PATH_LAYOUT/SECRET_PROVIDER; the SDK is
+    the loader's own lazy import. `load_policy`'s validation, cache, and last-known-good wrap it
+    unchanged, so a fetch error folds into last-known-good."""
+    spec = os.environ.get("POLICY_LOADER")
+    if spec:
+        import importlib
+
+        module, _, attr = spec.rpartition(".")
+        if not module:
+            raise RuntimeError(f"POLICY_LOADER must be 'module.callable', got {spec!r}")
+        return getattr(importlib.import_module(module), attr)(source)
     if source.startswith("s3://"):
         import boto3  # lazy — only when an s3 source is used
 
