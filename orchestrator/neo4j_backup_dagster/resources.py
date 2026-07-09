@@ -114,6 +114,12 @@ class ObjectStoreResource(dg.ConfigurableResource):
     def upload_backups(self, *a, **k):
         return self._core().upload_backups(*a, **k)
 
+    def download_prefix(self, *a, **k):
+        return self._core().download_prefix(*a, **k)
+
+    def sync_up(self, *a, **k):
+        return self._core().sync_up(*a, **k)
+
     def put_text(self, *a, **k):
         return self._core().put_text(*a, **k)
 

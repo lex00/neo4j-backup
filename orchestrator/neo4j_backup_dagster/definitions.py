@@ -72,6 +72,24 @@ def _run_backup(context, runner, store, subprocess_client, database, prefix, kin
     return store.latest_artifact_key(prefix)
 
 
+def _stage(runner, tag, name):
+    return f"{(UPLOAD_STAGING_PATH or runner.scratch_path).rstrip('/')}/{tag}/{name}"
+
+
+def _run_aggregate(context, runner, store, subprocess_client, physical, prefix):
+    """Collapse the chain at `prefix` in place; return the recovered-full key. pipeline mode
+    aggregates on local disk and syncs back via boto3 (SSE-KMS) — neo4j-admin can't send it."""
+    if BACKUP_UPLOAD == "pipeline":
+        stage = _stage(runner, "_agg", physical)
+        store.download_prefix(prefix, stage)
+        _run_admin(context, runner, runner.aggregate_command(physical, stage),
+                   subprocess_client, env=runner.env())
+        return store.sync_up(stage, prefix)
+    _run_admin(context, runner, runner.aggregate_command(physical, store.s3_uri(prefix)),
+               subprocess_client, env=runner.env())
+    return store.latest_artifact_key(prefix)
+
+
 # --- storage-key layout: an injected PathLayout instance (#21), not module aliases. A
 # deployment selects a custom scheme with PATH_LAYOUT=module.Class; default is unchanged.
 _layout = paths.get_layout()
@@ -136,9 +154,7 @@ def aggregate(
         raise dg.Failure(f"no artifact for {group_id}/{alias}")
     physical = _physical_of_key(group_id, alias, head)
     prefix = _physical_prefix(group_id, alias, physical)
-    _run_admin(context, runner, runner.aggregate_command(physical, store.s3_uri(prefix)),
-               pipes_subprocess_client, env=runner.env())
-    full = store.latest_artifact_key(prefix)
+    full = _run_aggregate(context, runner, store, pipes_subprocess_client, physical, prefix)
     return dg.MaterializeResult(metadata={"physical": physical, "full": full or ""})
 
 
@@ -159,16 +175,30 @@ def verify(
         raise dg.Failure(f"no artifact for {group_id}/{alias}")
     physical = _physical_of_key(group_id, alias, head)
     src = _physical_prefix(group_id, alias, physical)
-    scratch = f"_verify/{group_id}/{physical}/"
-    try:
-        copied = store.copy_prefix(src, scratch)
-        _run_admin(context, runner, runner.aggregate_command(physical, store.s3_uri(scratch)),
-                   pipes_subprocess_client, env=runner.env())
-        full = store.latest_artifact_key(scratch)
-        _run_admin(context, runner, runner.check_command(physical, store.s3_uri(full)),
-                   pipes_subprocess_client, env=runner.env())
-    finally:
-        store.delete_prefix(scratch)
+    if BACKUP_UPLOAD == "pipeline":
+        # verify entirely on local disk — no S3 scratch writes (neo4j-admin can't SSE-KMS them)
+        import shutil
+        stage = _stage(runner, "_verify", physical)
+        copied = store.download_prefix(src, stage)
+        try:
+            _run_admin(context, runner, runner.aggregate_command(physical, stage),
+                       pipes_subprocess_client, env=runner.env())
+            full = next(f for f in sorted(os.listdir(stage)) if f.endswith(".backup"))
+            _run_admin(context, runner, runner.check_command(physical, os.path.join(stage, full)),
+                       pipes_subprocess_client, env=runner.env())
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+    else:
+        scratch = f"_verify/{group_id}/{physical}/"
+        try:
+            copied = store.copy_prefix(src, scratch)
+            _run_admin(context, runner, runner.aggregate_command(physical, store.s3_uri(scratch)),
+                       pipes_subprocess_client, env=runner.env())
+            full = store.latest_artifact_key(scratch)
+            _run_admin(context, runner, runner.check_command(physical, store.s3_uri(full)),
+                       pipes_subprocess_client, env=runner.env())
+        finally:
+            store.delete_prefix(scratch)
     context.log.info(f"verified {physical}: consistent ({copied} artifacts checked)")
     return dg.MaterializeResult(
         metadata={"alias": alias, "physical": physical, "consistent": True}

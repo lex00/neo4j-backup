@@ -10,13 +10,12 @@ from datetime import datetime, timedelta, timezone
 
 from airflow.sdk import dag, task
 
-from neo4j_backup_airflow import config
-from neo4j_backup_airflow.execution import run_admin
+from neo4j_backup_airflow import config, upload
 from neo4j_backup_core import metadata, paths
+from neo4j_backup_core.policy import load_policy
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
 _layout = paths.get_layout()
-from neo4j_backup_core.policy import load_policy
 
 
 def aggregate_one(group_alias: str) -> dict:
@@ -27,8 +26,9 @@ def aggregate_one(group_alias: str) -> dict:
         raise RuntimeError(f"no artifact for {group_id}/{alias}")
     physical = _layout.physical_of_key(group_id, alias, head)
     prefix = _layout.physical_prefix(group_id, alias, physical)
-    run_admin(runner.aggregate_command(physical, store.s3_uri(prefix)))
-    return {"physical": physical, "full": store.latest_artifact_key(prefix)}
+    # admin (in place on s3://) or pipeline (download -> local aggregate -> boto3 sync-up).
+    full = upload.run_aggregate(runner, store, physical, prefix)
+    return {"physical": physical, "full": full}
 
 
 def verify_one(group_alias: str) -> dict:
@@ -39,14 +39,8 @@ def verify_one(group_alias: str) -> dict:
         raise RuntimeError(f"no artifact for {group_id}/{alias}")
     physical = _layout.physical_of_key(group_id, alias, head)
     src = _layout.physical_prefix(group_id, alias, physical)
-    scratch = f"_verify/{group_id}/{physical}/"
-    try:
-        store.copy_prefix(src, scratch)
-        run_admin(runner.aggregate_command(physical, store.s3_uri(scratch)))
-        full = store.latest_artifact_key(scratch)
-        run_admin(runner.check_command(physical, store.s3_uri(full)))
-    finally:
-        store.delete_prefix(scratch)
+    # admin (S3 scratch) or pipeline (local disk, no S3 writes) per BACKUP_UPLOAD.
+    upload.run_verify(runner, store, physical, src, f"_verify/{group_id}/{physical}/")
     return {"alias": alias, "physical": physical, "consistent": True}
 
 
