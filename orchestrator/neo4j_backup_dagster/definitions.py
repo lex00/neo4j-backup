@@ -19,6 +19,13 @@ POLICY_PATH = os.environ.get("NEO4J_BACKUP_POLICY", "policies/demo.yaml")
 # on a Cypher-5 cluster (existingData required). See Neo4jClient.seed_database.
 SEED_CYPHER_VERSION = os.environ.get("SEED_CYPHER_VERSION") or None
 
+# Backup upload path: "admin" (default) lets neo4j-admin write straight to s3:// (--to-path).
+# "pipeline" makes neo4j-admin write to a local staging dir and the pipeline uploads via boto3,
+# so an SSE-KMS header is sent — required by buckets that deny header-less PutObject, which
+# neo4j-admin cannot satisfy (no such setting exists; Ops Manual). Subprocess mode only.
+BACKUP_UPLOAD = os.environ.get("BACKUP_UPLOAD", "admin")
+UPLOAD_STAGING_PATH = os.environ.get("UPLOAD_STAGING_PATH") or None
+
 targets = dg.DynamicPartitionsDefinition(name="backup_targets")
 
 
@@ -46,6 +53,23 @@ def _run_admin(context, runner, command, subprocess_client, env=None):
         )
     else:
         subprocess_client.run(command=command, env=env, context=context)
+
+
+def _run_backup(context, runner, store, subprocess_client, database, prefix, kind):
+    """Run neo4j-admin backup and return the artifact key. admin mode -> neo4j-admin writes
+    to s3:// directly. pipeline mode -> neo4j-admin writes to local staging, then the pipeline
+    uploads to S3 (SSE-KMS via write_args) for buckets that deny neo4j-admin's header-less
+    PutObject. Subprocess mode. (aggregate/verify still write via neo4j-admin — see #39.)"""
+    if BACKUP_UPLOAD == "pipeline":
+        stage = f"{(UPLOAD_STAGING_PATH or runner.scratch_path).rstrip('/')}/_stage/{database}"
+        os.makedirs(stage, exist_ok=True)
+        cmd = runner.backup_command(database, stage, kind=kind)
+        _run_admin(context, runner, cmd, subprocess_client, env=runner.env())
+        return store.upload_backups(stage, prefix)  # SSE-KMS PUT, then remove local
+    to_path = store.s3_uri(prefix)
+    cmd = runner.backup_command(database, to_path, kind=kind)
+    _run_admin(context, runner, cmd, subprocess_client, env=runner.env())
+    return store.latest_artifact_key(prefix)
 
 
 # --- storage-key layout: an injected PathLayout instance (#21), not module aliases. A
@@ -79,17 +103,14 @@ def backup(
         raise dg.Failure(f"{alias!r} resolves to no physical database — bootstrap the group first")
 
     prefix = _physical_prefix(group_id, alias, physical)
-    to_path = store.s3_uri(prefix)
-    cmd = runner.backup_command(physical, to_path, kind=config.kind)
-    _run_admin(context, runner, cmd, pipes_subprocess_client, env=runner.env())
-
-    artifact = store.latest_artifact_key(prefix)
+    artifact = _run_backup(context, runner, store, pipes_subprocess_client,
+                           physical, prefix, config.kind)
     size = store.object_size(artifact) if artifact else 0
     return dg.MaterializeResult(
         metadata={
             "group": group_id, "alias": alias, "physical": physical,
             "kind": config.kind, "artifact": artifact or "",
-            "bytes": dg.MetadataValue.int(size), "to_path": to_path,
+            "bytes": dg.MetadataValue.int(size), "upload": BACKUP_UPLOAD,
         }
     )
 
@@ -204,9 +225,7 @@ def system_backup(
     """Binary backup of the `system` database to the reserved `_dbms/system/` prefix (FULL).
     Restore is offline + node-local (path B) — see bootstrap/restore_system.sh, not a job."""
     prefix = _layout.system_prefix()
-    cmd = runner.backup_command("system", store.s3_uri(prefix), kind="FULL")
-    _run_admin(context, runner, cmd, pipes_subprocess_client, env=runner.env())
-    key = store.latest_artifact_key(prefix)
+    key = _run_backup(context, runner, store, pipes_subprocess_client, "system", prefix, "FULL")
     context.log.info(f"system backup -> {key}")
     return dg.MaterializeResult(metadata={"key": key or ""})
 

@@ -191,6 +191,27 @@ class ObjectStore:
     def s3_uri(self, key: str) -> str:
         return f"s3://{self.bucket}/{key}"
 
+    def upload_file(self, local_path: str, key: str) -> str:
+        """Upload a local file to `key`, applying `write_args` (SSE-KMS, …). Managed transfer,
+        so multi-GB artifacts multipart automatically and each part carries the encryption."""
+        self._client().upload_file(local_path, self.bucket, key, ExtraArgs=self.write_args or None)
+        return key
+
+    def upload_backups(self, local_dir: str, prefix: str, cleanup: bool = True) -> str | None:
+        """Upload every `*.backup` in `local_dir` to `prefix` (via upload_file, so `write_args`
+        apply), return the newest key, and remove `local_dir`. Lets BACKUP_UPLOAD=pipeline route
+        neo4j-admin's local output through boto3 so an SSE header is sent — neo4j-admin has no
+        setting to send one itself (Ops Manual: only `s3.target_throughput_gbps` exists)."""
+        import os
+        import shutil
+
+        latest = None
+        for name in sorted(f for f in os.listdir(local_dir) if f.endswith(".backup")):
+            latest = self.upload_file(os.path.join(local_dir, name), prefix + name)
+        if cleanup:
+            shutil.rmtree(local_dir, ignore_errors=True)
+        return latest
+
     # --- text artifacts (the logical metadata export; .cypher, not .backup) ---
     # Encryption follows `write_args`: unset -> the bucket's default encryption applies (as for
     # the neo4j-admin .backup writes); set S3_SSE/S3_SSE_KMS_KEY_ID to send an explicit header

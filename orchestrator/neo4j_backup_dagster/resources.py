@@ -108,6 +108,12 @@ class ObjectStoreResource(dg.ConfigurableResource):
     def s3_uri(self, *a, **k):
         return self._core().s3_uri(*a, **k)
 
+    def upload_file(self, *a, **k):
+        return self._core().upload_file(*a, **k)
+
+    def upload_backups(self, *a, **k):
+        return self._core().upload_backups(*a, **k)
+
     def put_text(self, *a, **k):
         return self._core().put_text(*a, **k)
 

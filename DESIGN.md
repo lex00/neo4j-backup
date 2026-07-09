@@ -499,9 +499,15 @@ nodes already have S3 access for seeding; grant them KMS decrypt too.
 The pipeline's own boto3 writes (metadata export, verify copy) rely on bucket default
 encryption by default, but for a bucket whose policy **requires** an explicit SSE header on
 PutObject, set `S3_SSE=aws:kms` / `S3_SSE_KMS_KEY_ID` (or `S3_WRITE_ARGS` JSON) so those
-PUT/COPY calls send it. `neo4j-admin`'s `.backup` uploads still take the bucket default /
-its own S3 config — so a strict-SSE bucket must also allow those (or configure neo4j-admin's
-S3 integration accordingly).
+PUT/COPY calls send it.
+
+**neo4j-admin cannot send an SSE header.** Its S3 backup upload has no server-side-encryption
+setting — the Ops Manual's only `s3` cloud-storage setting is `target_throughput_gbps`. So a
+bucket that denies header-less PutObject rejects `neo4j-admin database backup --to-path s3://…`
+outright, with no arg to fix it. For that case set `BACKUP_UPLOAD=pipeline` (subprocess mode):
+neo4j-admin writes the artifact to a local staging dir, and the pipeline uploads it to S3 via
+boto3 with `S3_SSE`. (`aggregate`/`verify` still write via neo4j-admin — tracked separately;
+reads via `--from-path s3://…` are unaffected since GET is transparent with `kms:Decrypt`.)
 
 - Pro: keeps the whole loop node-agentless; no decrypt step; minimal pipeline change.
 - Con: "per-group key" granularity with bucket default encryption realistically means

@@ -106,6 +106,8 @@ All default to today's behaviour; set only what you need. Shared by both adapter
 | `NEO4J_RETRY_ATTEMPTS` / `_BASE` / `_CAP` | `5` / `0.2` / `5.0` | Bounded exponential backoff for transient Bolt failures (leader re-election, dropped session, expired token). |
 | `S3_SSE` / `S3_SSE_KMS_KEY_ID` | unset | Explicit encryption header on the pipeline's boto3 PUT/COPY (metadata export, verify copy). Set `S3_SSE=aws:kms` (+ key id) for buckets that **require** it on PutObject; unset = bucket default. (neo4j-admin's `.backup` uploads are governed separately.) |
 | `S3_WRITE_ARGS` | `{}` | JSON escape hatch merged into those PUT/COPY calls for any other arg (`BucketKeyEnabled`, `ACL`, …). |
+| `BACKUP_UPLOAD` | `admin` | Who uploads the `.backup`. `admin`: neo4j-admin writes straight to `s3://` (`--to-path`). `pipeline`: neo4j-admin writes to local staging and the pipeline uploads via boto3 with `S3_SSE` — for buckets that **deny** header-less PutObject (neo4j-admin has no SSE setting). **Subprocess mode only.** |
+| `UPLOAD_STAGING_PATH` | `SCRATCH_PATH` | Local dir neo4j-admin writes to in `pipeline` mode before upload (needs room for the artifact, like `--temp-path`). |
 
 ## Execution modes
 
