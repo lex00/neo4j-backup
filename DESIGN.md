@@ -676,6 +676,7 @@ any third-party SDK imported lazily so nothing is pulled unless the non-default 
 | **S3 write args** | bucket default encryption | `S3_SSE` / `S3_SSE_KMS_KEY_ID` / `S3_WRITE_ARGS` on boto3 PUT/COPY |
 | **Backup upload** | neo4j-admin → `s3://` | `BACKUP_UPLOAD=pipeline`: neo4j-admin → local, boto3 does every S3 write (SSE-KMS) |
 | **Runner binary** | `neo4j-admin` | `RUNNER_NEO4J_ADMIN` |
+| **Policy source** | local file | `NEO4J_BACKUP_POLICY=s3://…` + `POLICY_CACHE_TTL`; TTL cache + last-known-good, so policy edits land without an image rebuild |
 
 **Resilience.** All Bolt access goes through one client (`Neo4jClient.run_on`/`run_system`), so
 retry, credential resolution, and future contracts apply uniformly — no caller opens a raw
