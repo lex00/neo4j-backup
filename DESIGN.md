@@ -505,9 +505,13 @@ PUT/COPY calls send it.
 setting — the Ops Manual's only `s3` cloud-storage setting is `target_throughput_gbps`. So a
 bucket that denies header-less PutObject rejects `neo4j-admin database backup --to-path s3://…`
 outright, with no arg to fix it. For that case set `BACKUP_UPLOAD=pipeline` (subprocess mode):
-neo4j-admin writes the artifact to a local staging dir, and the pipeline uploads it to S3 via
-boto3 with `S3_SSE`. (`aggregate`/`verify` still write via neo4j-admin — tracked separately;
-reads via `--from-path s3://…` are unaffected since GET is transparent with `kms:Decrypt`.)
+neo4j-admin operates on local disk and the pipeline performs **every** S3 write via boto3 with
+`S3_SSE`, so the header is always sent. This covers all four writers — `backup` and
+`system_backup` (write local → upload), `aggregate` (download chain → aggregate local → upload
+the recovered full, delete the collapsed diffs), and `verify` (download → aggregate → check
+entirely on local disk, no S3 scratch). Reads (`--from-path s3://…`) stay direct — GET is
+transparent with `kms:Decrypt`. Cost: `pipeline` mode downloads/uploads through the worker, so
+size the staging disk accordingly.
 
 - Pro: keeps the whole loop node-agentless; no decrypt step; minimal pipeline change.
 - Con: "per-group key" granularity with bucket default encryption realistically means

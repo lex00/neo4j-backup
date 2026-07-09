@@ -11,17 +11,12 @@ from datetime import datetime
 
 from airflow.sdk import dag, task
 
-from neo4j_backup_airflow import config
-from neo4j_backup_airflow.execution import run_admin
+from neo4j_backup_airflow import config, upload
 from neo4j_backup_core import paths
 from neo4j_backup_core.policy import load_policy
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
 _layout = paths.get_layout()
-# Backup upload path (see the Dagster BACKUP_UPLOAD note): "admin" (direct s3://) or "pipeline"
-# (neo4j-admin -> local staging, then boto3 upload with SSE-KMS) for strict buckets.
-_BACKUP_UPLOAD = os.environ.get("BACKUP_UPLOAD", "admin")
-_UPLOAD_STAGING_PATH = os.environ.get("UPLOAD_STAGING_PATH") or None
 
 
 def backup_one(group_alias: str, kind: str) -> dict:
@@ -33,14 +28,8 @@ def backup_one(group_alias: str, kind: str) -> dict:
     if not physical:
         raise RuntimeError(f"{alias!r} resolves to no physical database — bootstrap the group first")
     prefix = _layout.physical_prefix(group_id, alias, physical)
-    if _BACKUP_UPLOAD == "pipeline":
-        stage = f"{(_UPLOAD_STAGING_PATH or runner.scratch_path).rstrip('/')}/_stage/{physical}"
-        os.makedirs(stage, exist_ok=True)
-        run_admin(runner.backup_command(physical, stage, kind=kind))
-        artifact = store.upload_backups(stage, prefix)  # SSE-KMS PUT, then remove local
-    else:
-        run_admin(runner.backup_command(physical, store.s3_uri(prefix), kind=kind))
-        artifact = store.latest_artifact_key(prefix)
+    # admin (direct s3://) or pipeline (local + boto3 upload with SSE-KMS) per BACKUP_UPLOAD.
+    artifact = upload.run_backup(runner, store, physical, prefix, kind)
     return {"group": group_id, "alias": alias, "physical": physical, "artifact": artifact}
 
 

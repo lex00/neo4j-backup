@@ -12,8 +12,7 @@ from datetime import datetime
 
 from airflow.sdk import dag, task
 
-from neo4j_backup_airflow import config
-from neo4j_backup_airflow.execution import run_admin
+from neo4j_backup_airflow import config, upload
 from neo4j_backup_core import paths
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
@@ -27,8 +26,8 @@ def neo4j_system_backup():
     def backup() -> str:
         store, runner = config.store(), config.runner()
         prefix = _layout.system_prefix()
-        run_admin(runner.backup_command("system", store.s3_uri(prefix), kind="FULL"))
-        key = store.latest_artifact_key(prefix)
+        # admin (direct s3://) or pipeline (local + boto3 upload) per BACKUP_UPLOAD.
+        key = upload.run_backup(runner, store, "system", prefix, "FULL")
         print(f"system backup -> {key}")
         return key
 

@@ -212,6 +212,36 @@ class ObjectStore:
             shutil.rmtree(local_dir, ignore_errors=True)
         return latest
 
+    def download_prefix(self, prefix: str, local_dir: str) -> int:
+        """Download every `.backup` under `prefix` into `local_dir`. Lets neo4j-admin operate on
+        a local path (aggregate/verify) so its S3 *write* becomes our boto3 upload (SSE-KMS)."""
+        import os
+
+        os.makedirs(local_dir, exist_ok=True)
+        client = self._client()
+        n = 0
+        for key, _s, _m in self.list_artifacts(prefix):
+            client.download_file(self.bucket, key, os.path.join(local_dir, key[len(prefix):]))
+            n += 1
+        return n
+
+    def sync_up(self, local_dir: str, prefix: str, cleanup: bool = True) -> str | None:
+        """Make `prefix` match `local_dir`'s `.backup` set: upload each (with `write_args`),
+        delete S3 artifacts no longer present (e.g. diffs collapsed by aggregate), remove
+        `local_dir`. Returns the newest key. The write leg for an in-place aggregate."""
+        import os
+        import shutil
+
+        local = {f for f in os.listdir(local_dir) if f.endswith(".backup")}
+        latest = None
+        for name in sorted(local):
+            latest = self.upload_file(os.path.join(local_dir, name), prefix + name)
+        stale = [k for (k, _s, _m) in self.list_artifacts(prefix) if k[len(prefix):] not in local]
+        self.delete_keys(stale)
+        if cleanup:
+            shutil.rmtree(local_dir, ignore_errors=True)
+        return latest
+
     # --- text artifacts (the logical metadata export; .cypher, not .backup) ---
     # Encryption follows `write_args`: unset -> the bucket's default encryption applies (as for
     # the neo4j-admin .backup writes); set S3_SSE/S3_SSE_KMS_KEY_ID to send an explicit header
