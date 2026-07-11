@@ -58,13 +58,15 @@ appliance — deployment specifics are yours.
 
 ### Front-ends — pick by what you already run
 
-One shared core (`neo4j_backup_core`), three ways to drive it. The policy, storage layout, and
-every seam are identical across them.
+One shared core (`neo4j_backup_core`), four front-ends over it. The policy, storage layout, and
+every seam are identical across them. Three schedule the cadence; the MCP server drives the
+exceptions.
 
 | Front-end | Pick when |
 |---|---|
 | **[Dagster](orchestrator/README.md)** / **[Airflow](airflow/README.md)** | you run an orchestrator and want concurrency lanes, dynamic policy fan-out, retries with backoff, and run-level observability |
 | **[`neo4j-backup` CLI](#command-line-interface)** + **[CI](CI.md)** / cron | a small fleet with no orchestrator — you accept CI's limits (scratch, best-effort cron, no orchestration) for a much lighter setup |
+| **[MCP server](MCP.md)** | an operator drives DR/status through an agent — read-only by default, guarded mutations; the exceptions, not the cadence |
 
 The CLI is not a co-equal orchestrator: in CI you get scheduling and a serialized lane, not the
 fan-out/observability the adapters give. It is the lightweight option, with the trade-offs stated
