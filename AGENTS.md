@@ -73,6 +73,12 @@ after the human approves what the dry-run showed.
 - "Clean up old backups — what would go?" → `neo4j-backup --json prune --dry-run`
   then, after approval, `neo4j-backup --json prune --confirm`
 
+## Beyond the CLI: MCP
+
+If you would rather call typed tools than compose shell commands, an optional MCP server exposes the
+same operations — read-only by default, with the same confirm / dry-run / verify-before-drop guards.
+It is an ergonomic wrapper over this same contract, not a different interface. See [MCP.md](MCP.md).
+
 ## More
 
 - [CLI-CONTRACT.md](CLI-CONTRACT.md) — the envelope, exit-code table, and guard rules in full.

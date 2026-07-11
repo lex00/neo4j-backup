@@ -27,6 +27,7 @@ nav:
   - CLI contract: CLI-CONTRACT.md
   - CI recipes: CI.md
   - Agent guide: AGENTS.md
+  - Operator MCP: MCP.md
   - Orchestrators:
     - Dagster: orchestrator/README.md
     - Airflow: airflow/README.md

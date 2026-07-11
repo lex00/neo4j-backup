@@ -8,6 +8,16 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 ## [Unreleased]
 
 ### Added
+- **Operator MCP server** (#58 P5) — `neo4j-backup-mcp` exposes the operations as
+  [MCP](https://modelcontextprotocol.io) tools so an operator drives DR/status through an agent
+  (schedulers own the cadence; MCP owns the exceptions). **Read-only by default** (`list_targets`,
+  `latest_artifact`, `show_chain`, `backup_status`, `preview_restore`, `preview_prune`);
+  `NEO4J_BACKUP_MCP_MODE=read-write` adds the mutating tools (`run_backup`/`run_verify`/
+  `run_aggregate`/`run_restore`/`run_prune`), each of which still needs `confirm=true`, previews via
+  `dry_run`, and runs **verify-before-drop** for a destructive `run_restore(replace=true)`. stdio
+  transport, every call audit-logged. The tool logic (`neo4j_backup_mcp.tools`) is dependency-free
+  and tested; the FastMCP wiring is behind the optional `[mcp]` extra with a `neo4j-backup-mcp`
+  entry point. Validated live (`just mcp-smoke`).
 - **CI recipes** (#58 P3) — copy-and-adapt templates that schedule the `neo4j-backup` CLI without an
   orchestrator: [GitHub Actions](examples/ci/github-actions.yml),
   [GitLab CI](examples/ci/gitlab-ci.yml) (`resource_group` lanes), and

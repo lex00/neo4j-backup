@@ -24,3 +24,6 @@ google-cloud-storage>=2
 
 [k8s]
 dagster-k8s>=0.24
+
+[mcp]
+mcp>=1.2

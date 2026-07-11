@@ -19,6 +19,8 @@ Provides-Extra: azure
 Requires-Dist: azure-storage-blob>=12; extra == "azure"
 Provides-Extra: gcp
 Requires-Dist: google-cloud-storage>=2; extra == "gcp"
+Provides-Extra: mcp
+Requires-Dist: mcp>=1.2; extra == "mcp"
 Provides-Extra: airflow
 Requires-Dist: apache-airflow>=3; extra == "airflow"
 Requires-Dist: apache-airflow-providers-cncf-kubernetes; extra == "airflow"
