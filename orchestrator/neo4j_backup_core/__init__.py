@@ -6,7 +6,7 @@ own (its parity test runs without either orchestrator installed).
 
 # Single source of truth for the package version (pyproject derives it via
 # [tool.setuptools.dynamic]). Bump this on release; see RELEASING.md.
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from . import naming  # noqa: F401,E402
 from . import metadata  # noqa: F401,E402

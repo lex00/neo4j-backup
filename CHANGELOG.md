@@ -7,6 +7,22 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-11
+
+### Added
+- **Multi-cloud object store** (#52) — Azure Blob (`CLOUD=azure`) and GCS (`CLOUD=gcp`) backends
+  alongside S3, behind one `ObjectStore` protocol with an `object_store()` factory and shared
+  cloud-agnostic composites (`_BaseObjectStore`); per-cloud primitives per backend. Each is
+  validated against its local emulator — MinIO / **Azurite** / **fake-gcs-server** (compose
+  profiles `azure` / `gcp`). Install the matching extra: `pip install 'neo4j-backup-dagster[azure]'`
+  / `[gcp]`.
+- **Cloud-agnostic restore validation** — `file://` seed (FileSeedProvider) restores from a
+  local/mounted artifact, so the restore drive is validated for every cloud without Neo4j's
+  per-cloud `gs://`/`azb://` fetch (`just file-restore-smoke`).
+
+### Changed
+- `ObjectStore.s3_uri` → `uri` (cloud-neutral: returns `s3://` / `azb://` / `gs://`).
+
 ## [0.1.0] — 2026-07-10
 
 First tagged release. Validated end to end against a real Neo4j Enterprise + object-store stack
@@ -42,5 +58,6 @@ First tagged release. Validated end to end against a real Neo4j Enterprise + obj
 - Dagster `prune` `list_text_keys` delegation; `RUNNER_NEO4J_ADMIN` wiring.
 - Pinned `grpcio-health-checking<1.82` (protobuf gencode/runtime drift).
 
-[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/lex00/neo4j-backup/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lex00/neo4j-backup/releases/tag/v0.1.0
