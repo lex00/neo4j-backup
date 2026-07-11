@@ -20,13 +20,24 @@ from __future__ import annotations
 import functools
 import logging
 import os
-
-from mcp.server.fastmcp import FastMCP
+import sys
 
 from neo4j_backup_core import ops
 from neo4j_backup_mcp import tools
 
 log = logging.getLogger("neo4j_backup_mcp")
+
+
+def _import_fastmcp():
+    """Import FastMCP, or exit with a clear pointer to the extra (the tool logic in `tools.py`
+    needs no SDK; only running the server does)."""
+    try:
+        from mcp.server.fastmcp import FastMCP
+    except ImportError:
+        sys.exit("neo4j-backup-mcp needs the MCP SDK — install the extra: "
+                 "pip install 'neo4j-backup-dagster[mcp] @ git+https://github.com/lex00/neo4j-backup"
+                 "@v0.3.0#subdirectory=orchestrator'")
+    return FastMCP
 
 
 def _audited(fn):
@@ -46,7 +57,7 @@ def _audited(fn):
 def build_server(mode: str | None = None) -> FastMCP:
     """Construct the server with the read/write scope from `mode` (or NEO4J_BACKUP_MCP_MODE)."""
     mode = mode or os.environ.get("NEO4J_BACKUP_MCP_MODE", "read-only")
-    mcp = FastMCP("neo4j-backup")
+    mcp = _import_fastmcp()("neo4j-backup")
     for fn in tools.READ_TOOLS:
         mcp.tool()(_audited(fn))
     if mode == "read-write":

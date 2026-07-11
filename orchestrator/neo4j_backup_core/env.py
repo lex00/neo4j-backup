@@ -7,9 +7,20 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 
 from . import secrets
 from .clients import BackupRunner, Neo4jClient, ObjectStore, object_store
+
+
+def subprocess_admin(runner, stdout=None):
+    """A `run_admin(cmd)` callable for `ops.*` that runs one neo4j-admin command as a local
+    subprocess with the runner's environment (raises on non-zero). Shared by the CLI and the MCP
+    server; both pass `stdout=sys.stderr` so the child's output never lands on their own stdout
+    (the CLI's JSON envelope / the MCP stdio protocol)."""
+    def run(cmd):
+        subprocess.run(cmd, check=True, env={**os.environ, **runner.env()}, stdout=stdout)
+    return run
 
 
 def policy_path() -> str:
