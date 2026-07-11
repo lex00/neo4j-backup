@@ -1,12 +1,14 @@
-"""#48 by-name mode: policy validation + the restore branch (create-if-absent / gated replace)."""
+"""#48 by-name mode: policy validation + the restore branch (create-if-absent / gated replace).
 
-import types
+The restore branch lives in `neo4j_backup_core.ops.restore_group` (shared by the Dagster/Airflow
+adapters and the CLI); these tests drive it directly with fakes."""
 
-import dagster as dg
 import pytest
 
-from neo4j_backup_dagster import definitions as D
+from neo4j_backup_core import ops, paths
 from neo4j_backup_core.policy import DbGroup
+
+LAYOUT = paths.DefaultPathLayout()
 
 
 def _by_name(**kw) -> DbGroup:
@@ -72,29 +74,22 @@ class _Neo:
         self.altered.append((a, t))
 
 
-_CTX = types.SimpleNamespace(log=types.SimpleNamespace(info=lambda *a, **k: None))
-
-
-def _cfg(replace=False):
-    return types.SimpleNamespace(replace=replace, restore_until=None)
-
-
 def test_by_name_create_if_absent():
     neo = _Neo()
-    D._restore_by_name(_CTX, _cfg(), neo, _Store(), _by_name())
+    ops.restore_group(neo, _Store(), _by_name(), LAYOUT)
     assert neo.seeded == ["foo", "bar"]
     assert neo.dropped == [] and neo.altered == []   # nothing dropped, no alias swap
 
 
 def test_by_name_existing_requires_replace_and_drops_nothing():
     neo = _Neo(existing=["foo"])
-    with pytest.raises(dg.Failure, match="replace=true"):
-        D._restore_by_name(_CTX, _cfg(replace=False), neo, _Store(), _by_name())
+    with pytest.raises(ops.OpError, match="replace=true"):
+        ops.restore_group(neo, _Store(), _by_name(), LAYOUT)
     assert neo.dropped == [] and neo.seeded == []    # pre-validation fails before any mutation
 
 
 def test_by_name_replace_drops_then_seeds():
     neo = _Neo(existing=["foo"])
-    D._restore_by_name(_CTX, _cfg(replace=True), neo, _Store(), _by_name())
+    ops.restore_group(neo, _Store(), _by_name(), LAYOUT, replace=True)
     assert neo.dropped == ["foo"]
     assert neo.seeded == ["foo", "bar"]

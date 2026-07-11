@@ -6,12 +6,13 @@
 - prune: age-based retention (boto3 only), keep the chain head.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from airflow.sdk import dag, task
 
 from neo4j_backup_airflow import config, upload
-from neo4j_backup_core import metadata, paths
+from neo4j_backup_airflow.execution import run_admin
+from neo4j_backup_core import ops, paths
 from neo4j_backup_core.policy import load_policy
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
@@ -20,48 +21,26 @@ _layout = paths.get_layout()
 
 def aggregate_one(group_alias: str) -> dict:
     group_id, alias = group_alias.split("/", 1)
-    store, runner = config.store(), config.runner()
-    head = store.latest_artifact_key(_layout.alias_prefix(group_id, alias))
-    if not head:
-        raise RuntimeError(f"no artifact for {group_id}/{alias}")
-    physical = _layout.physical_of_key(group_id, alias, head)
-    prefix = _layout.physical_prefix(group_id, alias, physical)
-    # admin (in place on s3://) or pipeline (download -> local aggregate -> boto3 sync-up).
-    full = upload.run_aggregate(runner, store, physical, prefix)
-    return {"physical": physical, "full": full}
+    try:
+        return ops.aggregate_target(run_admin, config.store(), config.runner(), _layout,
+                                    group_id, alias, upload=upload.BACKUP_UPLOAD,
+                                    staging=upload.STAGING)
+    except ops.OpError as e:
+        raise RuntimeError(str(e))
 
 
 def verify_one(group_alias: str) -> dict:
     group_id, alias = group_alias.split("/", 1)
-    store, runner = config.store(), config.runner()
-    head = store.latest_artifact_key(_layout.alias_prefix(group_id, alias))
-    if not head:
-        raise RuntimeError(f"no artifact for {group_id}/{alias}")
-    physical = _layout.physical_of_key(group_id, alias, head)
-    src = _layout.physical_prefix(group_id, alias, physical)
-    # admin (S3 scratch) or pipeline (local disk, no S3 writes) per BACKUP_UPLOAD.
-    upload.run_verify(runner, store, physical, src, f"_verify/{group_id}/{physical}/")
-    return {"alias": alias, "physical": physical, "consistent": True}
+    try:
+        return ops.verify_target(run_admin, config.store(), config.runner(), _layout,
+                                 group_id, alias, upload=upload.BACKUP_UPLOAD,
+                                 staging=upload.STAGING)
+    except ops.OpError as e:
+        raise RuntimeError(str(e))
 
 
 def prune_all() -> int:
-    pol = load_policy(config.policy_path())
-    store = config.store()
-    now = datetime.now(timezone.utc)
-    deleted = 0
-    for g in pol.db_groups:
-        cutoff = now - timedelta(days=g.retention_days)
-        for a in g.names:
-            arts = store.list_artifacts(_layout.alias_prefix(g.id, a))
-            if not arts:
-                continue
-            newest = max(arts, key=lambda t: t[2])[0]  # keep the chain head
-            stale = [k for (k, _s, m) in arts if m < cutoff and k != newest]
-            deleted += store.delete_keys(stale)
-    deleted += metadata.prune(store)  # keep the newest N DBMS metadata exports
-    sysarts = sorted(store.list_artifacts(_layout.system_prefix()), key=lambda t: t[2])
-    deleted += store.delete_keys([k for (k, _s, _m) in sysarts[:-14]])  # keep newest 14 system fulls
-    return deleted
+    return ops.prune(config.store(), load_policy(config.policy_path()), _layout)["deleted"]
 
 
 def _targets() -> list[str]:

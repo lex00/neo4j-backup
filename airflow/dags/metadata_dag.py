@@ -11,7 +11,7 @@ from datetime import datetime
 from airflow.sdk import Param, dag, get_current_context, task
 
 from neo4j_backup_airflow import config
-from neo4j_backup_core import metadata, naming, paths
+from neo4j_backup_core import ops, paths
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
 _layout = paths.get_layout()
@@ -22,11 +22,7 @@ _layout = paths.get_layout()
 def neo4j_metadata_backup():
     @task
     def export() -> str:
-        neo, store = config.neo4j(), config.store()
-        ts = naming.ts()
-        key = _layout.metadata_key(ts)
-        store.put_text(key, metadata.render(metadata.capture(neo), ts=ts))
-        return key
+        return ops.export_metadata(config.neo4j(), config.store(), _layout)["key"]
 
     export()
 
@@ -37,12 +33,13 @@ def neo4j_metadata_backup():
 def neo4j_metadata_restore():
     @task
     def restore() -> dict:
-        neo, store = config.neo4j(), config.store()
-        key = get_current_context()["params"]["key"] or store.latest_text_key(_layout.metadata_prefix())
-        if not key:
-            raise RuntimeError("no metadata artifact — run neo4j_metadata_backup first")
-        result = metadata.replay(neo, store.get_text(key))
-        print(f"replayed {result['applied']} statements from {key}; skipped {len(result['skipped'])}")
+        try:
+            result = ops.restore_metadata(config.neo4j(), config.store(), _layout,
+                                          get_current_context()["params"]["key"] or None)
+        except ops.OpError as e:
+            raise RuntimeError(str(e))
+        print(f"replayed {result['applied']} statements from {result['key']}; "
+              f"skipped {len(result['skipped'])}")
         return result
 
     restore()
