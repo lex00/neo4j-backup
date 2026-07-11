@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import dagster as dg
 
-from neo4j_backup_core.clients import BackupRunner, Neo4jClient, ObjectStore
+from neo4j_backup_core.clients import BackupRunner, Neo4jClient, ObjectStore, object_store
 
 
 class Neo4jResource(dg.ConfigurableResource):
@@ -84,8 +84,8 @@ class ObjectStoreResource(dg.ConfigurableResource):
     write_args_json: str = "{}"
 
     def _core(self) -> ObjectStore:
-        return ObjectStore(self.bucket, self.endpoint_url, self.region,
-                           self.sse, self.sse_kms_key_id, self.write_args_json)
+        return object_store(self.bucket, self.endpoint_url, self.region,
+                            self.sse, self.sse_kms_key_id, self.write_args_json)
 
     def list_artifacts(self, *a, **k):
         return self._core().list_artifacts(*a, **k)

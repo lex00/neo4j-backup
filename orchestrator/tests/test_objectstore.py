@@ -1,21 +1,21 @@
 """ObjectStore write_args — configurable SSE/extra args on the pipeline's PUT/COPY."""
 
-from neo4j_backup_core.clients import ObjectStore
+from neo4j_backup_core.clients import S3ObjectStore
 
 
 def test_write_args_assembly():
-    s = ObjectStore("b", sse="aws:kms", sse_kms_key_id="key-1")
+    s = S3ObjectStore("b", sse="aws:kms", sse_kms_key_id="key-1")
     assert s.write_args == {"ServerSideEncryption": "aws:kms", "SSEKMSKeyId": "key-1"}
 
 
 def test_write_args_json_escape_hatch_plus_sse():
-    s = ObjectStore("b", write_args_json='{"BucketKeyEnabled": true}', sse="aws:kms")
+    s = S3ObjectStore("b", write_args_json='{"BucketKeyEnabled": true}', sse="aws:kms")
     assert s.write_args["BucketKeyEnabled"] is True
     assert s.write_args["ServerSideEncryption"] == "aws:kms"
 
 
 def test_write_args_default_empty():
-    assert ObjectStore("b").write_args == {}
+    assert S3ObjectStore("b").write_args == {}
 
 
 class _FakeS3:
@@ -35,7 +35,7 @@ class _FakeS3:
 
 
 def test_put_text_sends_write_args(monkeypatch):
-    s = ObjectStore("b", sse="aws:kms", sse_kms_key_id="key-1")
+    s = S3ObjectStore("b", sse="aws:kms", sse_kms_key_id="key-1")
     fake = _FakeS3()
     monkeypatch.setattr(s, "_client", lambda: fake)
     s.put_text("_dbms/x.cypher", "data")
@@ -45,7 +45,7 @@ def test_put_text_sends_write_args(monkeypatch):
 
 
 def test_copy_prefix_sends_write_args(monkeypatch):
-    s = ObjectStore("b", sse="aws:kms")
+    s = S3ObjectStore("b", sse="aws:kms")
     fake = _FakeS3()
     monkeypatch.setattr(s, "_client", lambda: fake)
     n = s.copy_prefix("g/s/p/", "_verify/g/p/")
@@ -55,7 +55,7 @@ def test_copy_prefix_sends_write_args(monkeypatch):
 
 
 def test_no_write_args_when_unset(monkeypatch):
-    s = ObjectStore("b")
+    s = S3ObjectStore("b")
     fake = _FakeS3()
     monkeypatch.setattr(s, "_client", lambda: fake)
     s.put_text("k", "v")

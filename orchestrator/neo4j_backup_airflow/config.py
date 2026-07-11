@@ -9,7 +9,7 @@ import json
 import os
 
 from neo4j_backup_core import secrets
-from neo4j_backup_core.clients import BackupRunner, Neo4jClient, ObjectStore
+from neo4j_backup_core.clients import BackupRunner, Neo4jClient, ObjectStore, object_store
 
 
 def policy_path() -> str:
@@ -29,7 +29,7 @@ def neo4j() -> Neo4jClient:
 
 
 def store() -> ObjectStore:
-    return ObjectStore(
+    return object_store(
         os.environ.get("BACKUP_BUCKET", "neo4j-backups"),
         os.environ.get("AWS_ENDPOINT_URL_S3") or None,  # unset on real AWS
         os.environ.get("AWS_REGION", "us-east-1"),

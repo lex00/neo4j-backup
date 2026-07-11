@@ -12,14 +12,14 @@ os.environ.setdefault("AWS_ACCESS_KEY_ID", "minioadmin")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "minioadmin")
 
 from neo4j_backup_core import metadata, naming, paths
-from neo4j_backup_core.clients import Neo4jClient, ObjectStore
+from neo4j_backup_core.clients import Neo4jClient, object_store
 
 ROLE, USER, ALIAS = "t_meta_role", "t_meta_user", "t-meta-alias"
 
 
 def main() -> None:
     neo = Neo4jClient("neo4j://localhost:7687", "neo4j", "devpassword")
-    store = ObjectStore("neo4j-backups", "http://localhost:9000", "us-east-1")
+    store = object_store("neo4j-backups", "http://localhost:9000", "us-east-1")
 
     target = neo.alias_target("acme-orders")  # an existing physical to point the alias at
     assert target, "alias acme-orders has no target — run `just bootstrap` first"
