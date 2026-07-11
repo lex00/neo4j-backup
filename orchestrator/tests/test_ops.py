@@ -69,6 +69,9 @@ class FakeStore:
     def latest_text_key(self, prefix):
         return self._text_latest
 
+    def list_text_keys(self, prefix):
+        return []  # no metadata exports by default
+
 
 class FakeNeo4j:
     def __init__(self, physical="orders-20260101t000000", exists=False, target="old-phys"):
@@ -175,18 +178,26 @@ def test_aggregate_target_raises_without_head():
         ops.aggregate_target(lambda c: None, FakeStore(), RUNNER, LAYOUT, "demo", "orders")
 
 
+def test_verify_target_checks_head_and_cleans_scratch():
+    # exercises the store/runner argument order through verify_target -> run_verify (admin leg)
+    store = FakeStore(latest={LAYOUT.alias_prefix("demo", "orders"):
+                              f"{LAYOUT.physical_prefix('demo', 'orders', 'orders-x')}full.backup"})
+    _calls, run = recorder()
+    out = ops.verify_target(run, store, RUNNER, LAYOUT, "demo", "orders")
+    assert out["physical"] == "orders-x" and out["consistent"] is True
+    assert store.deleted == ["_verify/demo/orders-x/"]  # scratch copy cleaned
+
+
 # --- prune ------------------------------------------------------------------------------------
 
-def test_prune_keeps_head_and_deletes_stale(monkeypatch):
+def _prune_fixture():
     from datetime import datetime, timezone
     old = datetime(2000, 1, 1, tzinfo=timezone.utc)
     new = datetime(2999, 1, 1, tzinfo=timezone.utc)
-    prefix = "demo/orders/"
-    store = FakeStore(artifacts={prefix: [
+    store = FakeStore(artifacts={"demo/orders/": [
         ("demo/orders/p/old.backup", 1, old),
-        ("demo/orders/p/head.backup", 1, new),  # newest -> kept even though we only prune old ones
+        ("demo/orders/p/head.backup", 1, new),  # newest chain head -> always kept
     ]})
-    monkeypatch.setattr(ops.metadata, "prune", lambda s: 0)
 
     class G:
         id, retention_days = "demo", 7
@@ -194,10 +205,32 @@ def test_prune_keeps_head_and_deletes_stale(monkeypatch):
 
     class Pol:
         db_groups = [G()]
-    out = ops.prune(store, Pol(), LAYOUT)
+    return store, Pol()
+
+
+def test_prune_keeps_head_and_deletes_stale():
+    store, pol = _prune_fixture()
+    out = ops.prune(store, pol, LAYOUT)
     assert "demo/orders/p/old.backup" in store.deleted
     assert "demo/orders/p/head.backup" not in store.deleted
-    assert out["deleted"] >= 1
+    assert out["deleted"] >= 1 and out["dry_run"] is False
+
+
+def test_prune_dry_run_enumerates_without_deleting():
+    store, pol = _prune_fixture()
+    out = ops.prune(store, pol, LAYOUT, dry_run=True)
+    assert out["dry_run"] is True
+    assert "demo/orders/p/old.backup" in out["keys"]  # blast radius reported
+    assert store.deleted == []                          # but nothing actually removed
+
+
+def test_plan_restore_reports_drops_without_mutating():
+    store = FakeStore(latest=dict([_head("orders")]))
+    neo = FakeNeo4j(exists=True)
+    plan = ops.plan_restore(neo, store, FakeGroup(["orders"], restore_mode="by-name"),
+                            LAYOUT, replace=True)
+    assert plan["drops"] == ["orders"] and plan["members"][0]["action"] == "drop+recreate"
+    assert neo.dropped == [] and neo.seeded == []  # planning is inert
 
 
 # --- restore ----------------------------------------------------------------------------------

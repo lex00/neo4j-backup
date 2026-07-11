@@ -14,6 +14,16 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   `neo4j-backup` CLI (#58) and the optional MCP server build to; shipped before any CLI code so the
   subcommands are written against a fixed contract.
 
+- **`neo4j-backup` CLI** (#58 P1) — a scheduler-agnostic command-line adapter over the core, for
+  teams on CI/cron with no orchestrator: `backup` / `verify` / `aggregate` / `restore` / `prune` /
+  `metadata export|restore` / `system-backup` / `targets`. Subprocess execution (neo4j-admin local,
+  or execed on a runner via `RUNNER_EXEC_PREFIX`); honours every existing env/policy seam. Every
+  subcommand meets the #60 contract — `--json` envelope, documented exit codes, and
+  `--dry-run` + blast-radius + `--confirm` on the mutating commands. Installs with the base package
+  (`neo4j-backup = neo4j_backup_cli.__main__:main`); validated end-to-end on the compose stack
+  (`just cli-smoke`). The shared env→client builder now lives in `neo4j_backup_core.env` (Airflow's
+  `config` re-exports it).
+
 ### Changed
 - **Shared op bodies factored into `neo4j_backup_core.ops`** (#58 P1) — the backup / aggregate /
   verify / prune / restore (alias-swap + by-name) / metadata / system-backup logic, plus the

@@ -74,6 +74,10 @@ airflow-install:
 airflow-standalone:
     ./airflow/standalone.sh
 
+# CLI: full loop (targets/backup/verify/aggregate/restore/metadata/system/prune) via neo4j-backup
+cli-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_cli.py
+
 # Airflow: backup -> verify -> restore -> prune against the stack (dag.test, in-process)
 airflow-smoke:
     airflow/.venv/bin/python airflow/smoke_e2e.py

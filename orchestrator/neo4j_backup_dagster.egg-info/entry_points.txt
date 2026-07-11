@@ -1,0 +1,2 @@
+[console_scripts]
+neo4j-backup = neo4j_backup_cli.__main__:main
