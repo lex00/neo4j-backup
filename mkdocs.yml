@@ -24,6 +24,7 @@ nav:
   - Recovery: RECOVERY.md
   - Design: DESIGN.md
   - Local stack: STACK.md
+  - CLI contract: CLI-CONTRACT.md
   - Orchestrators:
     - Dagster: orchestrator/README.md
     - Airflow: airflow/README.md
