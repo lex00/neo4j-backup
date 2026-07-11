@@ -4,5 +4,9 @@ No Dagster or Airflow imports — both adapters wrap this. `naming` is importabl
 own (its parity test runs without either orchestrator installed).
 """
 
-from . import naming  # noqa: F401
-from . import metadata  # noqa: F401
+# Single source of truth for the package version (pyproject derives it via
+# [tool.setuptools.dynamic]). Bump this on release; see RELEASING.md.
+__version__ = "0.1.0"
+
+from . import naming  # noqa: F401,E402
+from . import metadata  # noqa: F401,E402

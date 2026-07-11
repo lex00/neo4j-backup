@@ -1,6 +1,6 @@
 [project]
 name = "neo4j-backup-dagster"
-version = "0.1.0"
+dynamic = ["version"]  # from neo4j_backup_core.__version__ (single source; see RELEASING.md)
 description = "Policy-driven Neo4j backup/restore orchestration (Dagster code location)"
 requires-python = ">=3.10"
 dependencies = [
@@ -34,6 +34,9 @@ airflow = [
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {attr = "neo4j_backup_core.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]

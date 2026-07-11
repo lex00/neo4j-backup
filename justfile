@@ -102,3 +102,12 @@ ps:
 urls:
     @echo "Neo4j Browser : http://localhost:7474  (neo4j / $NEO4J_PASSWORD)"
     @echo "MinIO console : http://localhost:9001  ($AWS_ACCESS_KEY_ID / $AWS_SECRET_ACCESS_KEY)"
+
+# validate a release: __version__ matches, CHANGELOG has the section, then print tag/push cmds
+release version:
+    @v=$(grep -oE '__version__ = "[^"]+"' orchestrator/neo4j_backup_core/__init__.py | cut -d'"' -f2); \
+     [ "$v" = "{{version}}" ] || { echo "!! __version__ is $v, not {{version}} — bump orchestrator/neo4j_backup_core/__init__.py first" >&2; exit 1; }; \
+     grep -q "^## \[{{version}}\]" CHANGELOG.md || { echo "!! CHANGELOG.md has no section for {{version}}" >&2; exit 1; }; \
+     git diff --quiet && git diff --cached --quiet || { echo "!! working tree not clean — commit the bump first" >&2; exit 1; }; \
+     echo ">> {{version}} looks release-ready. Tag + push (from main, CI green):"; \
+     echo "     git tag v{{version}} && git push origin v{{version}}"

@@ -100,6 +100,8 @@ so both adapters inherit it:
 | [RECOVERY.md](RECOVERY.md) | The three recovery modes (full / differential / PITR) with exact Cypher. |
 | [DESIGN.md](DESIGN.md) | The architecture: execution surface, db-group model, naming authority, encryption, runner resources, Dagster pipeline, restore + verification, and the configurable seams + resilience (§11.5). The main read. |
 | [STACK.md](STACK.md) | The local stack and how to run it (`just fresh` → `backup` → `restore`). |
+| [CHANGELOG.md](CHANGELOG.md) | Notable changes per version (Keep a Changelog / SemVer). |
+| [RELEASING.md](RELEASING.md) | Versioning + release process (git-tag, vendored source; no PyPI). |
 | [orchestrator/](orchestrator/README.md) | The `neo4j_backup_dagster` package (the Dagster orchestration), with its own README + `deploy/`. **Includes the configuration walkthrough.** |
 | [airflow/](airflow/README.md) | The equivalent Airflow 3.x DAG set over the same core — the DAG inventory, pools-as-lanes, `dag.test()` validation, and the Dagster↔Airflow concept map. |
 
