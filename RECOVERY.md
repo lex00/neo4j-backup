@@ -10,6 +10,13 @@ itself. Diagram: [restore-cutover](diagrams/restore-cutover.dot).
 Neo4j's CloudSeedProvider finds its full + the intervening diffs in the same prefix and
 applies them automatically. You never assemble the chain by hand.
 
+**Driving it.** This runbook is the raw Cypher — useful for understanding and for a fully manual
+recovery. In practice the same seed-and-cutover is driven for a whole group by an orchestrator
+(Dagster `restore_group` / the Airflow restore DAG) or, without one, by
+`neo4j-backup restore <group>` — run `--dry-run` first to see the plan/blast radius, then
+`--confirm` (add `--until <iso>` for PITR). An operator can also drive it through an agent via the
+[MCP server](MCP.md). All of these run the exact commands below; see [CLI-CONTRACT.md](CLI-CONTRACT.md).
+
 ## The three recovery modes
 
 All three are the same `CREATE DATABASE … seedURI` command; they differ only in which

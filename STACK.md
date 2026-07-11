@@ -23,6 +23,11 @@ just restore demo # restore the group via seed-from-URI into <db>_restored
 just urls         # Neo4j Browser + MinIO console links
 ```
 
+The same loop runs through each front-end against this stack: `just cli-smoke` drives the
+`neo4j-backup` CLI end to end (backup → verify → restore → prune), `just airflow-smoke` the Airflow
+DAGs, and `just mcp-smoke` a read-only round trip against the operator [MCP server](MCP.md) (needs
+the `[mcp]` extra). See [CLI-CONTRACT.md](CLI-CONTRACT.md) / [CI.md](CI.md) / [AGENTS.md](AGENTS.md).
+
 Point-in-time restore (group-aligned to one instant):
 
 ```

@@ -7,13 +7,15 @@ cd "$(dirname "$0")"
 command -v dot >/dev/null 2>&1 && ./diagrams/render.sh || echo "!! graphviz not found; SVGs may be stale"
 
 rm -rf docs
-mkdir -p docs/orchestrator/deploy docs/diagrams docs/bootstrap docs/airflow
+mkdir -p docs/orchestrator/deploy docs/diagrams docs/bootstrap docs/airflow docs/examples/ci
 
 cp README.md POLICY.md RECOVERY.md DESIGN.md STACK.md CLI-CONTRACT.md AGENTS.md CI.md MCP.md docs/
+cp CHANGELOG.md RELEASING.md docs/          # linked from the README doc map
 cp orchestrator/README.md docs/orchestrator/
 cp airflow/README.md docs/airflow/
 cp orchestrator/deploy/DEPLOY.md orchestrator/deploy/dagster.yaml docs/orchestrator/deploy/
 cp diagrams/README.md diagrams/*.dot diagrams/*.svg docs/diagrams/ 2>/dev/null || true
 cp bootstrap/adopt.sh docs/bootstrap/    # referenced from orchestrator docs
+cp examples/ci/*.yml examples/ci/README.md docs/examples/ci/   # linked from CI.md
 
 echo ">> staged docs/ for mkdocs"
