@@ -7,6 +7,11 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Changed
+- **Docs coherency** — `DESIGN.md` (§6.10), `RECOVERY.md`, and `STACK.md` now reference the CLI and
+  MCP front-ends over the shared core, not just Dagster/Airflow; the mkdocs site stages the CI
+  example recipes and `CHANGELOG`/`RELEASING` so their links resolve on the published site.
+
 ## [0.3.0] — 2026-07-11
 
 Scheduler-agnostic reach: a `neo4j-backup` CLI, CI recipes, an agent guide, and an optional

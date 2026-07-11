@@ -411,6 +411,25 @@ launches it and streams logs/metadata/materialization back with the real exit st
 keeping orchestration in Dagster and execution on the runner that has the binary, creds,
 scratch, and network path.
 
+### 6.10 Front-ends over the shared core
+
+Dagster is one front-end, not the design. The operation bodies (backup / aggregate / verify /
+prune / restore / metadata / system) live once in `neo4j_backup_core.ops`, parameterized by a
+`run_admin` callable + client handles; each front-end is a thin adapter that binds execution and
+shapes results:
+
+- **Dagster** (this section) and **Airflow** (`airflow/`) — the orchestrated front-ends, for
+  concurrency lanes, dynamic fan-out, and observability.
+- **`neo4j-backup` CLI** — a scheduler-agnostic front-end for CI/cron (subprocess execution),
+  honouring a machine contract (JSON envelope, exit codes, `--dry-run`/`--confirm` guards). See
+  [CLI-CONTRACT.md](CLI-CONTRACT.md) and [CI.md](CI.md).
+- **Operator MCP server** — the same operations as MCP tools for agent-driven DR/status,
+  read-only by default with guarded mutations. See [MCP.md](MCP.md); the no-MCP agent path is
+  [AGENTS.md](AGENTS.md).
+
+The restore, encryption, and verification design that follows is front-end-agnostic — it lives in
+the core and every adapter inherits it.
+
 ## 7. Restore loop
 
 Restore is organized at the **group** level so a tenant's referencing databases come

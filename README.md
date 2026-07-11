@@ -148,7 +148,7 @@ reports the blast radius). Schedule it with the [CI recipes](CI.md); point an ag
 | [POLICY.md](POLICY.md) | The backup policy — a complete annotated example + every field. |
 | [CLI-CONTRACT.md](CLI-CONTRACT.md) | The `neo4j-backup` CLI contract — JSON envelope, exit codes, and the dry-run/confirm guards. |
 | [CI.md](CI.md) | Scheduling the CLI from CI (GitHub / GitLab / Forgejo) — execution model, secrets, caveats. |
-| [AGENTS.md](AGENTS.md) | Driving the CLI with a coding/ops agent (no MCP) — safety rules, command surface, worked prompts. |
+| [AGENTS.md](AGENTS.md) | Driving the CLI with a coding/ops agent — safety rules, command surface, worked prompts (no server needed). |
 | [MCP.md](MCP.md) | The optional operator MCP server — read-only by default, guarded mutations (confirm + dry-run + verify-before-drop). |
 | [RECOVERY.md](RECOVERY.md) | The three recovery modes (full / differential / PITR) with exact Cypher. |
 | [DESIGN.md](DESIGN.md) | The architecture: execution surface, db-group model, naming authority, encryption, runner resources, Dagster pipeline, restore + verification, and the configurable seams + resilience (§11.5). The main read. |
