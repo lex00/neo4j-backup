@@ -7,6 +7,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Added
+- **Agent-drivable CLI contract** (#60) — `neo4j_backup_core.cli_contract` (the JSON result
+  envelope, `Exit` code classes, `validate_envelope`) with a reusable pytest conformance harness,
+  plus the `CLI-CONTRACT.md` spec. This is the machine-readable, no-MCP interface the forthcoming
+  `neo4j-backup` CLI (#58) and the optional MCP server build to; shipped before any CLI code so the
+  subcommands are written against a fixed contract.
+
 ## [0.2.0] — 2026-07-11
 
 ### Added
