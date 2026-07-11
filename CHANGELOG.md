@@ -8,6 +8,11 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 ## [Unreleased]
 
 ### Added
+- **Agent guide (`AGENTS.md`) + skill** (#59) — the no-MCP way to point any coding/ops agent at the
+  `neo4j-backup` CLI: safety posture (read-only default, `--confirm` to mutate, `--dry-run` a
+  destructive op first), the command surface, and worked operator prompts → exact commands. A thin
+  Claude skill (`.claude/skills/neo4j-backup/`) and `llms.txt` reference it (no second copy of the
+  contract). A doc-drift test asserts every command shown in the docs is a real CLI subcommand.
 - **Agent-drivable CLI contract** (#60) — `neo4j_backup_core.cli_contract` (the JSON result
   envelope, `Exit` code classes, `validate_envelope`) with a reusable pytest conformance harness,
   plus the `CLI-CONTRACT.md` spec. This is the machine-readable, no-MCP interface the forthcoming

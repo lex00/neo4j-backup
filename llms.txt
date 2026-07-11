@@ -1,0 +1,20 @@
+# neo4j-backup
+
+> Policy-driven Neo4j Enterprise backup and restore: agentless `neo4j-admin` backup to object
+> storage, seed-from-URI restore with alias-swap or by-name cutover, PITR, verify, and retention —
+> over a shared core with Dagster, Airflow, and CLI front-ends.
+
+An agent operates this via the `neo4j-backup` CLI (no MCP required). Every command emits one JSON
+object under `--json` and a documented exit code; mutating commands require `--confirm` and support
+`--dry-run`.
+
+## Agent guide
+
+- [AGENTS.md](AGENTS.md): how to drive the CLI safely — safety posture, command surface, worked examples.
+- [CLI-CONTRACT.md](CLI-CONTRACT.md): the JSON envelope, exit-code table, and dry-run/confirm guard rules.
+
+## Docs
+
+- [README.md](README.md): what the project is, the environment table, and the local stack.
+- [RECOVERY.md](RECOVERY.md): the human disaster-recovery runbook.
+- [POLICY.md](POLICY.md): the backup policy schema (groups, tiers, restore modes).

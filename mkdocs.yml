@@ -25,6 +25,7 @@ nav:
   - Design: DESIGN.md
   - Local stack: STACK.md
   - CLI contract: CLI-CONTRACT.md
+  - Agent guide: AGENTS.md
   - Orchestrators:
     - Dagster: orchestrator/README.md
     - Airflow: airflow/README.md
