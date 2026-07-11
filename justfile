@@ -78,6 +78,10 @@ airflow-standalone:
 cli-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_cli.py
 
+# MCP: read-only round trip against the operator server (needs the [mcp] extra + a backup)
+mcp-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_mcp.py
+
 # Airflow: backup -> verify -> restore -> prune against the stack (dag.test, in-process)
 airflow-smoke:
     airflow/.venv/bin/python airflow/smoke_e2e.py

@@ -25,6 +25,9 @@ k8s = ["dagster-k8s>=0.24"]
 # Cloud backends (#52) — install only the one you use; each SDK is lazy-imported.
 azure = ["azure-storage-blob>=12"]
 gcp = ["google-cloud-storage>=2"]
+# Operator MCP server (#58 P5) — only needed to run `neo4j-backup-mcp`; the tool logic itself
+# (neo4j_backup_mcp.tools) is pure and needs none of this.
+mcp = ["mcp>=1.2"]
 # Airflow adapter deps are installed with Airflow's constraints (see airflow/README.md);
 # this extra documents them. neo4j_backup_core needs only neo4j/boto3/pydantic/pyyaml.
 airflow = [
@@ -38,6 +41,7 @@ airflow = [
 # so it installs with the base deps (no orchestrator required).
 [project.scripts]
 neo4j-backup = "neo4j_backup_cli.__main__:main"
+neo4j-backup-mcp = "neo4j_backup_mcp.server:main"   # operator MCP server (needs the [mcp] extra)
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -48,7 +52,7 @@ version = {attr = "neo4j_backup_core.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["neo4j_backup_core*", "neo4j_backup_dagster*", "neo4j_backup_airflow*", "neo4j_backup_cli*"]
+include = ["neo4j_backup_core*", "neo4j_backup_dagster*", "neo4j_backup_airflow*", "neo4j_backup_cli*", "neo4j_backup_mcp*"]
 
 # `dagster dev` and the code-location entry resolve the Definitions from here.
 [tool.dagster]
