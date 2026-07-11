@@ -30,12 +30,9 @@ def _log(msg: str) -> None:
 
 
 def _run_admin(runner):
-    """Subprocess execution of one neo4j-admin command, with the runner's env; raises on failure.
-    neo4j-admin's stdout is redirected to stderr so the CLI's stdout stays a clean JSON envelope
-    (the #60 contract) — its progress/logging is diagnostic, not the result."""
-    def run(cmd):
-        subprocess.run(cmd, check=True, env={**os.environ, **runner.env()}, stdout=sys.stderr)
-    return run
+    """Subprocess execution of neo4j-admin (shared with the MCP server via `core.env`); its stdout
+    goes to stderr so the CLI's stdout stays a clean JSON envelope (the #60 contract)."""
+    return env.subprocess_admin(runner, stdout=sys.stderr)
 
 
 def _group(args):

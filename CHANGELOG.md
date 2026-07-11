@@ -7,6 +7,11 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-11
+
+Scheduler-agnostic reach: a `neo4j-backup` CLI, CI recipes, an agent guide, and an optional
+operator MCP server — all thin over one shared engine (epic #58).
+
 ### Added
 - **Operator MCP server** (#58 P5) — `neo4j-backup-mcp` exposes the operations as
   [MCP](https://modelcontextprotocol.io) tools so an operator drives DR/status through an agent
@@ -108,6 +113,7 @@ First tagged release. Validated end to end against a real Neo4j Enterprise + obj
 - Dagster `prune` `list_text_keys` delegation; `RUNNER_NEO4J_ADMIN` wiring.
 - Pinned `grpcio-health-checking<1.82` (protobuf gencode/runtime drift).
 
-[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/lex00/neo4j-backup/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/lex00/neo4j-backup/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lex00/neo4j-backup/releases/tag/v0.1.0

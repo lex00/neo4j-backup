@@ -55,7 +55,7 @@ Mutating (only with `NEO4J_BACKUP_MCP_MODE=read-write`; each needs `confirm=true
 Install the extra and point your agent at the server over stdio:
 
 ```bash
-pip install "git+https://github.com/lex00/neo4j-backup.git@v0.2.0#subdirectory=orchestrator"[mcp]
+pip install "neo4j-backup-dagster[mcp] @ git+https://github.com/lex00/neo4j-backup@v0.3.0#subdirectory=orchestrator"
 ```
 
 Agent client config (e.g. Claude Desktop / Claude Code `mcpServers`):

@@ -117,7 +117,7 @@ shell — CI, cron, or by hand. It is a third adapter over `neo4j_backup_core`, 
 installs with the base package (not on PyPI — pin a tag, or vendor and `pip install ./orchestrator`):
 
 ```bash
-pip install "git+https://github.com/lex00/neo4j-backup.git@v0.2.0#subdirectory=orchestrator"
+pip install "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0.3.0#subdirectory=orchestrator"
 
 neo4j-backup --json targets                    # what the policy covers
 neo4j-backup --json backup demo                # back up a group

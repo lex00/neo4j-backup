@@ -27,7 +27,7 @@ variables:
 .neo4j-backup:
   before_script:
     # Not on PyPI — install from a pinned tag (or vendor and `pip install ./orchestrator`).
-    - pip install "git+https://github.com/lex00/neo4j-backup.git@v0.2.0#subdirectory=orchestrator"
+    - pip install "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0.3.0#subdirectory=orchestrator"
 
 .backup:
   extends: .neo4j-backup

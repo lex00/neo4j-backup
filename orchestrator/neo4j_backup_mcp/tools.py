@@ -14,7 +14,6 @@ Two tiers:
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import time
 
@@ -31,10 +30,8 @@ def _layout():
 
 
 def _run_admin(runner):
-    def run(cmd):
-        # neo4j-admin output to stderr; MCP results are the return value, not stdout text
-        subprocess.run(cmd, check=True, env={**os.environ, **runner.env()}, stdout=sys.stderr)
-    return run
+    # neo4j-admin output to stderr so it never corrupts the MCP stdio protocol on stdout
+    return env.subprocess_admin(runner, stdout=sys.stderr)
 
 
 def _iso(m):
@@ -158,7 +155,7 @@ def run_restore(group: str, until: str | None = None, replace: bool = False,
     if replace and plan["drops"] and verify_first:
         runner = env.runner()
         run = _run_admin(runner)
-        for m in g.names:  # prove the backups are restorable BEFORE dropping anything
+        for m in plan["drops"]:  # prove each to-be-DROPPED db's backup restores BEFORE dropping it
             ops.verify_target(run, store, runner, layout, g.id, m, upload=_UPLOAD, staging=_STAGING)
         verified = True
     out = ops.restore_group(neo, store, g, layout, restore_until=until, replace=replace,
