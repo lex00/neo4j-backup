@@ -14,6 +14,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   `neo4j-backup` CLI (#58) and the optional MCP server build to; shipped before any CLI code so the
   subcommands are written against a fixed contract.
 
+### Changed
+- **Shared op bodies factored into `neo4j_backup_core.ops`** (#58 P1) — the backup / aggregate /
+  verify / prune / restore (alias-swap + by-name) / metadata / system-backup logic, plus the
+  `BACKUP_UPLOAD=pipeline` routing, lived in near-duplicate form in both the Dagster and Airflow
+  adapters. It now lives once in core, parameterized by a `run_admin` callable + client handles, so
+  both adapters (and the forthcoming CLI) call one implementation. Behaviour unchanged.
+
 ## [0.2.0] — 2026-07-11
 
 ### Added

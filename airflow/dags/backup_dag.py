@@ -11,7 +11,8 @@ from datetime import datetime
 from airflow.sdk import dag, task
 
 from neo4j_backup_airflow import config, upload
-from neo4j_backup_core import paths
+from neo4j_backup_airflow.execution import run_admin
+from neo4j_backup_core import ops, paths
 from neo4j_backup_core.policy import load_policy
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
@@ -19,17 +20,15 @@ _layout = paths.get_layout()
 
 
 def backup_one(group_alias: str, kind: str) -> dict:
-    """Resolve the alias's live physical and back it up to its per-store prefix."""
+    """Resolve the alias's live physical and back it up to its per-store prefix — via the shared
+    `neo4j_backup_core.ops.backup_target` (same code path as the Dagster asset and the CLI)."""
     group_id, alias = group_alias.split("/", 1)
     neo, store, runner = config.neo4j(), config.store(), config.runner()
-    # Accept either an alias (-> its current target) or a physical database name directly.
-    physical = neo.resolve_physical(alias)
-    if not physical:
-        raise RuntimeError(f"{alias!r} resolves to no physical database — bootstrap the group first")
-    prefix = _layout.physical_prefix(group_id, alias, physical)
-    # admin (direct s3://) or pipeline (local + boto3 upload with SSE-KMS) per BACKUP_UPLOAD.
-    artifact = upload.run_backup(runner, store, physical, prefix, kind)
-    return {"group": group_id, "alias": alias, "physical": physical, "artifact": artifact}
+    try:
+        return ops.backup_target(run_admin, neo, store, runner, _layout, group_id, alias, kind,
+                                 upload=upload.BACKUP_UPLOAD, staging=upload.STAGING)
+    except ops.OpError as e:
+        raise RuntimeError(str(e))
 
 
 def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str):

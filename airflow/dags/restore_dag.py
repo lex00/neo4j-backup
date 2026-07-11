@@ -15,7 +15,7 @@ from datetime import datetime
 from airflow.sdk import Param, dag, get_current_context, task
 
 from neo4j_backup_airflow import config
-from neo4j_backup_core import cutover, naming, paths
+from neo4j_backup_core import naming, ops, paths
 from neo4j_backup_core.policy import load_policy
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
@@ -56,35 +56,20 @@ def neo4j_restore():
 
     @task
     def seed(plan: dict, name: str) -> dict:
-        store, neo = config.store(), config.neo4j()
+        # Per-member seed via the shared core op — Airflow maps this across tasks (parallel), so
+        # each validates its own artifact before its own drop (the Dagster/CLI path pre-validates
+        # the whole group). One group-wide timestamp (plan["ts"]) keeps alias-swap physicals aligned.
         group = load_policy(config.policy_path()).group(plan["group_id"])
-        key = store.latest_artifact_key(_layout.alias_prefix(plan["group_id"], name))
-        if not key:
-            raise RuntimeError(f"no artifact for {plan['group_id']}/{name} — back up first")
-        if plan["mode"] == "by-name":
-            if neo.database_exists(name):
-                if not plan["replace"]:
-                    raise RuntimeError(f"database {name!r} exists; set replace=true to DROP+recreate (destructive)")
-                neo.drop_database(name)
-            neo.seed_database(name, store.uri(key), restore_until=plan["restore_until"],
-                              topology=group.topology_for(name), cypher_version=_SEED_CYPHER_VERSION)
-            return {"name": name, "mode": "by-name"}
-        old = neo.alias_target(name)  # captured before cutover (for external routing #17)
-        newdb = naming.physical(name, plan["ts"])
-        neo.seed_database(newdb, store.uri(key), restore_until=plan["restore_until"],
-                          topology=group.topology_for(name), cypher_version=_SEED_CYPHER_VERSION)
-        return {"alias": name, "newdb": newdb, "old": old, "mode": "alias-swap"}
+        try:
+            return ops.seed_member(config.neo4j(), config.store(), group, _layout, name,
+                                   restore_until=plan["restore_until"], replace=plan["replace"],
+                                   cypher_version=_SEED_CYPHER_VERSION, ts=plan["ts"], log=print)
+        except ops.OpError as e:
+            raise RuntimeError(str(e))
 
     @task
     def swap(seeded: list[dict]):  # barrier: runs once, after every seed completes
-        neo = config.neo4j()
-        strategy = cutover.from_env()  # alias-swap (default) or external routing (#17)
-        for s in seeded:
-            if s.get("mode") == "by-name":
-                print(f"restored {s['name']}")
-                continue
-            strategy.cutover(neo, s["alias"], s["newdb"], s.get("old"))
-            print(f"cutover {s['alias']} -> {s['newdb']}")
+        ops.cutover_seeded(config.neo4j(), seeded, log=print)
 
     p = plan()
     swap(seed.partial(plan=p).expand(name=members(p)))

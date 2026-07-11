@@ -10,7 +10,7 @@ import os
 
 import dagster as dg
 
-from neo4j_backup_core import cutover, metadata, naming, paths
+from neo4j_backup_core import ops, paths
 from neo4j_backup_core.policy import load_policy, parse_partition_key
 from .resources import Neo4jResource, ObjectStoreResource, RunnerResource
 
@@ -55,47 +55,17 @@ def _run_admin(context, runner, command, subprocess_client, env=None):
         subprocess_client.run(command=command, env=env, context=context)
 
 
-def _run_backup(context, runner, store, subprocess_client, database, prefix, kind):
-    """Run neo4j-admin backup and return the artifact key. admin mode -> neo4j-admin writes
-    to s3:// directly. pipeline mode -> neo4j-admin writes to local staging, then the pipeline
-    uploads to S3 (SSE-KMS via write_args) for buckets that deny neo4j-admin's header-less
-    PutObject. Subprocess mode. (aggregate/verify still write via neo4j-admin — see #39.)"""
-    if BACKUP_UPLOAD == "pipeline":
-        stage = f"{(UPLOAD_STAGING_PATH or runner.scratch_path).rstrip('/')}/_stage/{database}"
-        os.makedirs(stage, exist_ok=True)
-        cmd = runner.backup_command(database, stage, kind=kind)
-        _run_admin(context, runner, cmd, subprocess_client, env=runner.env())
-        return store.upload_backups(stage, prefix)  # SSE-KMS PUT, then remove local
-    to_path = store.uri(prefix)
-    cmd = runner.backup_command(database, to_path, kind=kind)
-    _run_admin(context, runner, cmd, subprocess_client, env=runner.env())
-    return store.latest_artifact_key(prefix)
-
-
-def _stage(runner, tag, name):
-    return f"{(UPLOAD_STAGING_PATH or runner.scratch_path).rstrip('/')}/{tag}/{name}"
-
-
-def _run_aggregate(context, runner, store, subprocess_client, physical, prefix):
-    """Collapse the chain at `prefix` in place; return the recovered-full key. pipeline mode
-    aggregates on local disk and syncs back via boto3 (SSE-KMS) — neo4j-admin can't send it."""
-    if BACKUP_UPLOAD == "pipeline":
-        stage = _stage(runner, "_agg", physical)
-        store.download_prefix(prefix, stage)
-        _run_admin(context, runner, runner.aggregate_command(physical, stage),
-                   subprocess_client, env=runner.env())
-        return store.sync_up(stage, prefix)
-    _run_admin(context, runner, runner.aggregate_command(physical, store.uri(prefix)),
-               subprocess_client, env=runner.env())
-    return store.latest_artifact_key(prefix)
+def _admin(context, runner, subprocess_client):
+    """Bind a `run_admin(cmd)` callable for `neo4j_backup_core.ops`: run one neo4j-admin command
+    via Pipes (subprocess or k8s) with the runner's environment. The op bodies live in core; this
+    is only the Dagster-specific execution + env binding."""
+    return lambda cmd: _run_admin(context, runner, cmd, subprocess_client, env=runner.env())
 
 
 # --- storage-key layout: an injected PathLayout instance (#21), not module aliases. A
 # deployment selects a custom scheme with PATH_LAYOUT=module.Class; default is unchanged.
+# The ops in `neo4j_backup_core.ops` take this instance and call its prefix methods directly.
 _layout = paths.get_layout()
-_alias_prefix = _layout.alias_prefix
-_physical_prefix = _layout.physical_prefix
-_physical_of_key = _layout.physical_of_key
 
 
 # --- Backup ----------------------------------------------------------------------
@@ -115,18 +85,18 @@ def backup(
     """Back up the physical database the alias currently targets, into that physical's
     own prefix — so repeated backups of the alias form a real chain (same store)."""
     group_id, alias = parse_partition_key(context.partition_key)
-    # Accept either an alias (-> its current target) or a physical database name directly.
-    physical = neo4j.resolve_physical(alias)
-    if not physical:
-        raise dg.Failure(f"{alias!r} resolves to no physical database — bootstrap the group first")
-
-    prefix = _physical_prefix(group_id, alias, physical)
-    artifact = _run_backup(context, runner, store, pipes_subprocess_client,
-                           physical, prefix, config.kind)
+    try:
+        out = ops.backup_target(
+            _admin(context, runner, pipes_subprocess_client), neo4j, store, runner, _layout,
+            group_id, alias, config.kind, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
+        )
+    except ops.OpError as e:
+        raise dg.Failure(str(e))
+    artifact = out["artifact"]
     size = store.object_size(artifact) if artifact else 0
     return dg.MaterializeResult(
         metadata={
-            "group": group_id, "alias": alias, "physical": physical,
+            "group": group_id, "alias": alias, "physical": out["physical"],
             "kind": config.kind, "artifact": artifact or "",
             "bytes": dg.MetadataValue.int(size), "upload": BACKUP_UPLOAD,
         }
@@ -149,13 +119,14 @@ def aggregate(
     """Collapse the live physical's chain into one recovered full, IN PLACE. RTO lever
     and retention — trades intra-chain PITR, so run on a retention cadence."""
     group_id, alias = parse_partition_key(context.partition_key)
-    head = store.latest_artifact_key(_alias_prefix(group_id, alias))
-    if not head:
-        raise dg.Failure(f"no artifact for {group_id}/{alias}")
-    physical = _physical_of_key(group_id, alias, head)
-    prefix = _physical_prefix(group_id, alias, physical)
-    full = _run_aggregate(context, runner, store, pipes_subprocess_client, physical, prefix)
-    return dg.MaterializeResult(metadata={"physical": physical, "full": full or ""})
+    try:
+        out = ops.aggregate_target(
+            _admin(context, runner, pipes_subprocess_client), store, runner, _layout,
+            group_id, alias, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
+        )
+    except ops.OpError as e:
+        raise dg.Failure(str(e))
+    return dg.MaterializeResult(metadata={"physical": out["physical"], "full": out["full"] or ""})
 
 
 # --- Verify (consistency check, NON-destructive) ---------------------------------
@@ -170,38 +141,16 @@ def verify(
     copy it to a scratch prefix, aggregate the COPY into a recovered full, and
     `database check` it. Non-zero exit raises (fail). Cleans up the copy."""
     group_id, alias = parse_partition_key(context.partition_key)
-    head = store.latest_artifact_key(_alias_prefix(group_id, alias))
-    if not head:
-        raise dg.Failure(f"no artifact for {group_id}/{alias}")
-    physical = _physical_of_key(group_id, alias, head)
-    src = _physical_prefix(group_id, alias, physical)
-    if BACKUP_UPLOAD == "pipeline":
-        # verify entirely on local disk — no S3 scratch writes (neo4j-admin can't SSE-KMS them)
-        import shutil
-        stage = _stage(runner, "_verify", physical)
-        copied = store.download_prefix(src, stage)
-        try:
-            _run_admin(context, runner, runner.aggregate_command(physical, stage),
-                       pipes_subprocess_client, env=runner.env())
-            full = next(f for f in sorted(os.listdir(stage)) if f.endswith(".backup"))
-            _run_admin(context, runner, runner.check_command(physical, os.path.join(stage, full)),
-                       pipes_subprocess_client, env=runner.env())
-        finally:
-            shutil.rmtree(stage, ignore_errors=True)
-    else:
-        scratch = f"_verify/{group_id}/{physical}/"
-        try:
-            copied = store.copy_prefix(src, scratch)
-            _run_admin(context, runner, runner.aggregate_command(physical, store.uri(scratch)),
-                       pipes_subprocess_client, env=runner.env())
-            full = store.latest_artifact_key(scratch)
-            _run_admin(context, runner, runner.check_command(physical, store.uri(full)),
-                       pipes_subprocess_client, env=runner.env())
-        finally:
-            store.delete_prefix(scratch)
-    context.log.info(f"verified {physical}: consistent ({copied} artifacts checked)")
+    try:
+        out = ops.verify_target(
+            _admin(context, runner, pipes_subprocess_client), store, runner, _layout,
+            group_id, alias, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
+        )
+    except ops.OpError as e:
+        raise dg.Failure(str(e))
+    context.log.info(f"verified {out['physical']}: consistent ({out['checked']} artifacts checked)")
     return dg.MaterializeResult(
-        metadata={"alias": alias, "physical": physical, "consistent": True}
+        metadata={"alias": alias, "physical": out["physical"], "consistent": True}
     )
 
 
@@ -211,36 +160,11 @@ def prune(context: dg.AssetExecutionContext, store: ObjectStoreResource):
     """Delete *.backup older than each group's retention_days, keeping the newest per
     alias (chain head). Production should `aggregate` an old chain into a full first so
     PITR coverage isn't lost; this age prune is chain-naive."""
-    from datetime import datetime, timedelta, timezone
-
-    policy = load_policy(POLICY_PATH)
-    now = datetime.now(timezone.utc)
-    deleted_total = 0
-    detail: dict[str, int] = {}
-    for g in policy.db_groups:
-        cutoff = now - timedelta(days=g.retention_days)
-        for a in g.names:
-            arts = store.list_artifacts(_alias_prefix(g.id, a))
-            if not arts:
-                continue
-            newest = max(arts, key=lambda t: t[2])[0]
-            stale = [k for (k, _s, m) in arts if m < cutoff and k != newest]
-            n = store.delete_keys(stale)
-            deleted_total += n
-            if n:
-                detail[f"{g.id}/{a}"] = n
-    meta_pruned = metadata.prune(store)  # keep the newest N DBMS metadata exports
-    deleted_total += meta_pruned
-    if meta_pruned:
-        detail["_dbms/metadata"] = meta_pruned
-    sysarts = sorted(store.list_artifacts(_layout.system_prefix()), key=lambda t: t[2])
-    sys_pruned = store.delete_keys([k for (k, _s, _m) in sysarts[:-14]])  # keep newest 14
-    deleted_total += sys_pruned
-    if sys_pruned:
-        detail["_dbms/system"] = sys_pruned
-    context.log.info(f"pruned {deleted_total} artifacts")
+    out = ops.prune(store, load_policy(POLICY_PATH), _layout)
+    context.log.info(f"pruned {out['deleted']} artifacts")
     return dg.MaterializeResult(
-        metadata={"deleted": deleted_total, **{k: dg.MetadataValue.int(v) for k, v in detail.items()}}
+        metadata={"deleted": out["deleted"],
+                  **{k: dg.MetadataValue.int(v) for k, v in out["detail"].items()}}
     )
 
 
@@ -254,10 +178,10 @@ def system_backup(
 ) -> dg.MaterializeResult:
     """Binary backup of the `system` database to the reserved `_dbms/system/` prefix (FULL).
     Restore is offline + node-local (path B) — see bootstrap/restore_system.sh, not a job."""
-    prefix = _layout.system_prefix()
-    key = _run_backup(context, runner, store, pipes_subprocess_client, "system", prefix, "FULL")
-    context.log.info(f"system backup -> {key}")
-    return dg.MaterializeResult(metadata={"key": key or ""})
+    out = ops.system_backup(_admin(context, runner, pipes_subprocess_client), store, runner,
+                            _layout, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH)
+    context.log.info(f"system backup -> {out['key']}")
+    return dg.MaterializeResult(metadata={"key": out["key"] or ""})
 
 
 # --- DBMS metadata export (#14): agentless users/roles/privileges/aliases ---------
@@ -269,12 +193,10 @@ def metadata_export(
 ) -> dg.MaterializeResult:
     """Capture the DBMS metadata layer as replayable Cypher (pure Bolt, no runner) and
     store it under the reserved `_dbms/` prefix. Restore is `metadata_restore`."""
-    ts = naming.ts()
-    key = _layout.metadata_key(ts)
-    cypher = metadata.render(metadata.capture(neo4j), ts=ts)
-    store.put_text(key, cypher)
-    context.log.info(f"metadata export -> {key} ({len(cypher)} bytes)")
-    return dg.MaterializeResult(metadata={"key": key, "bytes": dg.MetadataValue.int(len(cypher))})
+    out = ops.export_metadata(neo4j, store, _layout)
+    context.log.info(f"metadata export -> {out['key']} ({out['bytes']} bytes)")
+    return dg.MaterializeResult(
+        metadata={"key": out["key"], "bytes": dg.MetadataValue.int(out["bytes"])})
 
 
 class MetadataRestoreConfig(dg.Config):
@@ -288,11 +210,11 @@ def metadata_restore_op(
     neo4j: Neo4jResource,
     store: ObjectStoreResource,
 ):
-    key = config.key or store.latest_text_key(_layout.metadata_prefix())
-    if not key:
-        raise dg.Failure("no metadata artifact — materialize metadata_export first")
-    result = metadata.replay(neo4j, store.get_text(key))
-    context.log.info(f"replayed {result['applied']} statements from {key}; "
+    try:
+        result = ops.restore_metadata(neo4j, store, _layout, config.key)
+    except ops.OpError as e:
+        raise dg.Failure(str(e))
+    context.log.info(f"replayed {result['applied']} statements from {result['key']}; "
                      f"skipped {len(result['skipped'])}")
     return result
 
@@ -309,52 +231,6 @@ class RestoreConfig(dg.Config):
     replace: bool = False  # by-name mode only: DROP+recreate a target that already exists
 
 
-def _restore_alias_swap(context, config, neo4j, store, group):
-    """Seed a fresh physical per alias, then swap the alias to it (non-destructive)."""
-    ts = naming.ts()
-    planned: list[tuple[str, str, str | None]] = []
-    for alias in group.names:
-        key = store.latest_artifact_key(_alias_prefix(group.id, alias))
-        if not key:
-            raise dg.Failure(f"no artifact for {group.id}/{alias} — back up first")
-        newdb = naming.physical(alias, ts)
-        neo4j.seed_database(newdb, store.uri(key), restore_until=config.restore_until,
-                            topology=group.topology_for(alias), cypher_version=SEED_CYPHER_VERSION)
-        planned.append((alias, newdb, neo4j.alias_target(alias)))
-        context.log.info(f"seeded {newdb} <= {key}")
-    strategy = cutover.from_env()  # alias-swap (default) or external routing (#17)
-    for alias, newdb, old in planned:
-        strategy.cutover(neo4j, alias, newdb, old)
-        context.log.info(f"cutover {alias}: {old} -> {newdb}")
-    return planned
-
-
-def _restore_by_name(context, config, neo4j, store, group):
-    """Restore each database into its own name (#48): create-if-absent, or — with
-    config.replace — DROP+recreate an existing target (destructive; there is no rename, so no
-    non-destructive in-place). Resolve every artifact and check preconditions BEFORE any drop,
-    so a missing artifact or an unreplaceable existing target fails before anything is destroyed.
-    Full restorability assurance is the `verify` asset's job — run it first."""
-    plan: list[tuple[str, str, bool]] = []
-    for name in group.names:
-        key = store.latest_artifact_key(_alias_prefix(group.id, name))
-        if not key:
-            raise dg.Failure(f"no artifact for {group.id}/{name} — back up first")
-        exists = neo4j.database_exists(name)
-        if exists and not config.replace:
-            raise dg.Failure(
-                f"database {name!r} exists; set replace=true to DROP+recreate it (destructive)")
-        plan.append((name, key, exists))
-    for name, key, exists in plan:
-        if exists:
-            neo4j.drop_database(name)
-            context.log.info(f"dropped {name} (replace)")
-        neo4j.seed_database(name, store.uri(key), restore_until=config.restore_until,
-                            topology=group.topology_for(name), cypher_version=SEED_CYPHER_VERSION)
-        context.log.info(f"restored {name} <= {key}")
-    return [name for name, _k, _e in plan]
-
-
 @dg.op
 def restore_group_op(
     context: dg.OpExecutionContext,
@@ -363,9 +239,14 @@ def restore_group_op(
     store: ObjectStoreResource,
 ):
     group = load_policy(POLICY_PATH).group(config.group_id)
-    if group.restore_mode == "by-name":
-        return _restore_by_name(context, config, neo4j, store, group)
-    return _restore_alias_swap(context, config, neo4j, store, group)
+    try:
+        out = ops.restore_group(
+            neo4j, store, group, _layout, restore_until=config.restore_until,
+            replace=config.replace, cypher_version=SEED_CYPHER_VERSION, log=context.log.info,
+        )
+    except ops.OpError as e:
+        raise dg.Failure(str(e))
+    return out["members"]
 
 
 @dg.job
