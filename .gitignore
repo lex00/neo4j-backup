@@ -14,3 +14,4 @@ _site/
 # diagrams/*.svg
 airflow/.venv/
 .airflow_home/
+.seed/
