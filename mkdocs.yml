@@ -22,6 +22,7 @@ nav:
   - Home: README.md
   - Policy: POLICY.md
   - Recovery: RECOVERY.md
+  - Bulk import: IMPORT.md
   - Design: DESIGN.md
   - Local stack: STACK.md
   - CLI contract: CLI-CONTRACT.md

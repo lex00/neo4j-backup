@@ -76,6 +76,15 @@ def cmd_metadata_export(args):
     return envelope("metadata-export", ok=True, result=out), Exit.OK
 
 
+def cmd_import(args):
+    # Bulk import raw data into an offline store on the loader (#16). source_args is a raw passthrough
+    # to neo4j-admin (a leading `--` separator, if the operator adds one, is dropped). See IMPORT.md.
+    source = args.source_args[1:] if args.source_args[:1] == ["--"] else args.source_args
+    runner = env.runner()
+    out = ops.import_database(_run_admin(runner), runner, args.database, source)
+    return envelope("import", ok=True, result=out), Exit.OK
+
+
 # --- guarded commands (mutating: dry-run previews, --confirm to apply) -------------------------
 
 def _guard(op, group, blast, confirmed, dry_run):
@@ -183,6 +192,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     t = sub.add_parser("targets", help="list the policy's group/member targets")
     t.set_defaults(func=cmd_targets)
+
+    im = sub.add_parser("import", help="bulk-import raw data into an offline store on the loader (#16)")
+    im.add_argument("database", help="the physical database name to import into (see IMPORT.md)")
+    im.add_argument("source_args", nargs=argparse.REMAINDER,
+                    help="passthrough to neo4j-admin (e.g. --nodes=/path.csv --relationships=/rel.csv)")
+    im.set_defaults(func=cmd_import)
 
     m = sub.add_parser("metadata", help="DBMS metadata (users/roles/privileges/aliases)")
     msub = m.add_subparsers(dest="metadata_command", required=True, metavar="<export|restore>")

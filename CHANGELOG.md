@@ -7,6 +7,16 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Added
+- **Bulk import** (#16) — `neo4j-backup import <database> -- <neo4j-admin import args>` builds an
+  offline store from raw CSV/Parquet on ephemeral hardware (a passthrough over `neo4j-admin database
+  import full`, database-first so multi-value `--nodes` can't swallow it). It's the first step of the
+  off-cluster tail: import into a **fresh loader's default database** → adopt on first start →
+  online-backup to a native `.backup` → seed the real cluster (all existing commands). `IMPORT.md`
+  documents the pattern, including the key finding that importing into an *already-registered*
+  database **quarantines** the store (validated on Neo4j 2026.05 — use a fresh instance's default
+  db). `just import-smoke` validates the whole tail end to end with a throwaway loader container.
+
 ### Changed
 - **Docs coherency** — `DESIGN.md` (§6.10), `RECOVERY.md`, and `STACK.md` now reference the CLI and
   MCP front-ends over the shared core, not just Dagster/Airflow; the mkdocs site stages the CI

@@ -489,6 +489,17 @@ class BackupRunner:
             f"--max-off-heap-memory={max_off_heap}", database,
         ]
 
+    def import_command(self, database: str, source_args: list) -> list:
+        """Off-cluster bulk import (#16): `neo4j-admin database import full <database> <source_args…>`.
+        `source_args` (the `--nodes`/`--relationships`/options) is a **passthrough** — dataset-specific
+        and sensitive, so we structure the call but do not model the args. The database comes **first**:
+        `--nodes`/`--relationships` are multi-value, so a trailing database would be swallowed as an
+        extra file. Runs on the loader (writes the offline store into the DBMS data dir)."""
+        return [
+            *self.exec_prefix, self.neo4j_admin, "database", "import", "full",
+            database, *source_args,
+        ]
+
     def env(self) -> dict:
         return {"HEAP_SIZE": self.heap_size}
 

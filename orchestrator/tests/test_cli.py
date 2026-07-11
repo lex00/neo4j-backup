@@ -50,6 +50,17 @@ def test_targets_conformant():
     assert env["result"]["targets"] == ["demo/orders", "demo/customers"]
 
 
+def test_import_passes_through_and_is_conformant(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(cli.env, "runner", lambda: object())
+    monkeypatch.setattr(cli.ops, "import_database",
+                        lambda run, runner, db, src: seen.update(db=db, src=src) or {"database": db, "argv": []})
+    env, code = run(["import", "orders-x", "--nodes=/n.csv", "--relationships=/r.csv"])
+    assert_conformant(env, expect_ok=True)
+    assert_exit(code, Exit.OK)
+    assert seen == {"db": "orders-x", "src": ["--nodes=/n.csv", "--relationships=/r.csv"]}
+
+
 def test_backup_runs_each_member(monkeypatch):
     seen = []
     monkeypatch.setattr(cli.ops, "backup_target",
