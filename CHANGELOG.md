@@ -37,6 +37,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   `config` re-exports it).
 
 ### Changed
+- **README positioning + CLI reference** (#58 P4) — "Who this is for" now includes the CI/cron path;
+  a "Front-ends — pick by what you already run" table frames Dagster/Airflow vs the CLI+CI option;
+  a "Command-line interface" section documents install + every command; and the documentation map
+  lists `CLI-CONTRACT.md`, `CI.md`, and `AGENTS.md`.
 - **Shared op bodies factored into `neo4j_backup_core.ops`** (#58 P1) — the backup / aggregate /
   verify / prune / restore (alias-swap + by-name) / metadata / system-backup logic, plus the
   `BACKUP_UPLOAD=pipeline` routing, lived in near-duplicate form in both the Dagster and Airflow

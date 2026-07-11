@@ -15,7 +15,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 # Docs + recipes that invoke the CLI. All real invocations use `--json`, which anchors the scan and
 # keeps it clear of prose, headings, and the `<command>` template placeholder.
-DOCS = ["AGENTS.md", "llms.txt", "CI.md",
+DOCS = ["AGENTS.md", "llms.txt", "CI.md", "README.md",
         "examples/ci/github-actions.yml", "examples/ci/gitlab-ci.yml",
         "examples/ci/forgejo-actions.yml", "examples/ci/README.md"]
 
