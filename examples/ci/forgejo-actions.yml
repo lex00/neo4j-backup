@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0.3.0#subdirectory=orchestrator"
+      - run: pip install "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0.4.0#subdirectory=orchestrator"
       - name: Back up
         run: |
           kind="${{ github.event.schedule == '17 3 * * 0' && 'FULL' || 'DIFF' }}"

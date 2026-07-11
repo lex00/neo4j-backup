@@ -7,6 +7,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-11
+
+Bulk import off-cluster, plus a docs-coherency pass across the front-end story.
+
 ### Added
 - **Bulk import** (#16) — `neo4j-backup import <database> -- <neo4j-admin import args>` builds an
   offline store from raw CSV/Parquet on ephemeral hardware (a passthrough over `neo4j-admin database
@@ -128,7 +132,8 @@ First tagged release. Validated end to end against a real Neo4j Enterprise + obj
 - Dagster `prune` `list_text_keys` delegation; `RUNNER_NEO4J_ADMIN` wiring.
 - Pinned `grpcio-health-checking<1.82` (protobuf gencode/runtime drift).
 
-[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/lex00/neo4j-backup/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/lex00/neo4j-backup/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/lex00/neo4j-backup/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lex00/neo4j-backup/releases/tag/v0.1.0

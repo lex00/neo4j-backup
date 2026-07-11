@@ -48,7 +48,7 @@ credentials in your CI's secret store and the rest in plain variables:
 Not on PyPI — pin a git tag (or vendor the source and `pip install ./orchestrator`):
 
 ```
-pip install "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0.3.0#subdirectory=orchestrator"
+pip install "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0.4.0#subdirectory=orchestrator"
 ```
 
 Add a cloud extra if you use Azure/GCS — put it on the package name:
