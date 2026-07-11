@@ -39,6 +39,10 @@ services:
       AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
       AWS_REGION: "${AWS_REGION}"
       AWS_ENDPOINT_URL_S3: "${AWS_ENDPOINT_URL_S3}"
+      # Enable file:// seeding (#52 phase 4): validate restore cloud-agnostically from a
+      # local artifact on /seed — the byte-identical .backup, no cloud fetch. CloudSeedProvider
+      # keeps the s3:// path.
+      NEO4J_dbms_databases_seed__from__uri__providers: "CloudSeedProvider,FileSeedProvider"
     ports:
       - "7474:7474"      # Neo4j Browser / HTTP
       - "7687:7687"      # Bolt
@@ -49,6 +53,7 @@ services:
     networks: [neo4j, ops]
     volumes:
       - neo4j-data:/data
+      - ../.seed:/seed       # #52 phase 4: file:// restore validation (repo-root .seed on host)
     healthcheck:
       test: ["CMD-SHELL", "cypher-shell -u neo4j -p $${DB_PASSWORD} 'RETURN 1' || exit 1"]
       interval: 10s

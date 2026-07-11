@@ -111,3 +111,7 @@ release version:
      git diff --quiet && git diff --cached --quiet || { echo "!! working tree not clean — commit the bump first" >&2; exit 1; }; \
      echo ">> {{version}} looks release-ready. Tag + push (from main, CI green):"; \
      echo "     git tag v{{version}} && git push origin v{{version}}"
+
+# validate restore cloud-agnostically via file:// seed (#52) — needs the stack + a backup
+file-restore-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_file_restore.py

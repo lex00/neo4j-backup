@@ -81,6 +81,17 @@ Teams that don't use aliases set a group's `restore_mode: by-name` (POLICY.md) a
 so swapping a freshly-restored copy into an existing name isn't possible without an alias.
 If you need non-destructive restore, use `alias-swap` (that indirection is the whole point).
 
+## Seed from a local file (`file://`)
+
+`seedURI` also accepts a **local/mounted** artifact — `CREATE DATABASE foo OPTIONS { seedURI:
+'file:/seed/foo.backup' }` (FileSeedProvider; enable it via
+`dbms.databases.seed_from_uri_providers`, absolute path). The `.backup` is byte-identical
+regardless of which cloud produced it, so this is both a DR path (restore from a mounted backup)
+and how the pipeline validates restore **cloud-agnostically**: download the artifact from any
+backend (S3/Azure/GCS) to the node's filesystem, then seed via `file://` — no cloud fetch, no
+per-cloud emulator needed (`just file-restore-smoke`, #52). PITR (`seedRestoreUntil`) works on
+`file://` too.
+
 **Cluster topology.** When the group declares a `topology:` (POLICY.md), the orchestrator
 adds it to the seed so the restored physical comes up with the intended redundancy rather
 than the DBMS default — otherwise a restore after losing servers can silently reduce your
