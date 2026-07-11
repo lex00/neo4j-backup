@@ -34,6 +34,11 @@ airflow = [
   "apache-airflow-providers-neo4j",
 ]
 
+# Scheduler-agnostic CLI over the core (#58 P1) — subprocess execution, stdlib argparse only,
+# so it installs with the base deps (no orchestrator required).
+[project.scripts]
+neo4j-backup = "neo4j_backup_cli.__main__:main"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -43,7 +48,7 @@ version = {attr = "neo4j_backup_core.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["neo4j_backup_core*", "neo4j_backup_dagster*", "neo4j_backup_airflow*"]
+include = ["neo4j_backup_core*", "neo4j_backup_dagster*", "neo4j_backup_airflow*", "neo4j_backup_cli*"]
 
 # `dagster dev` and the code-location entry resolve the Definitions from here.
 [tool.dagster]

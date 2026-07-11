@@ -1,3 +1,4 @@
 neo4j_backup_airflow
+neo4j_backup_cli
 neo4j_backup_core
 neo4j_backup_dagster

@@ -110,7 +110,8 @@ def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: s
             "artifact": artifact}
 
 
-def _head_physical(store, layout, group_id: str, alias: str) -> tuple[str, str]:
+def head_physical(store, layout, group_id: str, alias: str) -> tuple[str, str]:
+    """The alias's chain head key and its physical name, or raise if the alias has no backup."""
     head = store.latest_artifact_key(layout.alias_prefix(group_id, alias))
     if not head:
         raise OpError(f"no artifact for {group_id}/{alias}")
@@ -120,7 +121,7 @@ def _head_physical(store, layout, group_id: str, alias: str) -> tuple[str, str]:
 def aggregate_target(run_admin: RunAdmin, store, runner, layout, group_id: str, alias: str,
                      *, upload: str = "admin", staging: str | None = None) -> dict:
     """Collapse the live physical's chain into one recovered full, IN PLACE (RTO/retention)."""
-    _head, physical = _head_physical(store, layout, group_id, alias)
+    _head, physical = head_physical(store, layout, group_id, alias)
     prefix = layout.physical_prefix(group_id, alias, physical)
     full = run_aggregate(run_admin, runner, store, physical, prefix, upload=upload, staging=staging)
     return {"alias": alias, "physical": physical, "full": full}
@@ -129,10 +130,10 @@ def aggregate_target(run_admin: RunAdmin, store, runner, layout, group_id: str, 
 def verify_target(run_admin: RunAdmin, store, runner, layout, group_id: str, alias: str,
                   *, upload: str = "admin", staging: str | None = None) -> dict:
     """Non-destructive consistency check of the latest backup for the alias."""
-    _head, physical = _head_physical(store, layout, group_id, alias)
+    _head, physical = head_physical(store, layout, group_id, alias)
     src = layout.physical_prefix(group_id, alias, physical)
     scratch = f"_verify/{group_id}/{physical}/"
-    checked = run_verify(run_admin, store, runner, physical, src, scratch,
+    checked = run_verify(run_admin, runner, store, physical, src, scratch,
                          upload=upload, staging=staging)
     return {"alias": alias, "physical": physical, "consistent": True, "checked": checked}
 
@@ -148,13 +149,25 @@ def system_backup(run_admin: RunAdmin, store, runner, layout,
 
 # --- retention prune (boto3 only) --------------------------------------------------------------
 
-def prune(store, policy, layout, *, keep_system: int = 14) -> dict:
+def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 14,
+          dry_run: bool = False) -> dict:
     """Delete `*.backup` older than each group's retention_days, keeping the newest per alias
-    (chain head); prune old DBMS metadata exports and keep the newest `keep_system` system fulls.
-    Chain-naive — aggregate an old chain into a full first to preserve PITR coverage."""
+    (chain head); keep the newest `keep_metadata` DBMS metadata exports and `keep_system` system
+    fulls. Chain-naive — aggregate an old chain into a full first to preserve PITR coverage.
+    `dry_run` enumerates the victims (`keys`) without deleting — the CLI's blast radius."""
     now = datetime.now(timezone.utc)
-    deleted = 0
+    victims: list[str] = []
     detail: dict[str, int] = {}
+
+    def _sweep(keys, label):
+        keys = list(keys)
+        if not keys:
+            return
+        detail[label] = len(keys)
+        victims.extend(keys)
+        if not dry_run:
+            store.delete_keys(keys)
+
     for g in policy.db_groups:
         cutoff = now - timedelta(days=g.retention_days)
         for a in g.names:
@@ -162,21 +175,14 @@ def prune(store, policy, layout, *, keep_system: int = 14) -> dict:
             if not arts:
                 continue
             newest = max(arts, key=lambda t: t[2])[0]
-            stale = [k for (k, _s, m) in arts if m < cutoff and k != newest]
-            n = store.delete_keys(stale)
-            deleted += n
-            if n:
-                detail[f"{g.id}/{a}"] = n
-    meta_pruned = metadata.prune(store)
-    deleted += meta_pruned
-    if meta_pruned:
-        detail["_dbms/metadata"] = meta_pruned
+            _sweep([k for (k, _s, m) in arts if m < cutoff and k != newest], f"{g.id}/{a}")
+    # DBMS metadata: keep the newest N (mirrors metadata.prune, but enumerable for dry-run)
+    marts = sorted(store.list_text_keys(layout.metadata_prefix()), key=lambda t: t[1])
+    _sweep([k for (k, _m) in (marts[:-keep_metadata] if keep_metadata > 0 else marts)],
+           "_dbms/metadata")
     sysarts = sorted(store.list_artifacts(layout.system_prefix()), key=lambda t: t[2])
-    sys_pruned = store.delete_keys([k for (k, _s, _m) in sysarts[:-keep_system]])
-    deleted += sys_pruned
-    if sys_pruned:
-        detail["_dbms/system"] = sys_pruned
-    return {"deleted": deleted, "detail": detail}
+    _sweep([k for (k, _s, _m) in sysarts[:-keep_system]], "_dbms/system")
+    return {"deleted": len(victims), "detail": detail, "keys": victims, "dry_run": dry_run}
 
 
 # --- DBMS metadata (pure Bolt, no runner) ------------------------------------------------------
@@ -274,3 +280,28 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
                                    cypher_version=cypher_version, ts=ts, log=log))
     cutover_seeded(neo4j, members, log=log)
     return {"mode": "alias-swap", "members": members}
+
+
+def plan_restore(neo4j, store, group, layout, *, replace: bool = False) -> dict:
+    """The blast radius of `restore_group` WITHOUT mutating: per member, the artifact that would be
+    used and what would happen — by-name `create` or `drop+recreate`, alias-swap seed + swap. Runs
+    the same preconditions (missing artifact, unreplaceable existing target) so a dry-run fails the
+    same way a real restore would. `drops` is the destructive surface (databases to be DROPped)."""
+    members: list[dict] = []
+    for name in group.names:
+        key = store.latest_artifact_key(layout.alias_prefix(group.id, name))
+        if not key:
+            raise OpError(f"no artifact for {group.id}/{name} — back up first")
+        if group.restore_mode == "by-name":
+            existed = neo4j.database_exists(name)
+            if existed and not replace:
+                raise OpError(
+                    f"database {name!r} exists; set replace=true to DROP+recreate it (destructive)")
+            members.append({"mode": "by-name", "name": name, "key": key,
+                            "action": "drop+recreate" if existed else "create",
+                            "drops": [name] if existed else []})
+        else:
+            members.append({"mode": "alias-swap", "alias": name, "key": key,
+                            "action": "seed new physical, then swap alias", "drops": []})
+    return {"mode": group.restore_mode, "members": members,
+            "drops": [d for m in members for d in m["drops"]]}
