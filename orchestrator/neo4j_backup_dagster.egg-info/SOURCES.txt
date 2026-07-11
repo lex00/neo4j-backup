@@ -21,8 +21,10 @@ neo4j_backup_dagster.egg-info/SOURCES.txt
 neo4j_backup_dagster.egg-info/dependency_links.txt
 neo4j_backup_dagster.egg-info/requires.txt
 neo4j_backup_dagster.egg-info/top_level.txt
+tests/test_azure.py
 tests/test_by_name.py
 tests/test_cutover.py
+tests/test_gcs.py
 tests/test_naming_parity.py
 tests/test_objectstore.py
 tests/test_paths.py

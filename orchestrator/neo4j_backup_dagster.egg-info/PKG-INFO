@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: neo4j-backup-dagster
-Version: 0.1.0
+Version: 0.2.0
 Summary: Policy-driven Neo4j backup/restore orchestration (Dagster code location)
 Requires-Python: >=3.10
 Requires-Dist: dagster>=1.8
@@ -15,6 +15,10 @@ Requires-Dist: pytest; extra == "dev"
 Requires-Dist: dagster-webserver; extra == "dev"
 Provides-Extra: k8s
 Requires-Dist: dagster-k8s>=0.24; extra == "k8s"
+Provides-Extra: azure
+Requires-Dist: azure-storage-blob>=12; extra == "azure"
+Provides-Extra: gcp
+Requires-Dist: google-cloud-storage>=2; extra == "gcp"
 Provides-Extra: airflow
 Requires-Dist: apache-airflow>=3; extra == "airflow"
 Requires-Dist: apache-airflow-providers-cncf-kubernetes; extra == "airflow"

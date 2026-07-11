@@ -12,9 +12,15 @@ apache-airflow-providers-cncf-kubernetes
 apache-airflow-providers-amazon
 apache-airflow-providers-neo4j
 
+[azure]
+azure-storage-blob>=12
+
 [dev]
 pytest
 dagster-webserver
+
+[gcp]
+google-cloud-storage>=2
 
 [k8s]
 dagster-k8s>=0.24
