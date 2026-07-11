@@ -6,6 +6,7 @@ these; the logic lives here once.
 from __future__ import annotations
 
 import json
+import os
 from contextlib import contextmanager
 from typing import Protocol, runtime_checkable
 
@@ -130,7 +131,7 @@ class ObjectStore(Protocol):
     def delete_keys(self, keys: list[str]) -> int: ...
     def copy_prefix(self, src_prefix: str, dst_prefix: str) -> int: ...
     def delete_prefix(self, prefix: str) -> int: ...
-    def s3_uri(self, key: str) -> str: ...
+    def uri(self, key: str) -> str: ...
     def upload_file(self, local_path: str, key: str) -> str: ...
     def upload_backups(self, local_dir: str, prefix: str, cleanup: bool = True) -> str | None: ...
     def download_prefix(self, prefix: str, local_dir: str) -> int: ...
@@ -144,12 +145,79 @@ class ObjectStore(Protocol):
 def object_store(bucket: str, endpoint_url: str | None = None, region: str = "us-east-1",
                  sse: str | None = None, sse_kms_key_id: str | None = None,
                  write_args_json: str = "{}", cloud: str | None = None) -> ObjectStore:
-    """Build the object-store backend. Today only S3 (boto3); `cloud` is reserved for the
-    Azure/GCP backends (#52) and ignored for now."""
+    """Build the object-store backend for `cloud` (aws (default) | azure; gcp later, #52)."""
+    if (cloud or "aws").lower() in ("azure", "az", "azb"):
+        return AzureObjectStore(bucket, endpoint_url, region, sse, sse_kms_key_id, write_args_json)
     return S3ObjectStore(bucket, endpoint_url, region, sse, sse_kms_key_id, write_args_json)
 
 
-class S3ObjectStore:
+class _BaseObjectStore:
+    """Cloud-agnostic composites (chains, prefixes, local<->store transfers) built on the
+    per-backend primitives. A backend subclass implements: `list_artifacts`, `object_size`,
+    `delete_keys`, `_copy`, `_download`, `upload_file`, `put_text`, `get_text`, `list_text_keys`,
+    `uri`, and carries a `write_args` dict."""
+
+    write_args: dict
+
+    def latest_artifact_key(self, prefix: str) -> str | None:
+        arts = self.list_artifacts(prefix)
+        return max(arts, key=lambda t: t[2])[0] if arts else None
+
+    def delete_prefix(self, prefix: str) -> int:
+        return self.delete_keys([k for (k, _s, _m) in self.list_artifacts(prefix)])
+
+    def copy_prefix(self, src_prefix: str, dst_prefix: str) -> int:
+        n = 0
+        for key, _s, _m in self.list_artifacts(src_prefix):
+            self._copy(key, dst_prefix + key[len(src_prefix):])
+            n += 1
+        return n
+
+    def download_prefix(self, prefix: str, local_dir: str) -> int:
+        import os
+
+        os.makedirs(local_dir, exist_ok=True)
+        n = 0
+        for key, _s, _m in self.list_artifacts(prefix):
+            self._download(key, os.path.join(local_dir, key[len(prefix):]))
+            n += 1
+        return n
+
+    def upload_backups(self, local_dir: str, prefix: str, cleanup: bool = True) -> str | None:
+        """Upload every `*.backup` in `local_dir` to `prefix`, return the newest key, remove
+        `local_dir`. The write leg of BACKUP_UPLOAD=pipeline."""
+        import os
+        import shutil
+
+        latest = None
+        for name in sorted(f for f in os.listdir(local_dir) if f.endswith(".backup")):
+            latest = self.upload_file(os.path.join(local_dir, name), prefix + name)
+        if cleanup:
+            shutil.rmtree(local_dir, ignore_errors=True)
+        return latest
+
+    def sync_up(self, local_dir: str, prefix: str, cleanup: bool = True) -> str | None:
+        """Make `prefix` match `local_dir`'s `.backup` set: upload each, delete artifacts no
+        longer present (e.g. diffs collapsed by aggregate), remove `local_dir`. Newest key."""
+        import os
+        import shutil
+
+        local = {f for f in os.listdir(local_dir) if f.endswith(".backup")}
+        latest = None
+        for name in sorted(local):
+            latest = self.upload_file(os.path.join(local_dir, name), prefix + name)
+        stale = [k for (k, _s, _m) in self.list_artifacts(prefix) if k[len(prefix):] not in local]
+        self.delete_keys(stale)
+        if cleanup:
+            shutil.rmtree(local_dir, ignore_errors=True)
+        return latest
+
+    def latest_text_key(self, prefix: str, suffix: str = ".cypher") -> str | None:
+        arts = self.list_text_keys(prefix, suffix)
+        return max(arts, key=lambda t: t[1])[0] if arts else None
+
+
+class S3ObjectStore(_BaseObjectStore):
     """S3-compatible object store (boto3).
 
     `write_args` are merged into every boto3 PUT/COPY the pipeline issues (put_text, copy_prefix).
@@ -188,10 +256,6 @@ class S3ObjectStore:
                     out.append((o["Key"], o["Size"], o["LastModified"]))
         return out
 
-    def latest_artifact_key(self, prefix: str) -> str | None:
-        arts = self.list_artifacts(prefix)
-        return max(arts, key=lambda t: t[2])[0] if arts else None
-
     def object_size(self, key: str) -> int:
         return self._client().head_object(Bucket=self.bucket, Key=key)["ContentLength"]
 
@@ -203,24 +267,16 @@ class S3ObjectStore:
         )
         return len(keys)
 
-    def copy_prefix(self, src_prefix: str, dst_prefix: str) -> int:
-        c = self._client()
-        n = 0
-        for key, _s, _m in self.list_artifacts(src_prefix):
-            dst = dst_prefix + key[len(src_prefix):]
-            c.copy_object(
-                Bucket=self.bucket,
-                CopySource={"Bucket": self.bucket, "Key": key},
-                Key=dst,
-                **self.write_args,
-            )
-            n += 1
-        return n
+    def _copy(self, src_key: str, dst_key: str) -> None:
+        self._client().copy_object(
+            Bucket=self.bucket, CopySource={"Bucket": self.bucket, "Key": src_key},
+            Key=dst_key, **self.write_args,
+        )
 
-    def delete_prefix(self, prefix: str) -> int:
-        return self.delete_keys([k for (k, _s, _m) in self.list_artifacts(prefix)])
+    def _download(self, key: str, local_path: str) -> None:
+        self._client().download_file(self.bucket, key, local_path)
 
-    def s3_uri(self, key: str) -> str:
+    def uri(self, key: str) -> str:
         return f"s3://{self.bucket}/{key}"
 
     def upload_file(self, local_path: str, key: str) -> str:
@@ -228,51 +284,6 @@ class S3ObjectStore:
         so multi-GB artifacts multipart automatically and each part carries the encryption."""
         self._client().upload_file(local_path, self.bucket, key, ExtraArgs=self.write_args or None)
         return key
-
-    def upload_backups(self, local_dir: str, prefix: str, cleanup: bool = True) -> str | None:
-        """Upload every `*.backup` in `local_dir` to `prefix` (via upload_file, so `write_args`
-        apply), return the newest key, and remove `local_dir`. Lets BACKUP_UPLOAD=pipeline route
-        neo4j-admin's local output through boto3 so an SSE header is sent — neo4j-admin has no
-        setting to send one itself (Ops Manual: only `s3.target_throughput_gbps` exists)."""
-        import os
-        import shutil
-
-        latest = None
-        for name in sorted(f for f in os.listdir(local_dir) if f.endswith(".backup")):
-            latest = self.upload_file(os.path.join(local_dir, name), prefix + name)
-        if cleanup:
-            shutil.rmtree(local_dir, ignore_errors=True)
-        return latest
-
-    def download_prefix(self, prefix: str, local_dir: str) -> int:
-        """Download every `.backup` under `prefix` into `local_dir`. Lets neo4j-admin operate on
-        a local path (aggregate/verify) so its S3 *write* becomes our boto3 upload (SSE-KMS)."""
-        import os
-
-        os.makedirs(local_dir, exist_ok=True)
-        client = self._client()
-        n = 0
-        for key, _s, _m in self.list_artifacts(prefix):
-            client.download_file(self.bucket, key, os.path.join(local_dir, key[len(prefix):]))
-            n += 1
-        return n
-
-    def sync_up(self, local_dir: str, prefix: str, cleanup: bool = True) -> str | None:
-        """Make `prefix` match `local_dir`'s `.backup` set: upload each (with `write_args`),
-        delete S3 artifacts no longer present (e.g. diffs collapsed by aggregate), remove
-        `local_dir`. Returns the newest key. The write leg for an in-place aggregate."""
-        import os
-        import shutil
-
-        local = {f for f in os.listdir(local_dir) if f.endswith(".backup")}
-        latest = None
-        for name in sorted(local):
-            latest = self.upload_file(os.path.join(local_dir, name), prefix + name)
-        stale = [k for (k, _s, _m) in self.list_artifacts(prefix) if k[len(prefix):] not in local]
-        self.delete_keys(stale)
-        if cleanup:
-            shutil.rmtree(local_dir, ignore_errors=True)
-        return latest
 
     # --- text artifacts (the logical metadata export; .cypher, not .backup) ---
     # Encryption follows `write_args`: unset -> the bucket's default encryption applies (as for
@@ -299,9 +310,72 @@ class S3ObjectStore:
                     out.append((o["Key"], o["LastModified"]))
         return out
 
-    def latest_text_key(self, prefix: str, suffix: str = ".cypher") -> str | None:
-        arts = self.list_text_keys(prefix, suffix)
-        return max(arts, key=lambda t: t[1])[0] if arts else None
+
+class AzureObjectStore(_BaseObjectStore):
+    """Azure Blob Storage backend (#52). `bucket` is the **container**; the storage account,
+    endpoint, and credential come from `AZURE_STORAGE_CONNECTION_STRING` — which works against
+    **Azurite** and real Azure alike. `write_args` are passthrough kwargs to blob uploads (e.g.
+    `encryption_scope`); the S3-only `sse`/`sse_kms_key_id` are ignored (Azure encrypts at the
+    account/scope level). Neo4j's own seed/backup fetch uses `azb://` — see uri()."""
+
+    def __init__(self, bucket: str, endpoint_url: str | None = None, region: str = "us-east-1",
+                 sse: str | None = None, sse_kms_key_id: str | None = None,
+                 write_args_json: str = "{}"):
+        self.container = bucket
+        self.write_args: dict = json.loads(write_args_json or "{}")
+
+    def _c(self):
+        from azure.storage.blob import BlobServiceClient
+
+        conn = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
+        return BlobServiceClient.from_connection_string(conn).get_container_client(self.container)
+
+    def list_artifacts(self, prefix: str):
+        return [(b.name, b.size, b.last_modified)
+                for b in self._c().list_blobs(name_starts_with=prefix) if b.name.endswith(".backup")]
+
+    def object_size(self, key: str) -> int:
+        return self._c().get_blob_client(key).get_blob_properties().size
+
+    def delete_keys(self, keys: list[str]) -> int:
+        c = self._c()
+        for k in keys:
+            c.delete_blob(k)
+        return len(keys)
+
+    def _copy(self, src_key: str, dst_key: str) -> None:
+        c = self._c()
+        c.get_blob_client(dst_key).start_copy_from_url(c.get_blob_client(src_key).url)
+
+    def _download(self, key: str, local_path: str) -> None:
+        with open(local_path, "wb") as f:
+            f.write(self._c().get_blob_client(key).download_blob().readall())
+
+    def uri(self, key: str) -> str:
+        account = os.environ.get("AZURE_STORAGE_ACCOUNT", "devstoreaccount1")
+        return f"azb://{account}/{self.container}/{key}"
+
+    def upload_file(self, local_path: str, key: str) -> str:
+        with open(local_path, "rb") as f:
+            self._c().upload_blob(name=key, data=f, overwrite=True, **self.write_args)
+        return key
+
+    def put_text(self, key: str, text: str) -> str:
+        from azure.storage.blob import ContentSettings
+
+        self._c().upload_blob(
+            name=key, data=text.encode(), overwrite=True,
+            content_settings=ContentSettings(content_type="text/plain; charset=utf-8"),
+            **self.write_args,
+        )
+        return key
+
+    def get_text(self, key: str) -> str:
+        return self._c().get_blob_client(key).download_blob().readall().decode()
+
+    def list_text_keys(self, prefix: str, suffix: str = ".cypher"):
+        return [(b.name, b.last_modified)
+                for b in self._c().list_blobs(name_starts_with=prefix) if b.name.endswith(suffix)]
 
 
 class BackupRunner:

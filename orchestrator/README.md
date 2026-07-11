@@ -78,7 +78,8 @@ Only `NEO4J_PASSWORD` is strictly required; the rest default sensibly.
 | `NEO4J_PASSWORD` | — (required) | `devpassword` | your secret |
 | `NEO4J_BOLT_URI` | `neo4j://localhost:7687` | local | `neo4j://<host>:7687` |
 | `NEO4J_USER` | `neo4j` | `neo4j` | `neo4j` |
-| `BACKUP_BUCKET` | `neo4j-backups` | `neo4j-backups` | your bucket |
+| `BACKUP_BUCKET` | `neo4j-backups` | `neo4j-backups` | S3 bucket / Azure container |
+| `CLOUD` | `aws` | `aws` | object-store backend: `aws` (S3) or `azure` (Blob); gcp later (#52) |
 | `AWS_ENDPOINT_URL_S3` | unset | `http://localhost:9000` | **leave unset** (real S3) |
 | `AWS_REGION` | `us-east-1` | `us-east-1` | your region |
 | `NEO4J_BACKUP_SOURCE` | `neo4j:6362` | `neo4j:6362` | `<follower>:6362` |
@@ -92,6 +93,8 @@ Only `NEO4J_PASSWORD` is strictly required; the rest default sensibly.
 k8s mode also reads `RUNNER_IMAGE`, `RUNNER_NODE_SELECTOR` (JSON),
 `RUNNER_MEMORY_LIMIT`, `RUNNER_SCRATCH_STORAGE`, `RUNNER_SERVICE_ACCOUNT`.
 AWS credentials come from the environment or an IAM role (no static keys needed on AWS).
+`CLOUD=azure` reads `AZURE_STORAGE_CONNECTION_STRING` (works with Azurite and real Azure) and
+needs the `azure` extra: `pip install 'neo4j-backup-dagster[azure]'`.
 
 ### Optional feature toggles
 

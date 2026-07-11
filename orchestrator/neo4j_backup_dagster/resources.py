@@ -77,6 +77,7 @@ class ObjectStoreResource(dg.ConfigurableResource):
     bucket: str
     endpoint_url: str | None = None
     region: str = "us-east-1"
+    cloud: str | None = None  # aws (default) | azure ; gcp later (#52)
     # Encryption / extra args for the pipeline's boto3 PUT/COPY (buckets that require an
     # explicit SSE header on PutObject). Unset -> bucket default encryption.
     sse: str | None = None
@@ -85,7 +86,7 @@ class ObjectStoreResource(dg.ConfigurableResource):
 
     def _core(self) -> ObjectStore:
         return object_store(self.bucket, self.endpoint_url, self.region,
-                            self.sse, self.sse_kms_key_id, self.write_args_json)
+                            self.sse, self.sse_kms_key_id, self.write_args_json, self.cloud)
 
     def list_artifacts(self, *a, **k):
         return self._core().list_artifacts(*a, **k)
@@ -105,8 +106,8 @@ class ObjectStoreResource(dg.ConfigurableResource):
     def delete_prefix(self, *a, **k):
         return self._core().delete_prefix(*a, **k)
 
-    def s3_uri(self, *a, **k):
-        return self._core().s3_uri(*a, **k)
+    def uri(self, *a, **k):
+        return self._core().uri(*a, **k)
 
     def upload_file(self, *a, **k):
         return self._core().upload_file(*a, **k)

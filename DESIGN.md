@@ -679,6 +679,7 @@ any third-party SDK imported lazily so nothing is pulled unless the non-default 
 | **Runner binary** | `neo4j-admin` | `RUNNER_NEO4J_ADMIN` |
 | **Policy source** | local file | `NEO4J_BACKUP_POLICY=s3://…` + `POLICY_CACHE_TTL`; TTL cache + last-known-good, so policy edits land without an image rebuild |
 | **Policy loader** | file / `s3://` | `POLICY_LOADER=module.callable` — override the fetch for an authenticated endpoint / Vault / config API (loader does its own auth) |
+| **Object-store backend** | S3 (boto3) | `CLOUD=azure` (Azure Blob); GCP later. `object_store()` factory + per-cloud backends over one `ObjectStore` protocol; validated on MinIO / Azurite (#52) |
 
 **Resilience.** All Bolt access goes through one client (`Neo4jClient.run_on`/`run_system`), so
 retry, credential resolution, and future contracts apply uniformly — no caller opens a raw

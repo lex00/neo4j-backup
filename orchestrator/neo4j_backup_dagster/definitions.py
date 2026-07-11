@@ -66,7 +66,7 @@ def _run_backup(context, runner, store, subprocess_client, database, prefix, kin
         cmd = runner.backup_command(database, stage, kind=kind)
         _run_admin(context, runner, cmd, subprocess_client, env=runner.env())
         return store.upload_backups(stage, prefix)  # SSE-KMS PUT, then remove local
-    to_path = store.s3_uri(prefix)
+    to_path = store.uri(prefix)
     cmd = runner.backup_command(database, to_path, kind=kind)
     _run_admin(context, runner, cmd, subprocess_client, env=runner.env())
     return store.latest_artifact_key(prefix)
@@ -85,7 +85,7 @@ def _run_aggregate(context, runner, store, subprocess_client, physical, prefix):
         _run_admin(context, runner, runner.aggregate_command(physical, stage),
                    subprocess_client, env=runner.env())
         return store.sync_up(stage, prefix)
-    _run_admin(context, runner, runner.aggregate_command(physical, store.s3_uri(prefix)),
+    _run_admin(context, runner, runner.aggregate_command(physical, store.uri(prefix)),
                subprocess_client, env=runner.env())
     return store.latest_artifact_key(prefix)
 
@@ -192,10 +192,10 @@ def verify(
         scratch = f"_verify/{group_id}/{physical}/"
         try:
             copied = store.copy_prefix(src, scratch)
-            _run_admin(context, runner, runner.aggregate_command(physical, store.s3_uri(scratch)),
+            _run_admin(context, runner, runner.aggregate_command(physical, store.uri(scratch)),
                        pipes_subprocess_client, env=runner.env())
             full = store.latest_artifact_key(scratch)
-            _run_admin(context, runner, runner.check_command(physical, store.s3_uri(full)),
+            _run_admin(context, runner, runner.check_command(physical, store.uri(full)),
                        pipes_subprocess_client, env=runner.env())
         finally:
             store.delete_prefix(scratch)
@@ -318,7 +318,7 @@ def _restore_alias_swap(context, config, neo4j, store, group):
         if not key:
             raise dg.Failure(f"no artifact for {group.id}/{alias} — back up first")
         newdb = naming.physical(alias, ts)
-        neo4j.seed_database(newdb, store.s3_uri(key), restore_until=config.restore_until,
+        neo4j.seed_database(newdb, store.uri(key), restore_until=config.restore_until,
                             topology=group.topology_for(alias), cypher_version=SEED_CYPHER_VERSION)
         planned.append((alias, newdb, neo4j.alias_target(alias)))
         context.log.info(f"seeded {newdb} <= {key}")
@@ -349,7 +349,7 @@ def _restore_by_name(context, config, neo4j, store, group):
         if exists:
             neo4j.drop_database(name)
             context.log.info(f"dropped {name} (replace)")
-        neo4j.seed_database(name, store.s3_uri(key), restore_until=config.restore_until,
+        neo4j.seed_database(name, store.uri(key), restore_until=config.restore_until,
                             topology=group.topology_for(name), cypher_version=SEED_CYPHER_VERSION)
         context.log.info(f"restored {name} <= {key}")
     return [name for name, _k, _e in plan]
@@ -443,6 +443,7 @@ defs = dg.Definitions(
         ),
         "store": ObjectStoreResource(
             bucket=os.environ.get("BACKUP_BUCKET", "neo4j-backups"),
+            cloud=os.environ.get("CLOUD") or None,  # aws (default) | azure ; gcp later (#52)
             # Unset on real AWS S3 (use AWS endpoints); set only for MinIO/S3-compatible.
             endpoint_url=os.environ.get("AWS_ENDPOINT_URL_S3") or None,
             region=os.environ.get("AWS_REGION", "us-east-1"),

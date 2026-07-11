@@ -37,6 +37,7 @@ def store() -> ObjectStore:
         sse=os.environ.get("S3_SSE") or None,
         sse_kms_key_id=os.environ.get("S3_SSE_KMS_KEY_ID") or None,
         write_args_json=os.environ.get("S3_WRITE_ARGS", "{}"),
+        cloud=os.environ.get("CLOUD") or None,  # aws (default) | azure ; gcp later (#52)
     )
 
 

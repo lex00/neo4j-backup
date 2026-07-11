@@ -108,7 +108,7 @@ def main() -> None:
     diff_key = store.latest_artifact_key(prefix)
     pitr_phys = naming.physical("acme-orders", naming.ts())
     try:
-        neo.seed_database(pitr_phys, store.s3_uri(diff_key), restore_until=t_mid)
+        neo.seed_database(pitr_phys, store.uri(diff_key), restore_until=t_mid)
         n_pitr = neo.count_nodes(pitr_phys)
         assert n_pitr == base + 1, f"PITR {n_pitr} != base+1 ({base + 1})"
         print(f"   PITR OK ({n_pitr} nodes == base+1 — landed between full and diff)")

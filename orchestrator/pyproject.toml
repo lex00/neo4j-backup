@@ -22,6 +22,9 @@ dev = ["pytest", "dagster-webserver"]
 # Only needed for RUNNER_MODE=k8s. Subprocess (EC2/VM) deployments don't need it — the
 # import is lazy, so the code location loads without dagster-k8s installed.
 k8s = ["dagster-k8s>=0.24"]
+# Cloud backends (#52) — install only the one you use; each SDK is lazy-imported.
+azure = ["azure-storage-blob>=12"]
+gcp = ["google-cloud-storage>=2"]
 # Airflow adapter deps are installed with Airflow's constraints (see airflow/README.md);
 # this extra documents them. neo4j_backup_core needs only neo4j/boto3/pydantic/pyyaml.
 airflow = [

@@ -26,7 +26,7 @@ def run_backup(runner, store, database, prefix, kind):
         os.makedirs(stage, exist_ok=True)
         run_admin(runner.backup_command(database, stage, kind=kind))
         return store.upload_backups(stage, prefix)
-    run_admin(runner.backup_command(database, store.s3_uri(prefix), kind=kind))
+    run_admin(runner.backup_command(database, store.uri(prefix), kind=kind))
     return store.latest_artifact_key(prefix)
 
 
@@ -36,7 +36,7 @@ def run_aggregate(runner, store, physical, prefix):
         store.download_prefix(prefix, stage)
         run_admin(runner.aggregate_command(physical, stage))
         return store.sync_up(stage, prefix)
-    run_admin(runner.aggregate_command(physical, store.s3_uri(prefix)))
+    run_admin(runner.aggregate_command(physical, store.uri(prefix)))
     return store.latest_artifact_key(prefix)
 
 
@@ -53,8 +53,8 @@ def run_verify(runner, store, physical, src, scratch):
         return
     try:
         store.copy_prefix(src, scratch)
-        run_admin(runner.aggregate_command(physical, store.s3_uri(scratch)))
+        run_admin(runner.aggregate_command(physical, store.uri(scratch)))
         full = store.latest_artifact_key(scratch)
-        run_admin(runner.check_command(physical, store.s3_uri(full)))
+        run_admin(runner.check_command(physical, store.uri(full)))
     finally:
         store.delete_prefix(scratch)
