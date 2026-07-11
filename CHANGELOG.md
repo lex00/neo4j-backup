@@ -8,6 +8,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 ## [Unreleased]
 
 ### Added
+- **CI recipes** (#58 P3) — copy-and-adapt templates that schedule the `neo4j-backup` CLI without an
+  orchestrator: [GitHub Actions](examples/ci/github-actions.yml),
+  [GitLab CI](examples/ci/gitlab-ci.yml) (`resource_group` lanes), and
+  [Forgejo/Gitea Actions](examples/ci/forgejo-actions.yml), plus a `CI.md` write-up (the
+  runner-is-the-backup-runner model, secrets→env, full/diff lanes, exit-code gating, and honest
+  caveats on scratch/cron/observability). The doc-drift test now also keeps the recipes' commands in
+  sync with the CLI and checks the example YAML parses.
 - **Agent guide (`AGENTS.md`) + skill** (#59) — the no-MCP way to point any coding/ops agent at the
   `neo4j-backup` CLI: safety posture (read-only default, `--confirm` to mutate, `--dry-run` a
   destructive op first), the command surface, and worked operator prompts → exact commands. A thin

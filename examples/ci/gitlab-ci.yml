@@ -1,0 +1,61 @@
+# Example: schedule neo4j-backup on GitLab CI.
+#
+# TEMPLATE — copy to `.gitlab-ci.yml` in your deployment repo. Create the cadence under
+# CI/CD > Schedules, each schedule setting a LANE variable (full | diff). See docs/CI.md.
+#
+# GitLab is the best CI fit for this: `resource_group` gives a real serialized lane (the CI analogue
+# of the orchestrators' full/diff concurrency pools). Run the jobs on a self-hosted runner that is
+# your backup runner — neo4j-admin on PATH, egress to the DB backup port (6362) and object store,
+# and a scratch disk sized for the largest full.
+
+stages: [backup, maintain]
+
+default:
+  # An image with neo4j-admin + Python + the package (build once, or install at job start as below).
+  image: python:3.12
+  tags: [neo4j-backup]          # route to your self-hosted backup runner
+
+variables:
+  NEO4J_BACKUP_POLICY: policies/demo.yaml
+  RUNNER_PAGECACHE: "512M"      # explicit or neo4j-admin OOMs
+  SCRATCH_PATH: "$CI_PROJECT_DIR/.scratch"   # size for the largest full backup
+  CLOUD: aws
+  # Set the rest as masked CI/CD Variables (Settings > CI/CD > Variables):
+  #   NEO4J_PASSWORD, NEO4J_BOLT_URI, NEO4J_BACKUP_SOURCE, BACKUP_BUCKET, AWS_REGION,
+  #   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY   (or the azure/gcp equivalents)
+
+.neo4j-backup:
+  before_script:
+    # Not on PyPI — install from a pinned tag (or vendor and `pip install ./orchestrator`).
+    - pip install "git+https://github.com/lex00/neo4j-backup.git@v0.2.0#subdirectory=orchestrator"
+
+.backup:
+  extends: .neo4j-backup
+  stage: backup
+  resource_group: neo4j-backup-demo    # serialize: never overlap this group's backups
+  script:
+    - neo4j-backup --json backup demo --kind "$KIND"   # non-zero exit fails the pipeline
+
+backup:diff:
+  extends: .backup
+  variables: { KIND: DIFF }
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $LANE == "diff"'
+
+backup:full:
+  extends: .backup
+  variables: { KIND: FULL }
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $LANE == "full"'
+
+# Weekly verify + retention, on the full-lane schedule. --confirm is set because the schedule is the
+# operator's standing approval for the guarded (destructive) prune.
+maintain:
+  extends: .neo4j-backup
+  stage: maintain
+  resource_group: neo4j-backup-demo
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $LANE == "full"'
+  script:
+    - neo4j-backup --json verify demo
+    - neo4j-backup --json prune --confirm
