@@ -8,6 +8,7 @@ pytest.importorskip("dagster")
 
 from neo4j_backup_core.clients import (
     AzureObjectStore,
+    GcsObjectStore,
     Neo4jClient,
     ObjectStore,
     S3ObjectStore,
@@ -27,7 +28,7 @@ def test_objectstore_resource_delegates_the_interface():
 
 def test_backends_implement_the_interface():
     # every cloud backend must implement the whole interface (dir() = own + base composites)
-    for backend in (S3ObjectStore, AzureObjectStore):
+    for backend in (S3ObjectStore, AzureObjectStore, GcsObjectStore):
         missing = _public_methods(ObjectStore) - set(dir(backend))
         assert not missing, f"{backend.__name__} missing interface methods: {sorted(missing)}"
 
