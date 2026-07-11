@@ -49,7 +49,7 @@ class _Store:
     def latest_artifact_key(self, prefix):
         return prefix + "art.backup"
 
-    def s3_uri(self, key):
+    def uri(self, key):
         return "s3://b/" + key
 
 

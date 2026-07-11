@@ -66,12 +66,12 @@ def neo4j_restore():
                 if not plan["replace"]:
                     raise RuntimeError(f"database {name!r} exists; set replace=true to DROP+recreate (destructive)")
                 neo.drop_database(name)
-            neo.seed_database(name, store.s3_uri(key), restore_until=plan["restore_until"],
+            neo.seed_database(name, store.uri(key), restore_until=plan["restore_until"],
                               topology=group.topology_for(name), cypher_version=_SEED_CYPHER_VERSION)
             return {"name": name, "mode": "by-name"}
         old = neo.alias_target(name)  # captured before cutover (for external routing #17)
         newdb = naming.physical(name, plan["ts"])
-        neo.seed_database(newdb, store.s3_uri(key), restore_until=plan["restore_until"],
+        neo.seed_database(newdb, store.uri(key), restore_until=plan["restore_until"],
                           topology=group.topology_for(name), cypher_version=_SEED_CYPHER_VERSION)
         return {"alias": name, "newdb": newdb, "old": old, "mode": "alias-swap"}
 
