@@ -68,7 +68,9 @@ The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, a
 | Field | Type | Required / default | Status | Meaning |
 |---|---|---|---|---|
 | `id` | string | **required** | used | group identifier; part of the storage path + partition key |
-| `aliases` | list of string | **required** | used | app-facing Neo4j aliases to back up (one backup unit each) |
+| `restore_mode` | `alias-swap` \| `by-name` | `alias-swap` | used | `alias-swap` (apps use aliases; restore seeds a new physical + swaps the alias — non-destructive) or `by-name` (#48: no alias; restore targets the database by its own name) |
+| `aliases` | list of string | **required** (alias-swap) | used | app-facing Neo4j aliases to back up (one unit each). Use in `alias-swap` mode. |
+| `databases` | list of string | **required** (by-name) | used | database **names** to back up/restore directly (must be legal DB names). Use in `by-name` mode instead of `aliases`. |
 | `tier` | string | **required** | used | which `tiers` entry sets the schedule (must exist) |
 | `retention_days` | int | `7` | used | `prune` deletes artifacts older than this |
 | `s3_prefix` | string | **required** | decl | not read; the bucket comes from `BACKUP_BUCKET` |

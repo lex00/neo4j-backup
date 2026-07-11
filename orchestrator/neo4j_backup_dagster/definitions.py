@@ -219,7 +219,7 @@ def prune(context: dg.AssetExecutionContext, store: ObjectStoreResource):
     detail: dict[str, int] = {}
     for g in policy.db_groups:
         cutoff = now - timedelta(days=g.retention_days)
-        for a in g.aliases:
+        for a in g.names:
             arts = store.list_artifacts(_alias_prefix(g.id, a))
             if not arts:
                 continue
@@ -302,10 +302,57 @@ def metadata_restore():
     metadata_restore_op()
 
 
-# --- Restore (group-aligned alias-swap, pure Cypher) -----------------------------
+# --- Restore (pure Cypher) — alias-swap (default) or by-name (#48) ----------------
 class RestoreConfig(dg.Config):
     group_id: str
     restore_until: str | None = None  # ISO-8601; needs a differential chain
+    replace: bool = False  # by-name mode only: DROP+recreate a target that already exists
+
+
+def _restore_alias_swap(context, config, neo4j, store, group):
+    """Seed a fresh physical per alias, then swap the alias to it (non-destructive)."""
+    ts = naming.ts()
+    planned: list[tuple[str, str, str | None]] = []
+    for alias in group.names:
+        key = store.latest_artifact_key(_alias_prefix(group.id, alias))
+        if not key:
+            raise dg.Failure(f"no artifact for {group.id}/{alias} — back up first")
+        newdb = naming.physical(alias, ts)
+        neo4j.seed_database(newdb, store.s3_uri(key), restore_until=config.restore_until,
+                            topology=group.topology_for(alias), cypher_version=SEED_CYPHER_VERSION)
+        planned.append((alias, newdb, neo4j.alias_target(alias)))
+        context.log.info(f"seeded {newdb} <= {key}")
+    strategy = cutover.from_env()  # alias-swap (default) or external routing (#17)
+    for alias, newdb, old in planned:
+        strategy.cutover(neo4j, alias, newdb, old)
+        context.log.info(f"cutover {alias}: {old} -> {newdb}")
+    return planned
+
+
+def _restore_by_name(context, config, neo4j, store, group):
+    """Restore each database into its own name (#48): create-if-absent, or — with
+    config.replace — DROP+recreate an existing target (destructive; there is no rename, so no
+    non-destructive in-place). Resolve every artifact and check preconditions BEFORE any drop,
+    so a missing artifact or an unreplaceable existing target fails before anything is destroyed.
+    Full restorability assurance is the `verify` asset's job — run it first."""
+    plan: list[tuple[str, str, bool]] = []
+    for name in group.names:
+        key = store.latest_artifact_key(_alias_prefix(group.id, name))
+        if not key:
+            raise dg.Failure(f"no artifact for {group.id}/{name} — back up first")
+        exists = neo4j.database_exists(name)
+        if exists and not config.replace:
+            raise dg.Failure(
+                f"database {name!r} exists; set replace=true to DROP+recreate it (destructive)")
+        plan.append((name, key, exists))
+    for name, key, exists in plan:
+        if exists:
+            neo4j.drop_database(name)
+            context.log.info(f"dropped {name} (replace)")
+        neo4j.seed_database(name, store.s3_uri(key), restore_until=config.restore_until,
+                            topology=group.topology_for(name), cypher_version=SEED_CYPHER_VERSION)
+        context.log.info(f"restored {name} <= {key}")
+    return [name for name, _k, _e in plan]
 
 
 @dg.op
@@ -315,25 +362,10 @@ def restore_group_op(
     neo4j: Neo4jResource,
     store: ObjectStoreResource,
 ):
-    policy = load_policy(POLICY_PATH)
-    group = policy.group(config.group_id)
-    ts = naming.ts()
-    planned: list[tuple[str, str, str | None]] = []
-    for alias in group.aliases:
-        key = store.latest_artifact_key(_alias_prefix(group.id, alias))
-        if not key:
-            raise dg.Failure(f"no artifact for {group.id}/{alias} — back up first")
-        newdb = naming.physical(alias, ts)
-        neo4j.seed_database(newdb, store.s3_uri(key), restore_until=config.restore_until,
-                            topology=group.topology_for(alias),
-                            cypher_version=SEED_CYPHER_VERSION)
-        planned.append((alias, newdb, neo4j.alias_target(alias)))
-        context.log.info(f"seeded {newdb} <= {key}")
-    strategy = cutover.from_env()  # alias-swap (default) or external routing (#17)
-    for alias, newdb, old in planned:
-        strategy.cutover(neo4j, alias, newdb, old)
-        context.log.info(f"cutover {alias}: {old} -> {newdb}")
-    return planned
+    group = load_policy(POLICY_PATH).group(config.group_id)
+    if group.restore_mode == "by-name":
+        return _restore_by_name(context, config, neo4j, store, group)
+    return _restore_alias_swap(context, config, neo4j, store, group)
 
 
 @dg.job
@@ -386,7 +418,7 @@ def _build_schedules() -> list:
                         run_config=dg.RunConfig(ops={"backup": BackupConfig(kind=_kind)}),
                     )
                     for g in pol.groups_for_tier(_tier)
-                    for a in g.aliases
+                    for a in g.names
                     if f"{g.id}/{a}" in existing
                 ]
 

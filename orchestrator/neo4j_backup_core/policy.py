@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from . import naming
 
@@ -39,7 +39,12 @@ class Topology(BaseModel):
 class DbGroup(BaseModel):
     id: str
     owner: str | None = None
-    aliases: list[str]
+    # A group is alias-swap (apps connect via aliases; restore seeds a new physical + swaps the
+    # alias — the default, non-destructive) OR by-name (#48: no alias; restore targets the
+    # database by its own name — create-if-absent, or destructive DROP+CREATE with replace).
+    restore_mode: Literal["alias-swap", "by-name"] = "alias-swap"
+    aliases: list[str] = Field(default_factory=list)      # alias-swap mode
+    databases: list[str] = Field(default_factory=list)    # by-name mode (database names)
     tier: str
     s3_prefix: str
     retention_days: int = 7
@@ -49,12 +54,29 @@ class DbGroup(BaseModel):
     topology: Topology | None = None
     overrides: dict[str, dict] = Field(default_factory=dict)
 
-    @field_validator("aliases")
-    @classmethod
-    def _validate_aliases(cls, v: list[str]) -> list[str]:
-        for a in v:
-            naming.validate_alias(a)  # raises on illegal alias
-        return v
+    @model_validator(mode="after")
+    def _validate_members(self) -> "DbGroup":
+        if self.restore_mode == "by-name":
+            if self.aliases:
+                raise ValueError(f"group {self.id!r}: use 'databases' (not 'aliases') in by-name mode")
+            if not self.databases:
+                raise ValueError(f"group {self.id!r}: by-name mode needs 'databases'")
+            for d in self.databases:
+                naming.validate_db(d)  # stricter than alias: a legal DATABASE name
+        else:
+            if self.databases:
+                raise ValueError(f"group {self.id!r}: 'databases' is only valid in by-name mode")
+            if not self.aliases:
+                raise ValueError(f"group {self.id!r}: alias-swap mode needs 'aliases'")
+            for a in self.aliases:
+                naming.validate_alias(a)
+        return self
+
+    @property
+    def names(self) -> list[str]:
+        """The group's members — aliases or database names per `restore_mode`. Backup, schedules,
+        prune, and the partition set are mode-agnostic over this."""
+        return self.databases if self.restore_mode == "by-name" else self.aliases
 
     def topology_for(self, alias: str) -> Topology | None:
         """Seed topology for an alias: a per-alias `overrides[alias].topology` wins over
@@ -88,8 +110,8 @@ class Policy(BaseModel):
         raise KeyError(gid)
 
     def partition_keys(self) -> list[str]:
-        """One work unit per (group, alias), encoded as 'group/alias'."""
-        return [f"{g.id}/{a}" for g in self.db_groups for a in g.aliases]
+        """One work unit per (group, member), encoded as 'group/name' (alias or database)."""
+        return [f"{g.id}/{n}" for g in self.db_groups for n in g.names]
 
     def groups_for_tier(self, tier: str) -> list[DbGroup]:
         return [g for g in self.db_groups if g.tier == tier]

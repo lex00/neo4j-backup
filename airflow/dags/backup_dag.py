@@ -45,7 +45,7 @@ def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str):
         @task
         def targets() -> list[str]:
             pol = load_policy(config.policy_path())
-            return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name) for a in g.aliases]
+            return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name) for a in g.names]
 
         @task(pool=f"neo4j_{lane}")  # lanes: pool neo4j_full (1) / neo4j_diff (N)
         def backup(group_alias: str) -> dict:
