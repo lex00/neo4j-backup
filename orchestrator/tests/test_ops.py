@@ -297,3 +297,19 @@ def test_system_backup_targets_reserved_prefix():
     _calls, run = recorder()
     out = ops.system_backup(run, store, RUNNER, LAYOUT)
     assert out["key"] == "_dbms/system/full.backup"
+
+
+# --- bulk import (#16) ------------------------------------------------------------------------
+
+def test_import_command_structures_call_and_passes_args_through():
+    argv = RUNNER.import_command("orders-x", ["--nodes=/n.csv", "--relationships=/r.csv"])
+    # database FIRST (multi-value --nodes would swallow a trailing database), then passthrough args
+    assert argv == ["neo4j-admin", "database", "import", "full",
+                    "orders-x", "--nodes=/n.csv", "--relationships=/r.csv"]
+
+
+def test_import_database_runs_the_built_command():
+    calls, run = recorder()
+    out = ops.import_database(run, RUNNER, "orders-x", ["--nodes=/n.csv"])
+    assert calls == [RUNNER.import_command("orders-x", ["--nodes=/n.csv"])]
+    assert out == {"database": "orders-x", "argv": calls[0]}

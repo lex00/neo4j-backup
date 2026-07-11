@@ -138,6 +138,16 @@ def verify_target(run_admin: RunAdmin, store, runner, layout, group_id: str, ali
     return {"alias": alias, "physical": physical, "consistent": True, "checked": checked}
 
 
+def import_database(run_admin: RunAdmin, runner, database: str, source_args: list) -> dict:
+    """Bulk-import raw data into an offline store on the loader (#16): the reusable tail's first step.
+    Structures + runs `neo4j-admin database import full`; `source_args` is a passthrough. The rest of
+    the tail (start Neo4j → CREATE DATABASE → backup → verify → seed) is existing commands — see
+    IMPORT.md. No store/neo4j handle: import is local to the loader, not a network/object-store op."""
+    cmd = runner.import_command(database, source_args)
+    run_admin(cmd)
+    return {"database": database, "argv": cmd}
+
+
 def system_backup(run_admin: RunAdmin, store, runner, layout,
                   *, upload: str = "admin", staging: str | None = None) -> dict:
     """Binary FULL backup of the `system` database to the reserved `_dbms/system/` prefix (#15)."""

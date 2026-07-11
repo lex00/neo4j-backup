@@ -82,6 +82,10 @@ cli-smoke:
 mcp-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_mcp.py
 
+# Bulk import (#16): import a tiny CSV -> adopt -> backup -> seed, end to end (needs the stack)
+import-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_import.py
+
 # Airflow: backup -> verify -> restore -> prune against the stack (dag.test, in-process)
 airflow-smoke:
     airflow/.venv/bin/python airflow/smoke_e2e.py

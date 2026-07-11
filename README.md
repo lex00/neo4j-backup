@@ -151,6 +151,7 @@ reports the blast radius). Schedule it with the [CI recipes](CI.md); point an ag
 | [AGENTS.md](AGENTS.md) | Driving the CLI with a coding/ops agent — safety rules, command surface, worked prompts (no server needed). |
 | [MCP.md](MCP.md) | The optional operator MCP server — read-only by default, guarded mutations (confirm + dry-run + verify-before-drop). |
 | [RECOVERY.md](RECOVERY.md) | The three recovery modes (full / differential / PITR) with exact Cypher. |
+| [IMPORT.md](IMPORT.md) | Bulk import: build a seed `.backup` off-cluster from raw CSV/Parquet on ephemeral hardware. |
 | [DESIGN.md](DESIGN.md) | The architecture: execution surface, db-group model, naming authority, encryption, runner resources, Dagster pipeline, restore + verification, and the configurable seams + resilience (§11.5). The main read. |
 | [STACK.md](STACK.md) | The local stack and how to run it (`just fresh` → `backup` → `restore`). |
 | [CHANGELOG.md](CHANGELOG.md) | Notable changes per version (Keep a Changelog / SemVer). |
