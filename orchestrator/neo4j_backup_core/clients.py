@@ -145,9 +145,12 @@ class ObjectStore(Protocol):
 def object_store(bucket: str, endpoint_url: str | None = None, region: str = "us-east-1",
                  sse: str | None = None, sse_kms_key_id: str | None = None,
                  write_args_json: str = "{}", cloud: str | None = None) -> ObjectStore:
-    """Build the object-store backend for `cloud` (aws (default) | azure; gcp later, #52)."""
-    if (cloud or "aws").lower() in ("azure", "az", "azb"):
+    """Build the object-store backend for `cloud` (aws (default) | azure | gcp)."""
+    c = (cloud or "aws").lower()
+    if c in ("azure", "az", "azb"):
         return AzureObjectStore(bucket, endpoint_url, region, sse, sse_kms_key_id, write_args_json)
+    if c in ("gcp", "gcs", "google"):
+        return GcsObjectStore(bucket, endpoint_url, region, sse, sse_kms_key_id, write_args_json)
     return S3ObjectStore(bucket, endpoint_url, region, sse, sse_kms_key_id, write_args_json)
 
 
@@ -376,6 +379,71 @@ class AzureObjectStore(_BaseObjectStore):
     def list_text_keys(self, prefix: str, suffix: str = ".cypher"):
         return [(b.name, b.last_modified)
                 for b in self._c().list_blobs(name_starts_with=prefix) if b.name.endswith(suffix)]
+
+
+class GcsObjectStore(_BaseObjectStore):
+    """Google Cloud Storage backend (#52). `bucket` is the GCS bucket. Real GCS uses ADC
+    (GOOGLE_APPLICATION_CREDENTIALS / workload identity); the **fake-gcs-server** emulator is
+    selected by `STORAGE_EMULATOR_HOST`. Neo4j's own `gs://` fetch has no emulator endpoint
+    override, so *restore* is validated via `file://` (phase 4), not against fake-gcs."""
+
+    def __init__(self, bucket: str, endpoint_url: str | None = None, region: str = "us-east-1",
+                 sse: str | None = None, sse_kms_key_id: str | None = None,
+                 write_args_json: str = "{}"):
+        self.bucket_name = bucket
+        self.write_args: dict = json.loads(write_args_json or "{}")
+
+    def _b(self):
+        from google.cloud import storage
+
+        endpoint = os.environ.get("STORAGE_EMULATOR_HOST")
+        if endpoint:
+            from google.auth.credentials import AnonymousCredentials
+
+            client = storage.Client(project=os.environ.get("GCP_PROJECT", "test"),
+                                    credentials=AnonymousCredentials(),
+                                    client_options={"api_endpoint": endpoint})
+        else:
+            client = storage.Client()
+        return client.bucket(self.bucket_name)
+
+    def list_artifacts(self, prefix: str):
+        return [(b.name, b.size, b.updated)
+                for b in self._b().list_blobs(prefix=prefix) if b.name.endswith(".backup")]
+
+    def object_size(self, key: str) -> int:
+        return self._b().get_blob(key).size
+
+    def delete_keys(self, keys: list[str]) -> int:
+        bkt = self._b()
+        for k in keys:
+            bkt.blob(k).delete()
+        return len(keys)
+
+    def _copy(self, src_key: str, dst_key: str) -> None:
+        bkt = self._b()
+        bkt.copy_blob(bkt.blob(src_key), bkt, dst_key)
+
+    def _download(self, key: str, local_path: str) -> None:
+        self._b().blob(key).download_to_filename(local_path)
+
+    def uri(self, key: str) -> str:
+        return f"gs://{self.bucket_name}/{key}"
+
+    def upload_file(self, local_path: str, key: str) -> str:
+        self._b().blob(key).upload_from_filename(local_path)
+        return key
+
+    def put_text(self, key: str, text: str) -> str:
+        self._b().blob(key).upload_from_string(text, content_type="text/plain; charset=utf-8")
+        return key
+
+    def get_text(self, key: str) -> str:
+        return self._b().blob(key).download_as_bytes().decode()
+
+    def list_text_keys(self, prefix: str, suffix: str = ".cypher"):
+        return [(b.name, b.updated)
+                for b in self._b().list_blobs(prefix=prefix) if b.name.endswith(suffix)]
 
 
 class BackupRunner:
