@@ -2,14 +2,16 @@
 
 ### 📖 Documentation site: **<https://lex00.github.io/neo4j-backup/>**
 
-**Validated, policy-driven Dagster pipelines** for backing up and restoring self-hosted
-Neo4j Enterprise — exercised end to end against a real Neo4j Enterprise + object-store
+**Validated, policy-driven backup and restore** for self-hosted Neo4j Enterprise — as
+[Dagster](orchestrator/README.md) / [Airflow](airflow/README.md) pipelines or a scheduler-agnostic
+[CLI](#command-line-interface), exercised end to end against a real Neo4j Enterprise + object-store
 stack. The database instances stay **agentless**: restore is pure Cypher over Bolt
 (seed-from-URI + alias swap), and backup is `neo4j-admin` run from a separate runner.
 
-The deliverable is the orchestration — a [Dagster](orchestrator/README.md) code location
-and an equivalent [Airflow](airflow/README.md) DAG set over one shared engine
-(`neo4j_backup_core`), pick whichever you run — and its validation. The pipeline is
+The deliverable is the orchestration — a [Dagster](orchestrator/README.md) code location,
+an equivalent [Airflow](airflow/README.md) DAG set, and a scheduler-agnostic
+[`neo4j-backup` CLI](#command-line-interface) for CI/cron, all over one shared engine
+(`neo4j_backup_core`); pick whichever you run — and its validation. The pipeline is
 **object-store-agnostic** — it takes a
 configurable bucket and writes `<group>/<slug>/<physical>/` prefixes; teams bring their
 own bucket / IAM / KMS structure and adapt the runner placement to their environment
@@ -40,10 +42,12 @@ Ops / platform / data-engineering teams that:
 
 - self-host **Neo4j Enterprise** — online backup and seed-from-URI restore are Enterprise
   features (Community has only offline dump/load);
-- already run **Dagster** or **Airflow** and want to add backups as a code location /
-  DAG set (the two adapters are interchangeable — [Airflow](airflow/README.md));
-- store artifacts in an **S3-compatible object store**;
-- are comfortable operating `neo4j-admin`, Cypher, and Dagster; and
+- run **Dagster** or **Airflow** and want backups as a code location / DAG set (the two
+  adapters are interchangeable) — **or neither**: the scheduler-agnostic
+  [`neo4j-backup` CLI](#command-line-interface) drives the same core from **CI or cron**
+  (see [CI recipes](CI.md));
+- store artifacts in an **S3-compatible object store** (or Azure Blob / GCS, `CLOUD=azure|gcp`);
+- are comfortable operating `neo4j-admin` and Cypher; and
 - have apps connect via Neo4j **aliases**, or are willing to migrate to them
   (the restore model is an alias swap — see
   [orchestrator/README.md](orchestrator/README.md)).
@@ -51,6 +55,20 @@ Ops / platform / data-engineering teams that:
 Not for: Neo4j **Community** (no online backup), Neo4j **Aura** (managed, has its own
 snapshots), or anyone wanting a turnkey/GUI product. This is tooling to adapt, not an
 appliance — deployment specifics are yours.
+
+### Front-ends — pick by what you already run
+
+One shared core (`neo4j_backup_core`), three ways to drive it. The policy, storage layout, and
+every seam are identical across them.
+
+| Front-end | Pick when |
+|---|---|
+| **[Dagster](orchestrator/README.md)** / **[Airflow](airflow/README.md)** | you run an orchestrator and want concurrency lanes, dynamic policy fan-out, retries with backoff, and run-level observability |
+| **[`neo4j-backup` CLI](#command-line-interface)** + **[CI](CI.md)** / cron | a small fleet with no orchestrator — you accept CI's limits (scratch, best-effort cron, no orchestration) for a much lighter setup |
+
+The CLI is not a co-equal orchestrator: in CI you get scheduling and a serialized lane, not the
+fan-out/observability the adapters give. It is the lightweight option, with the trade-offs stated
+in [CI.md](CI.md).
 
 ## No lock-in
 
@@ -92,11 +110,45 @@ so both adapters inherit it:
   PUT/COPY; `BACKUP_UPLOAD=pipeline` routes neo4j-admin's writes through boto3 too (it has no
   SSE setting of its own), so **strict buckets that deny header-less PutObject** work end to end.
 
+## Command-line interface
+
+For teams without an orchestrator, `neo4j-backup` runs the same policy-driven operations from a
+shell — CI, cron, or by hand. It is a third adapter over `neo4j_backup_core`, subprocess-only, and
+installs with the base package (not on PyPI — pin a tag, or vendor and `pip install ./orchestrator`):
+
+```bash
+pip install "git+https://github.com/lex00/neo4j-backup.git@v0.2.0#subdirectory=orchestrator"
+
+neo4j-backup --json targets                    # what the policy covers
+neo4j-backup --json backup demo                # back up a group
+neo4j-backup --json verify demo                # consistency-check the latest backups
+neo4j-backup --json restore demo --dry-run     # preview the plan; add --confirm to apply
+```
+
+| Command | Does | Mutates? |
+|---|---|---|
+| `targets` | list the policy's group/member targets | no |
+| `backup <group> [--kind AUTO\|FULL\|DIFF]` | back up every database in a group | writes artifacts |
+| `verify <group>` | consistency-check the latest backups | no |
+| `aggregate <group>` | collapse each chain into a recovered full, in place | yes |
+| `restore <group> [--until <iso>] [--replace]` | restore a group (alias-swap / by-name, PITR) | yes |
+| `prune` | delete backups past each group's retention | yes |
+| `metadata export` / `metadata restore [--key <k>]` | DBMS metadata as replayable Cypher | export writes / restore mutates |
+| `system-backup` | binary FULL backup of the `system` database | writes artifacts |
+
+Every command speaks the [CLI contract](CLI-CONTRACT.md): `--json` emits one result envelope,
+exit codes gate CI, and the mutating commands require `--confirm` (preview with `--dry-run`, which
+reports the blast radius). Schedule it with the [CI recipes](CI.md); point an agent at it with
+[AGENTS.md](AGENTS.md).
+
 ## Documentation map
 
 | Doc | What |
 |---|---|
 | [POLICY.md](POLICY.md) | The backup policy — a complete annotated example + every field. |
+| [CLI-CONTRACT.md](CLI-CONTRACT.md) | The `neo4j-backup` CLI contract — JSON envelope, exit codes, and the dry-run/confirm guards. |
+| [CI.md](CI.md) | Scheduling the CLI from CI (GitHub / GitLab / Forgejo) — execution model, secrets, caveats. |
+| [AGENTS.md](AGENTS.md) | Driving the CLI with a coding/ops agent (no MCP) — safety rules, command surface, worked prompts. |
 | [RECOVERY.md](RECOVERY.md) | The three recovery modes (full / differential / PITR) with exact Cypher. |
 | [DESIGN.md](DESIGN.md) | The architecture: execution surface, db-group model, naming authority, encryption, runner resources, Dagster pipeline, restore + verification, and the configurable seams + resilience (§11.5). The main read. |
 | [STACK.md](STACK.md) | The local stack and how to run it (`just fresh` → `backup` → `restore`). |
