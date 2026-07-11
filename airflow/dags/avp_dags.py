@@ -51,7 +51,7 @@ def prune_all() -> int:
     deleted = 0
     for g in pol.db_groups:
         cutoff = now - timedelta(days=g.retention_days)
-        for a in g.aliases:
+        for a in g.names:
             arts = store.list_artifacts(_layout.alias_prefix(g.id, a))
             if not arts:
                 continue

@@ -63,6 +63,24 @@ and `CUTOVER_HOOK=<url|command>`; the orchestrator calls the hook with the new/o
 that layer repoints, and the Neo4j alias is left untouched. Rollback is then the router's
 concern (repoint back to the old physical). Default `CUTOVER_STRATEGY=alias-swap` is unchanged.
 
+## By-name restore (no alias)
+
+Teams that don't use aliases set a group's `restore_mode: by-name` (POLICY.md) and list
+`databases:` (names, not aliases). Restore then targets each database by its **own name**:
+
+- **Create-if-absent** (default, non-destructive) — for DR / a fresh cluster / a dropped DB:
+  `CREATE DATABASE <name> OPTIONS { seedURI: … }`. Nothing is dropped.
+- **Replace** (destructive, opt-in) — an existing database is replaced with `DROP DATABASE
+  <name>` then `CREATE … seedURI`. Requires `replace=true` on the restore (Dagster op config /
+  Airflow `replace` param). There is a window where the database is gone; the Dagster op
+  pre-validates every artifact + target across the group **before** any drop, and you should run
+  `verify` first for restorability assurance.
+
+**There is no non-destructive in-place restore for a named database** — Neo4j has no
+`RENAME DATABASE` ([Ops Manual](https://neo4j.com/docs/operations-manual/current/database-administration/standard-databases/alter-databases/)),
+so swapping a freshly-restored copy into an existing name isn't possible without an alias.
+If you need non-destructive restore, use `alias-swap` (that indirection is the whole point).
+
 **Cluster topology.** When the group declares a `topology:` (POLICY.md), the orchestrator
 adds it to the seed so the restored physical comes up with the intended redundancy rather
 than the DBMS default — otherwise a restore after losing servers can silently reduce your
