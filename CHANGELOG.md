@@ -18,6 +18,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   clusters work unchanged.
 
 ### Fixed
+- **Restores keep customer privileges** (#117). Neo4j stores a privilege against the physical
+  database even when it was granted through an alias, so an alias-swap restore locked out every
+  customer user without DBMS-wide grants. The restore now re-grants every privilege on each old
+  physical onto its new one before any alias moves; a failed grant stops the restore with every
+  alias where it was. by-name restores with `--replace` read the privileges before the DROP (which
+  removes them) and grant them again after the CREATE. The dry-run plan lists the privileges per
+  member, and the result shows what was granted. `just restore` does the same copy.
 - **Local stack** (#127): MinIO's images can no longer be pulled, so `just fresh` failed at its
   first step. The stack now uses the floci S3/KMS emulator (`floci/floci:1.5.34`) and the AWS CLI
   (`amazon/aws-cli`) for setup and listing. Host port 9000 still serves S3. **Recreate your `.env`**

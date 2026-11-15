@@ -78,3 +78,20 @@ latest_artifact() {
     --query 'Contents[].Key' --output text \
     2>/dev/null | tr -d '\r' | tr '\t' '\n' | grep '\.backup$' | sed 's#.*/##' | sort | tail -1
 }
+
+# Copy every privilege whose ON clause names physical $1 onto physical $2 (#117). Neo4j stores
+# privileges against the physical database, so an alias swap without this locks customer roles
+# out. Privileges on `*` and HOME don't name the database and are left alone. Fails (set -e) on
+# the first grant Neo4j refuses, before any alias moves.
+copy_privileges() {
+  local old="$1" new="$2" cmd
+  [ -n "$old" ] || return 0
+  sys --format plain "SHOW PRIVILEGES AS COMMANDS YIELD command RETURN command;" \
+    | tail -n +2 | tr -d '\r' | sed -e 's/^"//' -e 's/"$//' \
+    | { grep -E " ON (GRAPH|DATABASE) \`$old\`( |$)" || true; } \
+    | sed -E "s/ ON (GRAPH|DATABASE) \`$old\`/ ON \\1 \`$new\`/" \
+    | while IFS= read -r cmd; do
+        echo ">>     grant: $cmd"
+        sys "$cmd;" </dev/null
+      done
+}

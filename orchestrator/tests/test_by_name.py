@@ -73,6 +73,12 @@ class _Neo:
     def alter_alias(self, a, t):
         self.altered.append((a, t))
 
+    def privilege_commands(self, n):
+        return []
+
+    def run_system(self, cypher, **params):
+        return []
+
 
 def test_by_name_create_if_absent():
     neo = _Neo()

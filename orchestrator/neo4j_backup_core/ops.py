@@ -24,7 +24,7 @@ import shutil
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from . import cutover, metadata, naming
+from . import cutover, metadata, naming, privileges
 
 RunAdmin = Callable[[list], None]
 Log = Callable[[str], None]
@@ -217,13 +217,58 @@ def restore_metadata(neo4j, store, layout, key: str | None = None) -> dict:
 
 # --- restore (pure Cypher): alias-swap (default) or by-name (#48) -------------------------------
 
+def _privileges_of(neo4j, database: str | None) -> list[str]:
+    """Privileges scoped to `database`, or [] when there is none (#117)."""
+    return neo4j.privilege_commands(database) if database else []
+
+
+def regrant(neo4j, commands: list[str], *, old: str | None = None, new: str | None = None,
+            log: Log = _NOLOG) -> list[str]:
+    """Apply `commands`, moving their ON clause from `old` to `new` when both are given. Stops at
+    the first failure with an OpError naming the commands that were not applied (#117)."""
+    applied: list[str] = []
+    for cmd in commands:
+        cmd = privileges.rewrite(cmd, old, new) if old and new else cmd
+        try:
+            neo4j.run_system(cmd)
+        except Exception as e:  # noqa: BLE001 - any driver error stops the restore
+            rest = [privileges.rewrite(c, old, new) if old and new else c
+                    for c in commands[len(applied):]]
+            raise OpError(f"privilege grant failed ({e}); not applied: {rest}") from e
+        applied.append(cmd)
+    if applied:
+        log(f"granted {len(applied)} privilege(s) on {new or '(same name)'}")
+    return applied
+
+
+def _restore_by_name(neo4j, group, name: str, key: str, existed: bool, *, store,
+                     restore_until, cypher_version, log: Log) -> dict:
+    """DROP (if present) then CREATE under the same name. DROP removes the database's privileges,
+    so they are captured first and re-granted after the create (#117)."""
+    held = _privileges_of(neo4j, name) if existed else []
+    if existed:
+        neo4j.drop_database(name)
+        log(f"dropped {name} (replace)")
+    neo4j.seed_database(name, store.uri(key), restore_until=restore_until,
+                        topology=group.topology_for(name), cypher_version=cypher_version)
+    log(f"restored {name} <= {key}")
+    try:
+        granted = regrant(neo4j, held, log=log)
+    except OpError as e:
+        raise OpError(f"{name} restored from {key}, but its privileges were not all re-granted: "
+                      f"{e}") from e
+    return {"mode": "by-name", "name": name, "key": key, "replaced": existed,
+            "privileges": granted}
+
+
 def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | None = None,
                 replace: bool = False, cypher_version: str | None = None, ts: str | None = None,
                 log: Log = _NOLOG) -> dict:
     """Seed one group member from its latest artifact. by-name: create-if-absent, or DROP+recreate
-    an existing target with `replace` (destructive; Neo4j has no rename). alias-swap: seed a fresh
-    physical named for `ts` (one group-wide timestamp; defaults to now) — the caller cuts the alias
-    over afterwards. Returns a plan entry tagged with `mode`."""
+    an existing target with `replace` (destructive; Neo4j has no rename), keeping its privileges.
+    alias-swap: seed a fresh physical named for `ts` (one group-wide timestamp; defaults to now) —
+    the caller cuts the alias over afterwards (`cutover_seeded`, which copies privileges first).
+    Returns a plan entry tagged with `mode`."""
     key = store.latest_artifact_key(layout.alias_prefix(group.id, name))
     if not key:
         raise OpError(f"no artifact for {group.id}/{name} — back up first")
@@ -231,13 +276,8 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
         existed = neo4j.database_exists(name)
         if existed and not replace:
             raise OpError(f"database {name!r} exists; set replace=true to DROP+recreate it (destructive)")
-        if existed:
-            neo4j.drop_database(name)
-            log(f"dropped {name} (replace)")
-        neo4j.seed_database(name, store.uri(key), restore_until=restore_until,
-                            topology=group.topology_for(name), cypher_version=cypher_version)
-        log(f"restored {name} <= {key}")
-        return {"mode": "by-name", "name": name, "key": key, "replaced": existed}
+        return _restore_by_name(neo4j, group, name, key, existed, store=store,
+                                restore_until=restore_until, cypher_version=cypher_version, log=log)
     old = neo4j.alias_target(name)  # captured before cutover (for external routing #17)
     newdb = naming.physical(name, ts or naming.ts())
     neo4j.seed_database(newdb, store.uri(key), restore_until=restore_until,
@@ -247,12 +287,20 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
 
 
 def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG) -> None:
-    """Barrier after alias-swap seeds: point each alias at its new physical. by-name entries are
-    no-ops (already restored under their own name)."""
+    """Barrier after alias-swap seeds. First copy every member's privileges from its old physical
+    to its new one (#117); only when all copies succeed, point each alias at its new physical. A
+    failed copy raises before any alias moves. Privileges on the old physical are left in place
+    (a rollback needs them; DROP DATABASE removes them). by-name entries are no-ops here."""
+    swaps = [s for s in seeded if s.get("mode") != "by-name"]
+    for s in swaps:
+        try:
+            s["privileges"] = regrant(neo4j, _privileges_of(neo4j, s.get("old")),
+                                      old=s.get("old"), new=s["newdb"], log=log)
+        except OpError as e:
+            raise OpError(f"{s['alias']}: copying privileges {s.get('old')} -> {s['newdb']} "
+                          f"failed, no alias was moved: {e}") from e
     strategy = cutover.from_env()  # alias-swap (default) or external routing (#17)
-    for s in seeded:
-        if s.get("mode") == "by-name":
-            continue
+    for s in swaps:
         strategy.cutover(neo4j, s["alias"], s["newdb"], s.get("old"))
         log(f"cutover {s['alias']}: {s.get('old')} -> {s['newdb']}")
 
@@ -276,13 +324,9 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
                     f"database {name!r} exists; set replace=true to DROP+recreate it (destructive)")
             plan.append((name, key, existed))
         for name, key, existed in plan:
-            if existed:
-                neo4j.drop_database(name)
-                log(f"dropped {name} (replace)")
-            neo4j.seed_database(name, store.uri(key), restore_until=restore_until,
-                                topology=group.topology_for(name), cypher_version=cypher_version)
-            log(f"restored {name} <= {key}")
-            members.append({"mode": "by-name", "name": name, "key": key, "replaced": existed})
+            members.append(_restore_by_name(neo4j, group, name, key, existed, store=store,
+                                            restore_until=restore_until,
+                                            cypher_version=cypher_version, log=log))
         return {"mode": "by-name", "members": members}
     ts = naming.ts()  # one timestamp for every physical seeded in this group restore
     for name in group.names:
@@ -309,9 +353,15 @@ def plan_restore(neo4j, store, group, layout, *, replace: bool = False) -> dict:
                     f"database {name!r} exists; set replace=true to DROP+recreate it (destructive)")
             members.append({"mode": "by-name", "name": name, "key": key,
                             "action": "drop+recreate" if existed else "create",
-                            "drops": [name] if existed else []})
+                            "drops": [name] if existed else [],
+                            # captured before the drop, re-granted after the create (#117)
+                            "privileges": _privileges_of(neo4j, name) if existed else []})
         else:
-            members.append({"mode": "alias-swap", "alias": name, "key": key,
-                            "action": "seed new physical, then swap alias", "drops": []})
+            old = neo4j.alias_target(name)
+            members.append({"mode": "alias-swap", "alias": name, "key": key, "old": old,
+                            "action": "seed new physical, copy privileges, then swap alias",
+                            "drops": [],
+                            # copied from the old physical to the new one before the swap (#117)
+                            "privileges": _privileges_of(neo4j, old)})
     return {"mode": group.restore_mode, "members": members,
             "drops": [d for m in members for d in m["drops"]]}

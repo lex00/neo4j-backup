@@ -54,9 +54,8 @@ with the time restored to and the new database names.
 - Running transactions are cancelled at the switch. Queries and writes in flight when the
   alias moves are rolled back. Make sure your applications retry; on a cluster, servers may briefly
   disagree about where the alias points.
-- Your users may be refused access for a short while. In this release, privileges have to be
-  copied to the new database by the platform team after the switch
-  ([#117](https://github.com/lex00/neo4j-backup/issues/117)). If your users get "Access denied"
+- Your users keep their access. Privileges granted on your database (directly or through the
+  alias) are copied to the restored database before the switch. If your users get "Access denied"
   through the alias after a restore, tell the platform team.
 - The old database is kept for a while, so a restore can be undone by moving the alias back.
   Ask quickly if the restore wasn't what you needed.

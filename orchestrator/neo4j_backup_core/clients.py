@@ -112,6 +112,13 @@ class Neo4jClient:
     def list_databases(self) -> list[str]:
         return [r["name"] for r in self.run_system("SHOW DATABASES YIELD name")]
 
+    def privilege_commands(self, database: str) -> list[str]:
+        """Every GRANT/DENY whose ON clause names `database` (#117)."""
+        from .privileges import scoped_to
+
+        rows = self.run_system("SHOW PRIVILEGES AS COMMANDS YIELD command RETURN command")
+        return scoped_to([r["command"] for r in rows], database)
+
     def list_aliases(self) -> dict[str, str]:
         rows = self.run_system(
             "SHOW ALIASES FOR DATABASE YIELD name, database RETURN name, database"

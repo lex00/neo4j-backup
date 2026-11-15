@@ -10,11 +10,12 @@ itself. Diagram: [restore-cutover](diagrams/restore-cutover.dot).
 Neo4j's CloudSeedProvider finds its full + the intervening diffs in the same prefix and
 applies them automatically. You never assemble the chain by hand.
 
-> **Known issue ([#117](https://github.com/lex00/neo4j-backup/issues/117)).** Neo4j stores
-> privileges against the database, not the alias. After the alias moves to the restored database,
-> customer users get "Access denied" until their privileges are copied to it. The
-> [Operator guide](OPERATOR.md#restore-on-a-customers-request) has the tested copy step; take a full
-> backup of the restored group afterwards too.
+> **Privileges ([#117](https://github.com/lex00/neo4j-backup/issues/117)).** Neo4j stores
+> privileges against the database, not the alias. The tool's restore copies them to the new
+> database before the switch. When you run the Cypher below by hand, copy them yourself before the
+> `ALTER ALIAS`: run each command from
+> `SHOW PRIVILEGES AS COMMANDS` whose `ON GRAPH` / `ON DATABASE` names the old database, with the
+> new database's name in its place. Take a full backup of the restored group afterwards too.
 
 **Driving it.** This runbook is the raw Cypher — useful for understanding and for a fully manual
 recovery. In practice the same seed-and-cutover is driven for a whole group by an orchestrator

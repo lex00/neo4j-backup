@@ -72,6 +72,9 @@ class Neo4jResource(dg.ConfigurableResource):
     def list_aliases(self, *a, **k):
         return self._core().list_aliases(*a, **k)
 
+    def privilege_commands(self, *a, **k):
+        return self._core().privilege_commands(*a, **k)
+
 
 class ObjectStoreResource(dg.ConfigurableResource):
     bucket: str
