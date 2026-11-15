@@ -7,10 +7,11 @@ the newest artifact across them. This is the Phase 5 fix for chain-mixing.
 """
 
 import os
+import tempfile
 
 import dagster as dg
 
-from neo4j_backup_core import ops, paths
+from neo4j_backup_core import capture, ops, paths
 from neo4j_backup_core.policy import load_policy, parse_partition_key
 from .resources import Neo4jResource, ObjectStoreResource, RunnerResource
 
@@ -29,10 +30,11 @@ UPLOAD_STAGING_PATH = os.environ.get("UPLOAD_STAGING_PATH") or None
 targets = dg.DynamicPartitionsDefinition(name="backup_targets")
 
 
-def _run_admin(context, runner, command, subprocess_client, env=None):
+def _run_admin(context, runner, command, subprocess_client, env=None) -> str:
     """Run a neo4j-admin command via Pipes — subprocess (VM/EC2, validated) or a k8s
-    pod, per `runner.mode`. Non-zero exit raises; neo4j-admin is not Pipes-instrumented
-    so callers emit their own result.
+    pod, per `runner.mode` — and return its output (#118). Non-zero exit raises; neo4j-admin is
+    not Pipes-instrumented, so the output comes back through a wrapper: a local temp file in
+    subprocess mode, a Pipes custom message from the pod in k8s mode (`capture.py`).
 
     `dagster-k8s` is imported only when RUNNER_MODE=k8s, so a subprocess-only (EC2/VM)
     deployment doesn't need it installed — `pip install 'neo4j-backup-dagster[k8s]'` adds it."""
@@ -47,18 +49,21 @@ def _run_admin(context, runner, command, subprocess_client, env=None):
                 "RUNNER_MODE=k8s needs the 'dagster-k8s' package — "
                 "pip install 'neo4j-backup-dagster[k8s]'"
             ) from e
-        PipesK8sClient().run(
-            context=context, image=runner.image, command=command,
+        done = PipesK8sClient().run(
+            context=context, image=runner.image, command=capture.wrap_for_pipes(command),
             base_pod_spec=runner.k8s_pod_spec(env),
         )
-    else:
-        subprocess_client.run(command=command, env=env, context=context)
+        return capture.decode_pipes(done.get_custom_messages())
+    with tempfile.NamedTemporaryFile("r", suffix=".out") as out:
+        subprocess_client.run(command=capture.tee_to_file(command, out.name), env=env,
+                              context=context)
+        return out.read()
 
 
 def _admin(context, runner, subprocess_client):
-    """Bind a `run_admin(cmd)` callable for `neo4j_backup_core.ops`: run one neo4j-admin command
-    via Pipes (subprocess or k8s) with the runner's environment. The op bodies live in core; this
-    is only the Dagster-specific execution + env binding."""
+    """Bind a `run_admin(cmd) -> str` callable for `neo4j_backup_core.ops`: run one neo4j-admin
+    command via Pipes (subprocess or k8s) with the runner's environment. The op bodies live in
+    core; this is only the Dagster-specific execution + env binding."""
     return lambda cmd: _run_admin(context, runner, cmd, subprocess_client, env=runner.env())
 
 
@@ -89,6 +94,7 @@ def backup(
         out = ops.backup_target(
             _admin(context, runner, pipes_subprocess_client), neo4j, store, runner, _layout,
             group_id, alias, config.kind, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
+            log=context.log.info,
         )
     except ops.OpError as e:
         raise dg.Failure(str(e))
@@ -123,6 +129,7 @@ def aggregate(
         out = ops.aggregate_target(
             _admin(context, runner, pipes_subprocess_client), store, runner, _layout,
             group_id, alias, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
+            log=context.log.info,
         )
     except ops.OpError as e:
         raise dg.Failure(str(e))

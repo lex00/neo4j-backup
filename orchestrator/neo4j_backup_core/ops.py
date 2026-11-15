@@ -6,8 +6,8 @@ restore logic near-verbatim. That's factored here so all three call one implemen
 
 The seam is deliberately thin:
 
-- **Execution** is a `run_admin` callable — `run_admin(cmd: list) -> None`, runs one neo4j-admin argv
-  to completion and raises on failure. Each adapter binds its own (Dagster Pipes, Airflow subprocess/
+- **Execution** is a `run_admin` callable — `run_admin(cmd: list) -> str`, runs one neo4j-admin argv
+  to completion, raises on failure, and returns the command's output (#118). Each adapter binds its own (Dagster Pipes, Airflow subprocess/
   KPO, CLI subprocess), including how the environment is applied, so this module never touches
   process/pod machinery.
 - **Handles** (`neo4j`, `store`, `runner`) are the core clients; `layout` is a `paths.PathLayout`.
@@ -24,7 +24,7 @@ import shutil
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from . import cutover, metadata, naming, privileges
+from . import artifacts, cutover, metadata, naming, privileges
 
 RunAdmin = Callable[[list], None]
 Log = Callable[[str], None]
@@ -46,28 +46,58 @@ def _stage(runner, tag: str, name: str, staging: str | None) -> str:
 # bucket that denies header-less PutObject the pipeline runs neo4j-admin against local paths and
 # lets the object store do the writes. Reads (`--from-path s3://…`) stay direct either way (#39).
 
+def record_artifacts(run_admin: RunAdmin, runner, store, prefix: str, *, rewrite: bool = False,
+                     log: Log = _NOLOG) -> dict:
+    """Bring the sidecars under `prefix` in step with its artifacts (#118): inspect the folder in
+    the store, write a sidecar for every artifact that lacks one (all of them with `rewrite`, after
+    an aggregate changed the chain), and delete sidecars whose artifact is gone. Not fatal: a
+    failure is logged and returned, and the artifacts stay `unknown` until the next run backfills
+    them."""
+    try:
+        _metas, unknown = artifacts.read(store, prefix)
+        want = None if rewrite else {k[len(prefix):] for k in unknown}
+        written = []
+        if want is None or want:
+            out = run_admin(runner.inspect_command(store.uri(prefix)))
+            written = artifacts.write_sidecars(store, prefix, out, only=want)
+        dropped = artifacts.drop_orphans(store, prefix)
+        return {"written": len(written), "dropped": len(dropped)}
+    except Exception as e:  # noqa: BLE001 - the artifact itself is fine; report and move on
+        log(f"warning: could not record artifact metadata under {prefix}: {e}")
+        return {"error": str(e)}
+
+
 def run_backup(run_admin: RunAdmin, runner, store, database: str, prefix: str, kind: str,
-               *, upload: str = "admin", staging: str | None = None) -> str | None:
-    """Back up `database` into `prefix`; return the artifact key."""
+               *, upload: str = "admin", staging: str | None = None,
+               log: Log = _NOLOG) -> str | None:
+    """Back up `database` into `prefix`, record its sidecar; return the artifact key."""
     if upload == "pipeline":
         stage = _stage(runner, "_stage", database, staging)
         os.makedirs(stage, exist_ok=True)
         run_admin(runner.backup_command(database, stage, kind=kind))
-        return store.upload_backups(stage, prefix)  # SSE-KMS PUT, then remove local
-    run_admin(runner.backup_command(database, store.uri(prefix), kind=kind))
-    return store.latest_artifact_key(prefix)
+        key = store.upload_backups(stage, prefix)  # SSE-KMS PUT, then remove local
+    else:
+        run_admin(runner.backup_command(database, store.uri(prefix), kind=kind))
+        key = store.latest_artifact_key(prefix)
+    record_artifacts(run_admin, runner, store, prefix, log=log)  # reads stay direct (#39)
+    return key
 
 
 def run_aggregate(run_admin: RunAdmin, runner, store, physical: str, prefix: str,
-                  *, upload: str = "admin", staging: str | None = None) -> str | None:
-    """Collapse the chain at `prefix` in place; return the recovered-full key."""
+                  *, upload: str = "admin", staging: str | None = None,
+                  log: Log = _NOLOG) -> str | None:
+    """Collapse the chain at `prefix` in place, rewrite its sidecars; return the recovered-full
+    key."""
     if upload == "pipeline":
         stage = _stage(runner, "_agg", physical, staging)
         store.download_prefix(prefix, stage)
         run_admin(runner.aggregate_command(physical, stage))
-        return store.sync_up(stage, prefix)
-    run_admin(runner.aggregate_command(physical, store.uri(prefix)))
-    return store.latest_artifact_key(prefix)
+        key = store.sync_up(stage, prefix)
+    else:
+        run_admin(runner.aggregate_command(physical, store.uri(prefix)))
+        key = store.latest_artifact_key(prefix)
+    record_artifacts(run_admin, runner, store, prefix, rewrite=True, log=log)
+    return key
 
 
 def run_verify(run_admin: RunAdmin, runner, store, physical: str, src: str, scratch: str,
@@ -97,7 +127,8 @@ def run_verify(run_admin: RunAdmin, runner, store, physical: str, src: str, scra
 # --- target-level ops: resolve the target, then run the right leg ------------------------------
 
 def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: str, alias: str,
-                  kind: str, *, upload: str = "admin", staging: str | None = None) -> dict:
+                  kind: str, *, upload: str = "admin", staging: str | None = None,
+                  log: Log = _NOLOG) -> dict:
     """Back up the physical the alias currently targets (or `alias` itself if it's a physical
     name) into that physical's own prefix, so repeated backups form one chain."""
     physical = neo4j.resolve_physical(alias)
@@ -105,7 +136,7 @@ def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: s
         raise OpError(f"{alias!r} resolves to no physical database — bootstrap the group first")
     prefix = layout.physical_prefix(group_id, alias, physical)
     artifact = run_backup(run_admin, runner, store, physical, prefix, kind,
-                          upload=upload, staging=staging)
+                          upload=upload, staging=staging, log=log)
     return {"group": group_id, "alias": alias, "physical": physical, "kind": kind,
             "artifact": artifact}
 
@@ -119,11 +150,13 @@ def head_physical(store, layout, group_id: str, alias: str) -> tuple[str, str]:
 
 
 def aggregate_target(run_admin: RunAdmin, store, runner, layout, group_id: str, alias: str,
-                     *, upload: str = "admin", staging: str | None = None) -> dict:
+                     *, upload: str = "admin", staging: str | None = None,
+                     log: Log = _NOLOG) -> dict:
     """Collapse the live physical's chain into one recovered full, IN PLACE (RTO/retention)."""
     _head, physical = head_physical(store, layout, group_id, alias)
     prefix = layout.physical_prefix(group_id, alias, physical)
-    full = run_aggregate(run_admin, runner, store, physical, prefix, upload=upload, staging=staging)
+    full = run_aggregate(run_admin, runner, store, physical, prefix, upload=upload, staging=staging,
+                         log=log)
     return {"alias": alias, "physical": physical, "full": full}
 
 
@@ -136,6 +169,19 @@ def verify_target(run_admin: RunAdmin, store, runner, layout, group_id: str, ali
     checked = run_verify(run_admin, runner, store, physical, src, scratch,
                          upload=upload, staging=staging)
     return {"alias": alias, "physical": physical, "consistent": True, "checked": checked}
+
+
+def artifact_chains(store, layout, group_id: str, alias: str, *, run_admin: RunAdmin | None = None,
+                    runner=None, log: Log = _NOLOG) -> dict:
+    """The backup chains for one member, per physical, from the sidecars (#118). With `run_admin`
+    and `runner`, artifacts that have no sidecar (taken before #118) are inspected once and
+    backfilled first; without, they are reported under `unknown`."""
+    prefix = layout.alias_prefix(group_id, alias)
+    if run_admin is not None and runner is not None:
+        _metas, unknown = artifacts.read(store, prefix)
+        for folder in sorted({k.rsplit("/", 1)[0] + "/" for k in unknown}):
+            record_artifacts(run_admin, runner, store, folder, log=log)
+    return artifacts.chains(store, prefix)
 
 
 def import_database(run_admin: RunAdmin, runner, database: str, source_args: list) -> dict:
@@ -178,21 +224,30 @@ def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 
         if not dry_run:
             store.delete_keys(keys)
 
+    swept: list[str] = []
     for g in policy.db_groups:
         cutoff = now - timedelta(days=g.retention_days)
         for a in g.names:
-            arts = store.list_artifacts(layout.alias_prefix(g.id, a))
+            prefix = layout.alias_prefix(g.id, a)
+            arts = store.list_artifacts(prefix)
             if not arts:
                 continue
             newest = max(arts, key=lambda t: t[2])[0]
             _sweep([k for (k, _s, m) in arts if m < cutoff and k != newest], f"{g.id}/{a}")
+            swept.append(prefix)
     # DBMS metadata: keep the newest N (mirrors metadata.prune, but enumerable for dry-run)
     marts = sorted(store.list_text_keys(layout.metadata_prefix()), key=lambda t: t[1])
     _sweep([k for (k, _m) in (marts[:-keep_metadata] if keep_metadata > 0 else marts)],
            "_dbms/metadata")
     sysarts = sorted(store.list_artifacts(layout.system_prefix()), key=lambda t: t[2])
     _sweep([k for (k, _s, _m) in sysarts[:-keep_system]], "_dbms/system")
-    return {"deleted": len(victims), "detail": detail, "keys": victims, "dry_run": dry_run}
+    # sidecars (#118) go with their artifacts
+    sidecars = 0
+    if not dry_run:
+        for prefix in [*swept, layout.system_prefix()]:
+            sidecars += len(artifacts.drop_orphans(store, prefix))
+    return {"deleted": len(victims), "detail": detail, "keys": victims, "dry_run": dry_run,
+            "sidecars_deleted": sidecars}
 
 
 # --- DBMS metadata (pure Bolt, no runner) ------------------------------------------------------

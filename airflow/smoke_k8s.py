@@ -95,6 +95,13 @@ def main() -> None:
     after = len(store.list_artifacts(prefix))
     print(f"== artifacts under {prefix}: {before} -> {after} ==")
     assert after > before, "the k8s backup pods did not write an artifact"
+    # #118: the inspect output came back from the pod through the XCom file and became a sidecar
+    from neo4j_backup_core import artifacts
+    metas, unknown = artifacts.read(store, prefix)
+    newest = store.latest_artifact_key(prefix)
+    assert newest in metas, f"no sidecar for {newest} (unknown: {unknown})"
+    print(f"== sidecar for {newest}: {metas[newest]['type']}, tx {metas[newest]['lowest_tx']}-"
+          f"{metas[newest]['highest_tx']} ==")
     print("PASS: RUNNER_MODE=k8s — Airflow dispatched pods in k3d that ran neo4j-admin")
 
 

@@ -10,22 +10,23 @@ fields the Dagster adapter feeds to PipesK8sClient — see neo4j_backup_core/cli
 
 import json
 import os
-import subprocess
+import sys
 
 from neo4j_backup_airflow import config
+from neo4j_backup_core import capture
 
 
-def run_admin(command: list, env: dict | None = None) -> None:
-    """Run one neo4j-admin command to completion; non-zero exit raises."""
+def run_admin(command: list, env: dict | None = None) -> str:
+    """Run one neo4j-admin command to completion and return its output (#118); non-zero exit
+    raises. The output is still streamed to the task log."""
     runner = config.runner()
     full_env = {**runner.env(), **(env or {})}
     if runner.mode == "k8s":
-        _run_pod(runner, command, full_env)
-    else:
-        subprocess.run(command, check=True, env={**os.environ, **full_env})
+        return _run_pod(runner, command, full_env)
+    return capture.run_captured(command, env=full_env, stream=sys.stdout)
 
 
-def _run_pod(runner, command: list, env: dict) -> None:
+def _run_pod(runner, command: list, env: dict) -> str:
     if not runner.image:
         raise RuntimeError("RUNNER_MODE=k8s requires RUNNER_IMAGE")
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
@@ -51,8 +52,9 @@ def _run_pod(runner, command: list, env: dict) -> None:
         namespace=os.environ.get("RUNNER_NAMESPACE", "default"),
         image=runner.image,
         image_pull_policy="IfNotPresent",
-        cmds=command[:1],
-        arguments=command[1:],
+        # wrapped so the output comes back through the XCom sidecar (#118)
+        cmds=capture.wrap_for_xcom(command)[:1],
+        arguments=capture.wrap_for_xcom(command)[1:],
         env_vars=[k8s.V1EnvVar(name=k, value=v) for k, v in env.items()],
         container_resources=k8s.V1ResourceRequirements(limits={"memory": runner.memory_limit}),
         volumes=[scratch],
@@ -62,7 +64,9 @@ def _run_pod(runner, command: list, env: dict) -> None:
         in_cluster=os.environ.get("RUNNER_IN_CLUSTER", "true").lower() == "true",
         on_finish_action="delete_pod",
         get_logs=True,
+        do_xcom_push=True,
     )
     # KPO derives its pod labels from the live task context (dag_id/run_id/try_number);
     # run_admin is only ever called from inside a task, so the context is available.
-    op.execute(get_current_context())  # blocks until the pod terminates, raises on failure
+    # blocks until the pod terminates, raises on failure; returns the XCom the wrapper wrote
+    return capture.decode_xcom(op.execute(get_current_context()))

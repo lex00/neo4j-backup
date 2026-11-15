@@ -18,12 +18,12 @@ STAGING = os.environ.get("UPLOAD_STAGING_PATH") or None
 
 def run_backup(runner, store, database, prefix, kind):
     return ops.run_backup(run_admin, runner, store, database, prefix, kind,
-                          upload=BACKUP_UPLOAD, staging=STAGING)
+                          upload=BACKUP_UPLOAD, staging=STAGING, log=print)
 
 
 def run_aggregate(runner, store, physical, prefix):
     return ops.run_aggregate(run_admin, runner, store, physical, prefix,
-                             upload=BACKUP_UPLOAD, staging=STAGING)
+                             upload=BACKUP_UPLOAD, staging=STAGING, log=print)
 
 
 def run_verify(runner, store, physical, src, scratch):

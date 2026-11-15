@@ -65,7 +65,7 @@ def main() -> None:
     store: ObjectStoreResource = RES["store"]
     phys = neo4j.alias_target("acme-orders")
     assert phys, "alias acme-orders has no target — run `just bootstrap` first"
-    prefix = D._physical_prefix("demo", "acme-orders", phys)
+    prefix = D._layout.physical_prefix("demo", "acme-orders", phys)
     before = len(store.list_artifacts(prefix))
 
     print(f"== RUNNER_MODE=k8s backup of {phys} (pod in k3d via PipesK8sClient) ==")
@@ -80,6 +80,13 @@ def main() -> None:
     after = len(store.list_artifacts(prefix))
     print(f"== artifacts under {prefix}: {before} -> {after} ==")
     assert after > before, "the k8s backup pod did not write an artifact"
+    # #118: the inspect output came back from the pod as a Pipes message and became a sidecar
+    from neo4j_backup_core import artifacts
+    metas, unknown = artifacts.read(store, prefix)
+    newest = store.latest_artifact_key(prefix)
+    assert newest in metas, f"no sidecar for {newest} (unknown: {unknown})"
+    print(f"== sidecar for {newest}: {metas[newest]['type']}, tx {metas[newest]['lowest_tx']}-"
+          f"{metas[newest]['highest_tx']} ==")
     print("PASS: RUNNER_MODE=k8s — pod ran neo4j-admin in k3d and wrote to the store")
 
 

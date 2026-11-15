@@ -90,9 +90,13 @@ List the group's backups in the bucket:
 aws s3 ls --recursive s3://$BACKUP_BUCKET/<group>/
 ```
 
-Or use the MCP tools `show_chain(group, member)` and `latest_artifact(group, member)`. A point in
-time is reachable when a differential backup after it exists in the same database folder as a
-full backup before it.
+Each backup has a small `<artifact>.meta.json` next to it, written from
+`neo4j-admin backup inspect` after every backup and aggregate: full or differential, the
+transaction range, the time the backup was taken, and the store. The MCP tool
+`show_chain(group, member)` reads them and lists each chain (a full and the differentials after
+it, per database folder) with the window it covers (`from`, `to`). A point in time is reachable
+when it falls inside a chain's window. Backups taken before this was added are listed under
+`unknown` until the next backup or aggregate of that database fills them in.
 
 ### 3. Tell the customer what will happen
 
