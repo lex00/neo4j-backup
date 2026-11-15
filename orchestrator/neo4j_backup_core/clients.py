@@ -10,6 +10,7 @@ import os
 from contextlib import contextmanager
 from typing import Protocol, runtime_checkable
 
+from .cypher import quote, seed_uri_literal
 from .retry import retry_bolt
 
 
@@ -58,26 +59,30 @@ class Neo4jClient:
     # `topology` (any object exposing .primaries/.secondaries — e.g. policy.Topology) adds
     # the clustered `TOPOLOGY n PRIMARIES m SECONDARIES` clause; omit for standalone.
     def seed_database(self, name: str, seed_uri: str, restore_until: str | None = None,
-                      topology=None, cypher_version: str | None = None):
+                      topology=None, cypher_version: str | None = None,
+                      store_base: str | None = None):
+        # `store_base` (the store's `uri("")`): the seed URI must be inside it (#77)
+        if store_base is not None and not seed_uri.startswith(store_base):
+            raise ValueError(f"seed URI {seed_uri!r} is not in the backup store {store_base!r}")
         prefix = f"CYPHER {cypher_version} " if cypher_version else ""
         topo = ""
         if topology is not None:
             topo = (f" TOPOLOGY {topology.primaries} PRIMARIES "
                     f"{topology.secondaries} SECONDARIES")
-        opts = f"seedURI: '{seed_uri}'"
+        opts = f"seedURI: '{seed_uri_literal(seed_uri)}'"
         if cypher_version == "5":
             opts += ", existingData: 'use'"
         if restore_until:
             from .until import parse_until  # normalised here too: never the raw input (#77)
 
             opts += f", seedRestoreUntil: datetime('{parse_until(restore_until)}')"
-        self.run_system(f"{prefix}CREATE DATABASE `{name}`{topo} OPTIONS {{ {opts} }} WAIT")
+        self.run_system(f"{prefix}CREATE DATABASE {quote(name)}{topo} OPTIONS {{ {opts} }} WAIT")
 
     def alter_alias(self, alias: str, target: str):
-        self.run_system(f"ALTER ALIAS `{alias}` SET DATABASE TARGET `{target}`")
+        self.run_system(f"ALTER ALIAS {quote(alias)} SET DATABASE TARGET {quote(target)}")
 
     def create_alias(self, alias: str, target: str):
-        self.run_system(f"CREATE ALIAS `{alias}` IF NOT EXISTS FOR DATABASE `{target}`")
+        self.run_system(f"CREATE ALIAS {quote(alias)} IF NOT EXISTS FOR DATABASE {quote(target)}")
 
     def alias_target(self, alias: str) -> str | None:
         rows = self.run_system(
@@ -114,10 +119,10 @@ class Neo4jClient:
         return t.to_native() if hasattr(t, "to_native") else t
 
     def stop_database(self, name: str):
-        self.run_system(f"STOP DATABASE `{name}` WAIT")
+        self.run_system(f"STOP DATABASE {quote(name)} WAIT")
 
     def drop_database(self, name: str):
-        self.run_system(f"DROP DATABASE `{name}` IF EXISTS WAIT")
+        self.run_system(f"DROP DATABASE {quote(name)} IF EXISTS WAIT")
 
     def count_nodes(self, database: str) -> int:
         return self.run_on(database, "MATCH (n) RETURN count(n) AS n")[0]["n"]

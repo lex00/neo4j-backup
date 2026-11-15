@@ -15,10 +15,7 @@ from __future__ import annotations
 
 import re
 
-
-def quote(name: str) -> str:
-    """Backtick-quote a Neo4j identifier, doubling any backtick inside it."""
-    return "`" + name.replace("`", "``") + "`"
+from .cypher import quote  # the one quoting helper (#77)
 
 
 def _on(database: str) -> re.Pattern:
