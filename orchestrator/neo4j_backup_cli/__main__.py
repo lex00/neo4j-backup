@@ -131,12 +131,16 @@ def cmd_aggregate(args):
 
 def cmd_prune(args):
     store, policy, layout = env.store(), load_policy(env.policy_path()), paths.get_layout()
-    preview = ops.prune(store, policy, layout, dry_run=True)
-    short = _guard("prune", None, {"deleted": preview["deleted"], "detail": preview["detail"],
-                                   "keys": preview["keys"]}, args.confirm, args.dry_run)
+    runner = env.runner()
+    # backups taken before #118 have no sidecar; inspecting them (additive) lets prune see chains
+    fill = {"run_admin": _run_admin(runner), "runner": runner, "log": _log}
+    preview = ops.prune(store, policy, layout, dry_run=True, **fill)
+    short = _guard("prune", None, {k: preview[k] for k in ("deleted", "detail", "keys",
+                                                           "kept_for_chains", "unknown_kept")},
+                   args.confirm, args.dry_run)
     if short:
         return short
-    out = ops.prune(store, policy, layout)
+    out = ops.prune(store, policy, layout, **fill)
     return envelope("prune", ok=True, result=out), Exit.OK
 
 

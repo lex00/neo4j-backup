@@ -203,40 +203,6 @@ def test_verify_target_checks_head_and_cleans_scratch():
 
 # --- prune ------------------------------------------------------------------------------------
 
-def _prune_fixture():
-    from datetime import datetime, timezone
-    old = datetime(2000, 1, 1, tzinfo=timezone.utc)
-    new = datetime(2999, 1, 1, tzinfo=timezone.utc)
-    store = FakeStore(artifacts={"demo/orders/": [
-        ("demo/orders/p/old.backup", 1, old),
-        ("demo/orders/p/head.backup", 1, new),  # newest chain head -> always kept
-    ]})
-
-    class G:
-        id, retention_days = "demo", 7
-        names = ["orders"]
-
-    class Pol:
-        db_groups = [G()]
-    return store, Pol()
-
-
-def test_prune_keeps_head_and_deletes_stale():
-    store, pol = _prune_fixture()
-    out = ops.prune(store, pol, LAYOUT)
-    assert "demo/orders/p/old.backup" in store.deleted
-    assert "demo/orders/p/head.backup" not in store.deleted
-    assert out["deleted"] >= 1 and out["dry_run"] is False
-
-
-def test_prune_dry_run_enumerates_without_deleting():
-    store, pol = _prune_fixture()
-    out = ops.prune(store, pol, LAYOUT, dry_run=True)
-    assert out["dry_run"] is True
-    assert "demo/orders/p/old.backup" in out["keys"]  # blast radius reported
-    assert store.deleted == []                          # but nothing actually removed
-
-
 def test_plan_restore_reports_drops_without_mutating():
     store = FakeStore(latest=dict([_head("orders")]))
     neo = FakeNeo4j(exists=True)

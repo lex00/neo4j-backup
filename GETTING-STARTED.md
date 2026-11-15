@@ -198,9 +198,6 @@ All of them read the same policy and produce the same backups, so you can change
 
 Read these before you rely on the tool for customers:
 
-- [#73](https://github.com/lex00/neo4j-backup/issues/73) prune can delete the full backup that
-  newer differential backups depend on when a tier's full backups are further apart than
-  `retention_days` (the shipped `silver` and `bronze` tiers with the default 7 days).
 - [#74](https://github.com/lex00/neo4j-backup/issues/74) after a restore, differential backups
   fail until the next full backup; take a full backup straight after every restore.
 - [#75](https://github.com/lex00/neo4j-backup/issues/75) if the policy fails to load, Dagster

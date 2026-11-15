@@ -104,9 +104,11 @@ def preview_restore(group: str, replace: bool = False) -> dict:
 
 
 def preview_prune() -> dict:
-    """The artifacts retention would delete right now, WITHOUT deleting them."""
+    """The artifacts retention would delete right now, WITHOUT deleting them. Whole chains only
+    (#73); `kept_for_chains` counts artifacts past retention kept because newer ones need them,
+    `unknown_kept` those with no metadata sidecar yet (kept; run_prune fills them in first)."""
     out = ops.prune(env.store(), load_policy(env.policy_path()), _layout(), dry_run=True)
-    return {"deleted": out["deleted"], "detail": out["detail"], "keys": out["keys"]}
+    return {k: out[k] for k in ("deleted", "detail", "keys", "kept_for_chains", "unknown_kept")}
 
 
 # --- mutating (read-write scope only; each guarded by confirm) --------------------------------
@@ -175,14 +177,18 @@ def run_prune(confirm: bool = False, dry_run: bool = False) -> dict:
     """Delete backups past each group's retention (destructive). Needs confirm=true; dry_run (and
     the pre-confirmation result) return the exact keys that would be deleted."""
     store, policy, layout = env.store(), load_policy(env.policy_path()), _layout()
-    preview = ops.prune(store, policy, layout, dry_run=True)
+    runner = env.runner()
+    fill = {"run_admin": _run_admin(runner), "runner": runner, "log": _log}
+    preview = ops.prune(store, policy, layout, dry_run=True, **fill)
+    shown = {k: preview[k] for k in ("deleted", "detail", "keys", "kept_for_chains",
+                                     "unknown_kept")}
     if dry_run:
-        return {"dry_run": True, "deleted": preview["deleted"], "detail": preview["detail"],
-                "keys": preview["keys"]}
+        return {"dry_run": True, **shown}
     if not confirm:
-        return _needs_confirmation("prune", {"deleted": preview["deleted"], "keys": preview["keys"]})
-    out = ops.prune(store, policy, layout)
-    return {"deleted": out["deleted"], "detail": out["detail"]}
+        return _needs_confirmation("prune", shown)
+    out = ops.prune(store, policy, layout, **fill)
+    return {"deleted": out["deleted"], "detail": out["detail"],
+            "kept_for_chains": out["kept_for_chains"], "unknown_kept": out["unknown_kept"]}
 
 
 READ_TOOLS = [list_targets, latest_artifact, show_chain, backup_status,

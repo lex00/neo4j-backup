@@ -203,17 +203,55 @@ def system_backup(run_admin: RunAdmin, store, runner, layout,
     return {"key": key}
 
 
-# --- retention prune (boto3 only) --------------------------------------------------------------
+# --- retention prune --------------------------------------------------------------------------
+
+def _sidecar_time(t: str | None) -> datetime | None:
+    # neo4j-admin reports UTC without an offset, e.g. 2026-11-15T21:26:56
+    if not t:
+        return None
+    d = datetime.fromisoformat(t)
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def plan_member_prune(chains: list[dict], cutoff: datetime) -> tuple[list[str], int]:
+    """Which artifacts of one member to delete, chain by chain (#73). `chains` is
+    `artifacts.chains(...)["chains"]` for the member (every physical and store). Kept: the newest
+    chain; every chain whose newest artifact is at or after the cutoff; and every chain from the
+    newest full before the cutoff onward (it covers the cutoff instant). The rest are deleted
+    whole. Returns (keys to delete, number of kept artifacts older than the cutoff)."""
+    if not chains:
+        return [], 0
+    starts = [_sidecar_time(c["from"]) for c in chains]
+    ends = [_sidecar_time(c["to"]) for c in chains]
+    newest = max(range(len(chains)), key=lambda i: ends[i])
+    before = [st for st in starts if st < cutoff]
+    anchor = max(before) if before else None
+    delete: list[str] = []
+    held = 0
+    for i, c in enumerate(chains):
+        keep = (i == newest or ends[i] >= cutoff or (anchor is not None and starts[i] >= anchor))
+        if keep:
+            held += sum(1 for a in c["artifacts"] if _sidecar_time(a["time"]) < cutoff)
+        else:
+            delete.extend(a["key"] for a in c["artifacts"])
+    return delete, held
+
 
 def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 14,
-          dry_run: bool = False) -> dict:
-    """Delete `*.backup` older than each group's retention_days, keeping the newest per alias
-    (chain head); keep the newest `keep_metadata` DBMS metadata exports and `keep_system` system
-    fulls. Chain-naive — aggregate an old chain into a full first to preserve PITR coverage.
-    `dry_run` enumerates the victims (`keys`) without deleting — the CLI's blast radius."""
-    now = datetime.now(timezone.utc)
+          dry_run: bool = False, run_admin: RunAdmin | None = None, runner=None,
+          now: datetime | None = None, log: Log = _NOLOG) -> dict:
+    """Delete backups past each group's `retention_days` without breaking a chain (#73): per
+    member, whole chains are deleted only when nothing kept depends on them
+    (`plan_member_prune`). Full or diff is read from the sidecars (#118). Artifacts with no sidecar
+    are inspected first when `run_admin`/`runner` are given (this writes sidecars even on a dry
+    run, so the preview and the real prune see the same chains); otherwise they are kept and
+    counted in `unknown_kept`. Also keeps the newest `keep_metadata` DBMS metadata exports and
+    `keep_system` system fulls. `dry_run` lists the victims (`keys`) without deleting."""
+    now = now or datetime.now(timezone.utc)
     victims: list[str] = []
     detail: dict[str, int] = {}
+    held_total = 0
+    unknown_kept: list[str] = []
 
     def _sweep(keys, label):
         keys = list(keys)
@@ -229,11 +267,14 @@ def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 
         cutoff = now - timedelta(days=g.retention_days)
         for a in g.names:
             prefix = layout.alias_prefix(g.id, a)
-            arts = store.list_artifacts(prefix)
-            if not arts:
+            if not store.list_artifacts(prefix):
                 continue
-            newest = max(arts, key=lambda t: t[2])[0]
-            _sweep([k for (k, _s, m) in arts if m < cutoff and k != newest], f"{g.id}/{a}")
+            read = artifact_chains(store, layout, g.id, a, run_admin=run_admin, runner=runner,
+                                   log=log)
+            keys, held = plan_member_prune(read["chains"], cutoff)
+            held_total += held
+            unknown_kept.extend(read["unknown"])
+            _sweep(keys, f"{g.id}/{a}")
             swept.append(prefix)
     # DBMS metadata: keep the newest N (mirrors metadata.prune, but enumerable for dry-run)
     marts = sorted(store.list_text_keys(layout.metadata_prefix()), key=lambda t: t[1])
@@ -247,7 +288,8 @@ def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 
         for prefix in [*swept, layout.system_prefix()]:
             sidecars += len(artifacts.drop_orphans(store, prefix))
     return {"deleted": len(victims), "detail": detail, "keys": victims, "dry_run": dry_run,
-            "sidecars_deleted": sidecars}
+            "sidecars_deleted": sidecars, "kept_for_chains": held_total,
+            "unknown_kept": len(unknown_kept)}
 
 
 # --- DBMS metadata (pure Bolt, no runner) ------------------------------------------------------

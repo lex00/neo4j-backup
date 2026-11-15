@@ -163,14 +163,23 @@ def verify(
 
 # --- Prune (age-based retention) -------------------------------------------------
 @dg.asset(group_name="neo4j_backup")
-def prune(context: dg.AssetExecutionContext, store: ObjectStoreResource):
-    """Delete *.backup older than each group's retention_days, keeping the newest per
-    alias (chain head). Production should `aggregate` an old chain into a full first so
-    PITR coverage isn't lost; this age prune is chain-naive."""
-    out = ops.prune(store, load_policy(POLICY_PATH), _layout)
-    context.log.info(f"pruned {out['deleted']} artifacts")
+def prune(
+    context: dg.AssetExecutionContext,
+    store: ObjectStoreResource,
+    runner: RunnerResource,
+    pipes_subprocess_client: dg.PipesSubprocessClient,
+):
+    """Delete backups past each group's retention_days, whole chains only (#73): a full that a
+    kept diff depends on is kept, and the chain covering the cutoff is kept. Artifacts with no
+    metadata sidecar are inspected first (#118)."""
+    out = ops.prune(store, load_policy(POLICY_PATH), _layout,
+                    run_admin=_admin(context, runner, pipes_subprocess_client), runner=runner,
+                    log=context.log.info)
+    context.log.info(f"pruned {out['deleted']} artifacts; kept {out['kept_for_chains']} past "
+                     f"retention for their chains; {out['unknown_kept']} without metadata")
     return dg.MaterializeResult(
-        metadata={"deleted": out["deleted"],
+        metadata={"deleted": out["deleted"], "kept_for_chains": out["kept_for_chains"],
+                  "unknown_kept": out["unknown_kept"],
                   **{k: dg.MetadataValue.int(v) for k, v in out["detail"].items()}}
     )
 

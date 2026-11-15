@@ -32,6 +32,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   clusters work unchanged.
 
 ### Fixed
+- **Prune keeps whole chains** (#73). It used to keep only the newest backup per member, so with
+  weekly fulls and `retention_days: 7` (the shipped `silver` and `bronze` tiers) it deleted the
+  full that the remaining diffs needed, and the newest backup could no longer be restored. Prune now
+  reads the chains from the sidecars (#118) and, per member, keeps the newest chain, every chain
+  with a backup inside the window, and the chain covering the start of the window; older chains go
+  whole, sidecars with them. Backups with no sidecar are inspected first (CLI, Dagster, Airflow,
+  MCP `run_prune`), or kept and counted. The preview reports `kept_for_chains` and `unknown_kept`.
 - `smoke_k8s.py` and `smoke_phase6.py` called a removed helper (`_physical_prefix`) and failed at
   start; they use the path layout now.
 - **Restores keep customer privileges** (#117). Neo4j stores a privilege against the physical
