@@ -32,7 +32,13 @@ for raw in "${DEMO_ALIASES[@]}"; do
   aliases+=("$alias_name"); news+=("$newdb"); olds+=("$(alias_target "$alias_name")")
 done
 
-# Phase 2 — repoint all aliases after every seed succeeds (group-aligned cutover).
+# Phase 2 — copy privileges from each old physical to its new one (#117), all before any swap.
+for i in "${!aliases[@]}"; do
+  echo ">>   privileges ${olds[$i]:-<none>} -> ${news[$i]}"
+  copy_privileges "${olds[$i]}" "${news[$i]}"
+done
+
+# Phase 3 — repoint all aliases after every seed succeeds (group-aligned cutover).
 for i in "${!aliases[@]}"; do
   echo ">>   alias ${aliases[$i]}: ${olds[$i]:-<none>} -> ${news[$i]}"
   sys "ALTER ALIAS \`${aliases[$i]}\` SET DATABASE TARGET \`${news[$i]}\`;"

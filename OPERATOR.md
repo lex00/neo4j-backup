@@ -99,7 +99,8 @@ full backup before it.
 - Writes after the chosen time are gone.
 - Transactions running at the moment of the switch are aborted and rolled back; applications must
   retry. On a cluster, members may briefly disagree about where the alias points.
-- Their users lose access until you copy the privileges (step 6).
+- Their users keep access: the restore copies every privilege on the old database to the new one
+  before the switch.
 
 ### 4. Preview
 
@@ -108,8 +109,9 @@ neo4j-backup restore <group> --dry-run                                   # lates
 neo4j-backup restore <group> --until 2026-11-15T09:00:00Z --dry-run      # point in time
 ```
 
-The plan lists the backup each database will come from and any database that would be dropped
-(only in by-name groups with `--replace`).
+The plan lists the backup each database will come from, any database that would be dropped
+(only in by-name groups with `--replace`), and per member the privileges that will be carried over
+(`privileges`: the grants on the database the alias points at now).
 
 ### 5. Restore
 
@@ -123,27 +125,17 @@ The same restore from the orchestrators:
   `{ops: {restore_group_op: {config: {group_id: <group>, restore_until: "2026-11-15T09:00:00Z"}}}}`.
 - Airflow: `airflow dags trigger neo4j_restore -c '{"group_id": "<group>", "restore_until": "2026-11-15T09:00:00Z"}'`.
 
-The result lists, per member, the old database (`old`) and the new one (`newdb`). Keep it; you need
-both names below.
+The result lists, per member, the old database (`old`), the new one (`newdb`) and the privileges
+granted on the new one (`privileges`). Keep it for the report.
 
-### 6. Copy the customer's privileges to the new database
+Neo4j stores privileges against the database, not the alias, so the restore re-grants every
+privilege on the old database onto the new one before it moves any alias. Grants on `*` and on
+`HOME` don't name a database and are left as they are. If a grant fails, the restore stops before
+the switch and every alias still points at its old database. In a by-name group with `--replace`,
+the privileges are read before the drop and granted again after the create (DROP DATABASE removes
+them).
 
-A known issue in this release ([#117](https://github.com/lex00/neo4j-backup/issues/117)): Neo4j
-stores privileges against the database, not the alias, so after the switch the customer's users
-get "Access denied". For each member, with `OLD` and `NEW` from the restore result:
-
-```bash
-cypher-shell -d system --format plain \
-  "SHOW PRIVILEGES AS COMMANDS YIELD command WHERE command CONTAINS '\`$OLD\`' RETURN command" \
-  | tail -n +2 | sed -e 's/^"//' -e 's/"$//' -e "s/\`$OLD\`/\`$NEW\`/g" \
-  | while IFS= read -r cmd; do cypher-shell -d system "$cmd" </dev/null; done
-```
-
-This was tested on the local stack: a user granted read access through the alias was denied after
-a restore and could read again after the copy. The privileges on the old database stay, which is
-what you want for an undo.
-
-### 7. Take a full backup of the restored group
+### 6. Take a full backup of the restored group
 
 ```bash
 neo4j-backup backup <group> --kind FULL
@@ -153,7 +145,7 @@ The new databases have no backups of their own yet, so the next scheduled differ
 would fail ([#74](https://github.com/lex00/neo4j-backup/issues/74)) and anything written until the
 next full backup would be unprotected.
 
-### 8. Report back
+### 7. Report back
 
 Send the customer the restore point, the time of the switch, and the old and new database names.
 
@@ -169,8 +161,8 @@ Its privileges were never removed, so access works again straight away.
 
 ### Clean up later
 
-After a soak period, drop the old databases (`DROP DATABASE <old>`) and revoke the privileges
-that were copied away from them.
+After a soak period, drop the old databases (`DROP DATABASE <old>`). Dropping a database also
+removes the privileges granted on it.
 
 ### Limits today
 
@@ -180,8 +172,7 @@ that were copied away from them.
   database's chain; restore that by hand with the Cypher in [RECOVERY.md](RECOVERY.md)
   ([#114](https://github.com/lex00/neo4j-backup/issues/114)).
 
-**Planned:** copying privileges automatically ([#117](https://github.com/lex00/neo4j-backup/issues/117)),
-the full backup as part of the restore ([#97](https://github.com/lex00/neo4j-backup/issues/97)),
+**Planned:** the full backup as part of the restore ([#97](https://github.com/lex00/neo4j-backup/issues/97)),
 `--ticket` and `--reason` on the command ([#119](https://github.com/lex00/neo4j-backup/issues/119)),
 `rollback` ([#122](https://github.com/lex00/neo4j-backup/issues/122)) and `cleanup`
 ([#93](https://github.com/lex00/neo4j-backup/issues/93)).
@@ -190,8 +181,7 @@ the full backup as part of the restore ([#97](https://github.com/lex00/neo4j-bac
 
 When a customer's data starts as CSV or Parquet files, follow [IMPORT.md](IMPORT.md): import it
 on a separate loader machine, back it up into the group's folder in the bucket, then
-`neo4j-backup restore <group> --confirm`. Copy privileges and take a full backup afterwards, as for
-any restore.
+`neo4j-backup restore <group> --confirm`. Take a full backup afterwards, as for any restore.
 
 For a customer whose graph is rebuilt in full from external sources on a schedule, run the same
 steps each cycle. Their writes since the previous load are replaced each time.
@@ -228,7 +218,10 @@ Not yet tested end to end. The pieces exist:
    latest export (passwords aren't in it), or restore the `system` database offline for exact
    copies ([RECOVERY.md](RECOVERY.md#the-metadata-layer-users-roles-privileges-aliases)).
 3. Point the tool at the new cluster (`NEO4J_BOLT_URI`, `NEO4J_BACKUP_SOURCE`) and restore each
-   group. Check each alias and copy privileges as in the restore runbook.
+   group. The grants replayed in step 2 name the old cluster's physical databases, so the restore
+   has nothing to copy from. Check that each customer role reads through its alias, and if not,
+   copy the grants by hand from the old physical name (see the privileges note in
+   [RECOVERY.md](RECOVERY.md)). Grants on `*` carry over as they are.
 
 **Planned:** several clusters in one policy ([#106](https://github.com/lex00/neo4j-backup/issues/106))
 and restoring a group into another cluster ([#115](https://github.com/lex00/neo4j-backup/issues/115)).

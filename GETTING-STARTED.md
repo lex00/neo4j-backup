@@ -116,11 +116,10 @@ cutover acme-audit: acme-audit-20261115t204341 -> acme-audit-20261115t204747
 Each alias now points at a new database seeded from the backup. The old databases are still there,
 so undoing a restore is pointing the alias back (see the [Operator guide](OPERATOR.md#undo-a-restore)).
 
-> **Customer privileges after a restore.** In this release a restore does not carry over
-> privileges granted to customer roles, so their users get "Access denied" until you copy the
-> privileges to the new database ([#117](https://github.com/lex00/neo4j-backup/issues/117)). The
-> demo uses the admin user, so you won't see it here. The
-> [Operator guide](OPERATOR.md#restore-on-a-customers-request) has the fix.
+> **Customer privileges.** Neo4j stores privileges against the database, not the alias, so the
+> restore re-grants every privilege on each old database onto the new one before the switch
+> ([#117](https://github.com/lex00/neo4j-backup/issues/117)). The demo uses the admin user, whose
+> grants are on `*`, so the restore output lists none.
 
 ### 4. Restore to a point in time
 
@@ -199,8 +198,6 @@ All of them read the same policy and produce the same backups, so you can change
 
 Read these before you rely on the tool for customers:
 
-- [#117](https://github.com/lex00/neo4j-backup/issues/117) restores drop customer privileges
-  (workaround in the [Operator guide](OPERATOR.md#restore-on-a-customers-request)).
 - [#73](https://github.com/lex00/neo4j-backup/issues/73) prune can delete the full backup that
   newer differential backups depend on when a tier's full backups are further apart than
   `retention_days` (the shipped `silver` and `bronze` tiers with the default 7 days).

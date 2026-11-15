@@ -74,9 +74,22 @@ class FakeStore:
 
 
 class FakeNeo4j:
-    def __init__(self, physical="orders-20260101t000000", exists=False, target="old-phys"):
+    def __init__(self, physical="orders-20260101t000000", exists=False, target="old-phys",
+                 privs=None, fail_on=None):
         self._physical, self._exists, self._target = physical, exists, target
         self.seeded, self.dropped, self.altered = [], [], []
+        self._privs = privs or {}  # database -> [command]
+        self._fail_on = fail_on     # substring of a command that makes run_system raise
+        self.ran = []
+
+    def privilege_commands(self, database):
+        return list(self._privs.get(database, []))
+
+    def run_system(self, cypher, **params):
+        if self._fail_on and self._fail_on in cypher:
+            raise RuntimeError("grant refused")
+        self.ran.append(cypher)
+        return []
 
     def resolve_physical(self, alias):
         return self._physical
@@ -274,6 +287,48 @@ def test_restore_group_by_name_replaces_then_seeds():
     out = ops.restore_group(neo, store, group, LAYOUT, replace=True)
     assert neo.dropped == ["orders"] and len(neo.seeded) == 1
     assert out["members"][0]["replaced"] is True
+
+
+# --- privileges across the swap (#117) --------------------------------------------------------
+
+OLD_PRIVS = {"old-phys": ["GRANT ACCESS ON DATABASE `old-phys` TO `r`",
+                          "GRANT MATCH {*} ON GRAPH `old-phys` NODE * TO `r`"]}
+
+
+def test_alias_swap_copies_privileges_before_swap():
+    store = FakeStore(latest=dict([_head("orders")]))
+    neo = FakeNeo4j(privs=OLD_PRIVS)
+    out = ops.restore_group(neo, store, FakeGroup(["orders"]), LAYOUT)
+    new = out["members"][0]["newdb"]
+    assert neo.ran == [f"GRANT ACCESS ON DATABASE `{new}` TO `r`",
+                       f"GRANT MATCH {{*}} ON GRAPH `{new}` NODE * TO `r`"]
+    assert out["members"][0]["privileges"] == neo.ran
+    assert neo.altered == [("orders", new)]
+
+
+def test_failed_privilege_copy_moves_no_alias():
+    store = FakeStore(latest=dict([_head("orders"), _head("customers")]))
+    neo = FakeNeo4j(privs=OLD_PRIVS, fail_on="MATCH")
+    with pytest.raises(ops.OpError, match="no alias was moved"):
+        ops.restore_group(neo, store, FakeGroup(["orders", "customers"]), LAYOUT)
+    assert neo.altered == []  # every alias still on its old physical
+
+
+def test_by_name_replace_regrants_privileges_after_create():
+    store = FakeStore(latest=dict([_head("orders")]))
+    privs = {"orders": ["GRANT ACCESS ON DATABASE `orders` TO `r`"]}
+    neo = FakeNeo4j(exists=True, privs=privs)
+    out = ops.restore_group(neo, store, FakeGroup(["orders"], restore_mode="by-name"), LAYOUT,
+                            replace=True)
+    assert neo.dropped == ["orders"] and neo.ran == privs["orders"]
+    assert out["members"][0]["privileges"] == privs["orders"]
+
+
+def test_plan_restore_lists_privileges_per_member():
+    store = FakeStore(latest=dict([_head("orders")]))
+    plan = ops.plan_restore(FakeNeo4j(privs=OLD_PRIVS), store, FakeGroup(["orders"]), LAYOUT)
+    assert plan["members"][0]["old"] == "old-phys"
+    assert plan["members"][0]["privileges"] == OLD_PRIVS["old-phys"]
 
 
 # --- metadata + system ------------------------------------------------------------------------
