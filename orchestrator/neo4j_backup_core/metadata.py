@@ -135,9 +135,10 @@ def statements(cypher_text: str) -> list[str]:
 def prune(store, keep: int = 14) -> int:
     """Keep the newest `keep` metadata exports under `_dbms/`, delete the rest. Bounded
     history rather than per-group age (metadata is DBMS-wide and tiny)."""
+    if isinstance(keep, bool) or not isinstance(keep, int) or keep < 1:
+        raise ValueError(f"keep must be an integer >= 1 (the newest N are kept), got {keep!r}")
     arts = sorted(store.list_text_keys(paths.metadata_prefix()), key=lambda t: t[1])
-    stale = [k for (k, _m) in arts[:-keep]] if keep > 0 else [k for (k, _m) in arts]
-    return store.delete_keys(stale)
+    return store.delete_keys([k for (k, _m) in arts[:-keep]])
 
 
 def replay(neo, cypher_text: str) -> dict:
