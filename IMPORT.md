@@ -71,9 +71,9 @@ a policy group's aliases on a normal source).
 **4. Seed (the existing path).** The `.backup` is now an ordinary chain head at
 `<group>/<slug>/<physical>/`; seed-from-URI restores its store into whatever target you name — the
 loader's db name doesn't leak through. It is a restore point only: a backup chain belongs to one
-database, so the seeded database can't add differential backups to the loader's backup. Take a full
-backup of the group straight after the restore (`neo4j-backup backup <group> --kind FULL`), and copy
-the customer's privileges as in the [Operator guide](OPERATOR.md#restore-on-a-customers-request):
+database, so the seeded database can't add differential backups to the loader's backup. The restore
+takes a full backup of each seeded database at the end (the baseline, on by default), and copies the
+customer's privileges, as described in the [Operator guide](OPERATOR.md#restore-on-a-customers-request):
 
 ```bash
 neo4j-backup --json verify <group>

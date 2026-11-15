@@ -250,6 +250,7 @@ class RestoreConfig(dg.Config):
     group_id: str
     restore_until: str | None = None  # ISO-8601; needs a differential chain
     replace: bool = False  # by-name mode only: DROP+recreate a target that already exists
+    baseline: bool = True  # take a FULL of each restored database afterwards (#97)
 
 
 @dg.op
@@ -271,12 +272,40 @@ def restore_group_op(
         )
     except ops.OpError as e:
         raise dg.Failure(str(e))
-    return out["members"]
+    return {"group_id": config.group_id, "baseline": config.baseline, "members": out["members"]}
 
 
-@dg.job
+@dg.op(pool="neo4j")
+def baseline_op(
+    context: dg.OpExecutionContext,
+    restored: dict,
+    neo4j: Neo4jResource,
+    store: ObjectStoreResource,
+    runner: RunnerResource,
+    pipes_subprocess_client: dg.PipesSubprocessClient,
+):
+    """A FULL backup of each database the restore created (#97), a visible step after the
+    cutover. The restore job runs with the `backup_kind: full` tag, so it waits for the full
+    lane like a scheduled full. A failure leaves the restore applied."""
+    if not restored["baseline"]:
+        context.log.info("baseline skipped (baseline=false)")
+        return []
+    group = load_policy(POLICY_PATH).group(restored["group_id"])
+    try:
+        done = ops.baseline_after_restore(
+            _admin(context, runner, pipes_subprocess_client), neo4j, store, runner, _layout,
+            group, restored["members"], upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
+            log=context.log.info)
+    except ops.BaselineError as e:
+        raise dg.Failure(f"[{e.kind}] {e}", metadata={"baseline_done": str(e.done)})
+    return done
+
+
+# The full-lane tag: the baseline step is a full backup, so the job queues behind the full lane's
+# tag concurrency limit like a scheduled full does (#97).
+@dg.job(tags={"backup_kind": "full"})
 def restore_group():
-    restore_group_op()
+    baseline_op(restore_group_op())
 
 
 # --- Sensor + schedules ----------------------------------------------------------

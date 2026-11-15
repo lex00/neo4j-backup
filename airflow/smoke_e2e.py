@@ -78,23 +78,40 @@ def main() -> None:
     assert not store.list_artifacts("_verify/"), "verify scratch not cleaned"
     print("   verify OK (consistent, prod chain intact, scratch cleaned)")
 
+    from neo4j_backup_core import artifacts
+
+    def types_at(alias):
+        p = neo.alias_target(alias)
+        metas, _u = artifacts.read(store, paths.physical_prefix("demo", alias, p))
+        return p, sorted(m["type"] for m in metas.values())
+
     expected = neo.count_nodes(phys)
-    print("== RESTORE via dag.test(run_conf=group_id=demo) ==")
+    print("== RESTORE via dag.test(run_conf=group_id=demo), with the baseline (#97) ==")
     run = rd.neo4j_restore_dag.test(run_conf={"group_id": "demo"})
     assert _ok(run), f"restore DAG state={getattr(run,'state',run)}"
     n = neo.count_nodes("acme-orders")
     assert n == expected, f"restored {n} != expected {expected}"
-    print(f"   restore OK ({n} nodes via alias)")
+    newphys, types = types_at("acme-orders")
+    assert types == ["full"], types
+    print(f"   restore OK ({n} nodes via alias); baseline full of {newphys}")
 
-    print("== DIFF lane right after the restore (#74) ==")
-    newphys = neo.alias_target("acme-orders")
-    split = bd.split_by_base(["demo/acme-orders"])
-    assert split == {"diff": [], "full": ["demo/acme-orders"]}, split
+    print("== the next diff-lane run takes a diff (#97) ==")
+    assert bd.split_by_base(["demo/acme-orders"])["diff"] == ["demo/acme-orders"]
+    neo.run_on(newphys, "CREATE (:AfterRestore)")
     run = bd.neo4j_backup_gold_diff.test()
     assert _ok(run), f"diff DAG state={getattr(run,'state',run)}"
-    from neo4j_backup_core import artifacts
-    metas, _unknown = artifacts.read(store, paths.physical_prefix("demo", "acme-orders", newphys))
-    assert [m["type"] for m in metas.values()] == ["full"], metas
+    assert types_at("acme-orders")[1] == ["diff", "full"], types_at("acme-orders")
+    print("   diff OK")
+
+    print("== RESTORE with baseline=false, then the DIFF lane (#74) ==")
+    run = rd.neo4j_restore_dag.test(run_conf={"group_id": "demo", "baseline": False})
+    assert _ok(run), f"restore DAG state={getattr(run,'state',run)}"
+    newphys, types = types_at("acme-orders")
+    assert types == [], types
+    assert bd.split_by_base(["demo/acme-orders"]) == {"diff": [], "full": ["demo/acme-orders"]}
+    run = bd.neo4j_backup_gold_diff.test()
+    assert _ok(run), f"diff DAG state={getattr(run,'state',run)}"
+    assert types_at("acme-orders")[1] == ["full"], types_at("acme-orders")
     print(f"   diff DAG sent acme-orders to the full pool; {newphys} now has a full")
 
     print("== PRUNE via dag.test() ==")
