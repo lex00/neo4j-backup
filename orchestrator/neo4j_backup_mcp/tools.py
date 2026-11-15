@@ -96,12 +96,14 @@ def backup_status() -> dict:
     return {"targets": rows}
 
 
-def preview_restore(group: str, replace: bool = False) -> dict:
+def preview_restore(group: str, replace: bool = False, until: str | None = None) -> dict:
     """The blast radius of restoring a group WITHOUT mutating: per member, the artifact and what
-    would happen (by-name create / drop+recreate, or alias-swap seed + swap). Runs preconditions."""
+    would happen (by-name create / drop+recreate, or alias-swap seed + swap). Runs preconditions.
+    With `until`, each member's `seed` names the backup chain and window that covers it (#114)."""
+    until = parse_until(until)
     g = load_policy(env.policy_path()).group(group)
     return {"group": group, "plan": ops.plan_restore(env.neo4j(), env.store(), g, _layout(),
-                                                      replace=replace)}
+                                                      replace=replace, until=until)}
 
 
 def preview_prune() -> dict:
@@ -162,7 +164,8 @@ def run_restore(group: str, until: str | None = None, replace: bool = False,
     until = parse_until(until)
     g = load_policy(env.policy_path()).group(group)
     store, neo, layout = env.store(), env.neo4j(), _layout()
-    plan = ops.plan_restore(neo, store, g, layout, replace=replace)  # preconditions first
+    plan = ops.plan_restore(neo, store, g, layout, replace=replace,
+                            until=until)  # preconditions first, incl. the chain for `until`
     plan["baseline"] = baseline
     if dry_run:
         return {"group": group, "dry_run": True, "plan": plan}

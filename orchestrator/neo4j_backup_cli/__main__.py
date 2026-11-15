@@ -116,7 +116,8 @@ def _guard(op, group, blast, confirmed, dry_run):
 def cmd_restore(args):
     group = _group(args)
     store, neo, layout = env.store(), env.neo4j(), paths.get_layout()
-    plan = ops.plan_restore(neo, store, group, layout, replace=args.replace)  # preconditions first
+    plan = ops.plan_restore(neo, store, group, layout, replace=args.replace,
+                            until=args.until)  # preconditions first, incl. the chain for --until
     plan["baseline"] = not args.no_baseline  # a FULL of each new database afterwards (#97)
     short = _guard("restore", group.id, {"plan": plan}, args.confirm, args.dry_run)
     if short:
