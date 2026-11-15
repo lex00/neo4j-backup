@@ -72,7 +72,7 @@ The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, a
 | `aliases` | list of string | **required** (alias-swap) | used | app-facing Neo4j aliases to back up (one unit each). Use in `alias-swap` mode. |
 | `databases` | list of string | **required** (by-name) | used | database **names** to back up/restore directly (must be legal DB names). Use in `by-name` mode instead of `aliases`. |
 | `tier` | string | **required** | used | which `tiers` entry sets the schedule (must exist) |
-| `retention_days` | int | `7` | used | `prune` deletes backups older than this, whole chains only: per member it keeps the newest chain, any chain with a backup inside the window, and the chain that covers the start of the window (the newest full before it), so a point in time inside the window stays reachable |
+| `retention_days` | int | `7` | used | `prune` deletes backups older than this, whole chains only: per member it keeps the newest chain, any chain with a backup inside the window, and the chain that covers the start of the window (the newest full before it), so a point in time inside the window stays reachable. If the group's tier takes fulls further apart than this, policy load logs a warning and `neo4j-backup targets` lists it under `warnings`: backups are then kept up to the full interval plus `retention_days` |
 | `s3_prefix` | string | **required** | decl | not read; the bucket comes from `BACKUP_BUCKET` |
 | `owner` | string | `null` | decl | reporting / ownership tag |
 | `rpo_minutes` | int | `60` | decl | target, not enforced |

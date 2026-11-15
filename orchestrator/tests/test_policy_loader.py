@@ -76,3 +76,39 @@ def test_unset_falls_back_to_file(monkeypatch, tmp_path):
     f = tmp_path / "p.yaml"
     f.write_text(MINI)
     assert P.load_policy(str(f)).group("g")   # built-in file path still works
+
+
+# --- #73: full interval vs retention ------------------------------------------------------------
+
+def _policy(tier_full, retention):
+    from neo4j_backup_core.policy import Policy
+    return Policy.model_validate({
+        "db_groups": [{"id": "g", "aliases": ["a"], "tier": "t", "s3_prefix": "s3://x/",
+                       "retention_days": retention}],
+        "tiers": {"t": {"full_cron": tier_full, "diff_cron": "0 * * * *"}}})
+
+
+def test_warns_when_fulls_are_further_apart_than_retention(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING):
+        p = _policy("0 3 * * 0", 3)  # weekly full, 3 days retention
+    assert len(p.warnings()) == 1 and "7 days" in p.warnings()[0]
+    assert "retention_days 3" in caplog.text
+
+
+def test_no_warning_when_retention_covers_the_full_interval():
+    assert _policy("0 3 * * 0", 7).warnings() == []
+    assert _policy("0 2 * * *", 1).warnings() == []
+
+
+def test_cron_forms_it_cannot_read_are_skipped():
+    # Dagster and Airflow accept @weekly and day names; the check skips them, load still works
+    assert _policy("@weekly", 3).warnings() == []
+    assert _policy("0 3 * * SUN", 3).warnings() == []
+
+
+def test_shipped_demo_policy_has_no_warnings():
+    from neo4j_backup_core.policy import load_policy
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    assert load_policy(os.path.join(here, "..", "..", "policies", "demo.yaml")).warnings() == []

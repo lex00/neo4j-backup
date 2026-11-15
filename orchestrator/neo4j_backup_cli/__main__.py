@@ -42,8 +42,9 @@ def _group(args):
 # --- unguarded commands (read-only or additive) -----------------------------------------------
 
 def cmd_targets(args):
-    keys = load_policy(env.policy_path()).partition_keys()
-    return envelope("targets", ok=True, result={"targets": keys}), Exit.OK
+    policy = load_policy(env.policy_path())
+    return envelope("targets", ok=True, result={"targets": policy.partition_keys(),
+                                                "warnings": policy.warnings()}), Exit.OK
 
 
 def cmd_backup(args):
