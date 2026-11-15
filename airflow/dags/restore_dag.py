@@ -46,6 +46,11 @@ def neo4j_restore():
     def plan() -> dict:
         ctx = get_current_context()
         gid = ctx["params"]["group_id"]
+        until = parse_until(ctx["params"]["restore_until"])
+        # every member's seed (and the chain covering `until`) is chosen here, so a time no
+        # chain covers fails before any seed task runs (#114)
+        ops.choose_seeds(config.store(), _layout, load_policy(config.policy_path()).group(gid),
+                         until)
         return {
             "group_id": gid,
             # ISO-8601, UTC if no offset; a bad value fails here, before any Neo4j call (#77)

@@ -407,6 +407,63 @@ def regrant(neo4j, commands: list[str], *, old: str | None = None, new: str | No
     return applied
 
 
+def choose_seed(store, layout, group_id: str, name: str, until: str | None = None) -> dict:
+    """The artifact to seed one member from (#114), and the `seedRestoreUntil` to use with it.
+
+    Without `until`: the member's newest artifact, as before. With `until` T (normalised, #77),
+    from the chains in the sidecars (#118), across every physical and store of the member:
+    - T inside a chain's window (its full's time <= T < its newest backup's time): that chain's
+      newest artifact, with `seedRestoreUntil` T. This reaches a time before a restore or rebuild,
+      which lives in the previous physical's chain.
+    - T at a chain's newest backup, or after the member's newest backup overall: that artifact,
+      whole (no `seedRestoreUntil`; Neo4j refuses it on a full, and nothing later was backed up).
+    - Otherwise (before the first backup, or in a gap between chains): OpError listing the
+      nearest windows, raised before anything is changed.
+    Returns {key, until, chain: {folder, from, to} | None, whole: bool}."""
+    prefix = layout.alias_prefix(group_id, name)
+    if until is None:
+        key = store.latest_artifact_key(prefix)
+        if not key:
+            raise OpError(f"no artifact for {group_id}/{name} — back up first")
+        return {"key": key, "until": None, "chain": None, "whole": True}
+    from .until import parse_until
+    t = _sidecar_time(parse_until(until))
+    read = artifacts.chains(store, prefix)
+    chains = sorted(read["chains"], key=lambda c: c["from"] or "")
+    if not chains:
+        raise OpError(f"no backups with metadata for {group_id}/{name}"
+                      + (f" ({len(read['unknown'])} without a sidecar: run a backup or "
+                         f"`show_chain` to fill them in)" if read["unknown"] else ""))
+    win = lambda c: {"folder": c["folder"], "from": c["from"], "to": c["to"]}  # noqa: E731
+    newest = max(chains, key=lambda c: c["to"] or "")
+    for c in chains:
+        start, end = _sidecar_time(c["from"]), _sidecar_time(c["to"])
+        # a diff with no transactions can't take seedRestoreUntil (Neo4j treats it as a full,
+        # verified on 2026.05), so the seed is the newest diff that has transactions; with
+        # none, the chain is its full and restores whole
+        real = [a for a in c["artifacts"] if a["type"] == "full" or a.get("highest_tx")]
+        last = real[-1] if real else c["artifacts"][0]
+        if start <= t < end:
+            if last["type"] == "full" or _sidecar_time(last["time"]) <= t:
+                return {"key": last["key"], "until": None, "chain": win(c), "whole": True}
+            return {"key": last["key"], "until": parse_until(until), "chain": win(c),
+                    "whole": False}
+        if t == end or (c is newest and t >= end):
+            return {"key": last["key"], "until": None, "chain": win(c), "whole": True}
+    near = sorted(chains, key=lambda c: min(abs((_sidecar_time(c["from"]) - t).total_seconds()),
+                                            abs((_sidecar_time(c["to"]) - t).total_seconds())))
+    windows = ", ".join(f"{c['from']}..{c['to']} ({c['folder']})" for c in near[:3])
+    unknown = (f"; {len(read['unknown'])} backups have no sidecar and were not considered"
+               if read["unknown"] else "")
+    raise OpError(f"no backup chain of {group_id}/{name} covers {until}; nearest windows (UTC): "
+                  f"{windows}{unknown}")
+
+
+def choose_seeds(store, layout, group, until: str | None = None) -> dict[str, dict]:
+    """`choose_seed` for every member, so a time no chain covers fails before any change."""
+    return {name: choose_seed(store, layout, group.id, name, until) for name in group.names}
+
+
 def _restore_by_name(neo4j, group, name: str, key: str, existed: bool, *, store,
                      restore_until, cypher_version, log: Log) -> dict:
     """DROP (if present) then CREATE under the same name. DROP removes the database's privileges,
@@ -430,28 +487,30 @@ def _restore_by_name(neo4j, group, name: str, key: str, existed: bool, *, store,
 
 def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | None = None,
                 replace: bool = False, cypher_version: str | None = None, ts: str | None = None,
-                log: Log = _NOLOG) -> dict:
+                log: Log = _NOLOG, seed: dict | None = None) -> dict:
     """Seed one group member from its latest artifact. by-name: create-if-absent, or DROP+recreate
     an existing target with `replace` (destructive; Neo4j has no rename), keeping its privileges.
     alias-swap: seed a fresh physical named for `ts` (one group-wide timestamp; defaults to now) —
     the caller cuts the alias over afterwards (`cutover_seeded`, which copies privileges first).
-    Returns a plan entry tagged with `mode`."""
-    key = store.latest_artifact_key(layout.alias_prefix(group.id, name))
-    if not key:
-        raise OpError(f"no artifact for {group.id}/{name} — back up first")
+    Returns a plan entry tagged with `mode`. The artifact (and whether `restore_until` applies)
+    comes from `choose_seed` (#114), or `seed` when the caller chose already."""
+    seed = seed or choose_seed(store, layout, group.id, name, restore_until)
+    key, until = seed["key"], seed["until"]
     if group.restore_mode == "by-name":
         existed = neo4j.database_exists(name)
         if existed and not replace:
             raise OpError(f"database {name!r} exists; set replace=true to DROP+recreate it (destructive)")
-        return _restore_by_name(neo4j, group, name, key, existed, store=store,
-                                restore_until=restore_until, cypher_version=cypher_version, log=log)
+        out = _restore_by_name(neo4j, group, name, key, existed, store=store,
+                               restore_until=until, cypher_version=cypher_version, log=log)
+        return {**out, "seed": seed}
     old = neo4j.alias_target(name)  # captured before cutover (for external routing #17)
     newdb = naming.physical(name, ts or naming.ts())
-    neo4j.seed_database(newdb, store.uri(key), restore_until=restore_until,
+    neo4j.seed_database(newdb, store.uri(key), restore_until=until,
                         topology=group.topology_for(name), cypher_version=cypher_version,
                         store_base=store.uri(""))
-    log(f"seeded {newdb} <= {key}")
-    return {"mode": "alias-swap", "alias": name, "newdb": newdb, "old": old, "key": key}
+    log(f"seeded {newdb} <= {key}" + (f" until {until}" if until else ""))
+    return {"mode": "alias-swap", "alias": name, "newdb": newdb, "old": old, "key": key,
+            "seed": seed}
 
 
 def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG) -> None:
@@ -480,26 +539,26 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
     any drop, so a missing artifact or an unreplaceable target fails before anything is destroyed.
     alias-swap seeds every fresh physical, then cuts all aliases over. Returns the member plan."""
     members: list[dict] = []
+    seeds = choose_seeds(store, layout, group, restore_until)  # every member, before any change
     if group.restore_mode == "by-name":
-        plan: list[tuple[str, str, bool]] = []
+        plan: list[tuple[str, bool]] = []
         for name in group.names:
-            key = store.latest_artifact_key(layout.alias_prefix(group.id, name))
-            if not key:
-                raise OpError(f"no artifact for {group.id}/{name} — back up first")
             existed = neo4j.database_exists(name)
             if existed and not replace:
                 raise OpError(
                     f"database {name!r} exists; set replace=true to DROP+recreate it (destructive)")
-            plan.append((name, key, existed))
-        for name, key, existed in plan:
-            members.append(_restore_by_name(neo4j, group, name, key, existed, store=store,
-                                            restore_until=restore_until,
-                                            cypher_version=cypher_version, log=log))
+            plan.append((name, existed))
+        for name, existed in plan:
+            out = _restore_by_name(neo4j, group, name, seeds[name]["key"], existed, store=store,
+                                   restore_until=seeds[name]["until"],
+                                   cypher_version=cypher_version, log=log)
+            members.append({**out, "seed": seeds[name]})
         return {"mode": "by-name", "members": members}
     ts = naming.ts()  # one timestamp for every physical seeded in this group restore
     for name in group.names:
         members.append(seed_member(neo4j, store, group, layout, name, restore_until=restore_until,
-                                   cypher_version=cypher_version, ts=ts, log=log))
+                                   cypher_version=cypher_version, ts=ts, log=log,
+                                   seed=seeds[name]))
     cutover_seeded(neo4j, members, log=log)
     return {"mode": "alias-swap", "members": members}
 
@@ -528,16 +587,17 @@ def baseline_after_restore(run_admin: RunAdmin, neo4j, store, runner, layout, gr
     return done
 
 
-def plan_restore(neo4j, store, group, layout, *, replace: bool = False) -> dict:
+def plan_restore(neo4j, store, group, layout, *, replace: bool = False,
+                 until: str | None = None) -> dict:
     """The blast radius of `restore_group` WITHOUT mutating: per member, the artifact that would be
     used and what would happen — by-name `create` or `drop+recreate`, alias-swap seed + swap. Runs
     the same preconditions (missing artifact, unreplaceable existing target) so a dry-run fails the
-    same way a real restore would. `drops` is the destructive surface (databases to be DROPped)."""
+    same way a real restore would. `drops` is the destructive surface (databases to be DROPped).
+    With `until`, each member's `seed` shows the chosen chain and window (#114)."""
     members: list[dict] = []
+    seeds = choose_seeds(store, layout, group, until)
     for name in group.names:
-        key = store.latest_artifact_key(layout.alias_prefix(group.id, name))
-        if not key:
-            raise OpError(f"no artifact for {group.id}/{name} — back up first")
+        key = seeds[name]["key"]
         if group.restore_mode == "by-name":
             existed = neo4j.database_exists(name)
             if existed and not replace:
@@ -555,5 +615,7 @@ def plan_restore(neo4j, store, group, layout, *, replace: bool = False) -> dict:
                             "drops": [],
                             # copied from the old physical to the new one before the swap (#117)
                             "privileges": _privileges_of(neo4j, old)})
+    for m in members:
+        m["seed"] = seeds[m.get("alias") or m["name"]]
     return {"mode": group.restore_mode, "members": members,
             "drops": [d for m in members for d in m["drops"]]}

@@ -95,8 +95,14 @@ Each backup has a small `<artifact>.meta.json` next to it, written from
 transaction range, the time the backup was taken, and the store. The MCP tool
 `show_chain(group, member)` reads them and lists each chain (a full and the differentials after
 it, per database folder) with the window it covers (`from`, `to`). A point in time is reachable
-when it falls inside a chain's window. Backups taken before this was added are listed under
-`unknown` until the next backup or aggregate of that database fills them in.
+when it falls inside a chain's window, including a chain of a database the alias pointed at
+before an earlier restore: with `--until`, the restore picks, per member, the chain whose window
+covers the time ([#114](https://github.com/lex00/neo4j-backup/issues/114)), and the dry-run shows
+it under each member's `seed` (`chain`, and `until` or `whole`). A member with no change after the
+time (only a full, or diffs with no transactions) is seeded whole from its last backup. If no chain
+covers the time for some member, the restore stops before changing anything and lists the nearest
+windows. Backups taken before this was added are listed under `unknown` until the next backup or
+aggregate of that database fills them in; `--until` doesn't consider them.
 
 ### 3. Tell the customer what will happen
 
@@ -179,9 +185,6 @@ removes the privileges granted on it.
 
 - A restore always covers the whole group; one database alone isn't possible
   ([#121](https://github.com/lex00/neo4j-backup/issues/121)).
-- `--until` uses the newest backup chain. A time before the last restore lives in the previous
-  database's chain; restore that by hand with the Cypher in [RECOVERY.md](RECOVERY.md)
-  ([#114](https://github.com/lex00/neo4j-backup/issues/114)).
 
 **Planned:** `--ticket` and `--reason` on the command ([#119](https://github.com/lex00/neo4j-backup/issues/119)),
 `rollback` ([#122](https://github.com/lex00/neo4j-backup/issues/122)) and `cleanup`

@@ -41,6 +41,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   clusters work unchanged.
 
 ### Fixed
+- **`--until` picks the chain that covers the time** (#114). Restore always seeded from the
+  member's newest backup, so a time before an earlier restore (in the previous database's chain)
+  failed. Now, per member, it picks the chain whose window covers the time, across every physical
+  and store, using the sidecars; a member with nothing after the time is seeded whole (Neo4j
+  refuses `seedRestoreUntil` on a full or on a diff with no transactions). Every member's choice is
+  made before any change, so an uncovered time fails cleanly, listing the nearest windows. The
+  dry-run shows the chain per member. Also `preview_restore(until=…)` in MCP.
 - `keep_system` and `keep_metadata` mean the same thing (#78): the newest N are kept, N >= 1.
   0 used to delete no system fulls but every metadata export; it is now refused.
 - **Point-in-time values are validated** (#77). `--until` (CLI), `until` (MCP) and `restore_until`
