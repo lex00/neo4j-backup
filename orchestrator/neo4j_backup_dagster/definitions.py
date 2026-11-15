@@ -13,6 +13,7 @@ import dagster as dg
 
 from neo4j_backup_core import capture, ops, paths
 from neo4j_backup_core.policy import load_policy, load_policy_at_startup, parse_partition_key
+from neo4j_backup_core.until import UntilError, parse_until
 from .resources import Neo4jResource, ObjectStoreResource, RunnerResource
 
 POLICY_PATH = os.environ.get("NEO4J_BACKUP_POLICY", "policies/demo.yaml")
@@ -258,10 +259,14 @@ def restore_group_op(
     neo4j: Neo4jResource,
     store: ObjectStoreResource,
 ):
+    try:
+        until = parse_until(config.restore_until)  # ISO-8601, UTC if no offset (#77)
+    except UntilError as e:
+        raise dg.Failure(str(e))
     group = load_policy(POLICY_PATH).group(config.group_id)
     try:
         out = ops.restore_group(
-            neo4j, store, group, _layout, restore_until=config.restore_until,
+            neo4j, store, group, _layout, restore_until=until,
             replace=config.replace, cypher_version=SEED_CYPHER_VERSION, log=context.log.info,
         )
     except ops.OpError as e:

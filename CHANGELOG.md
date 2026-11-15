@@ -35,6 +35,11 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   clusters work unchanged.
 
 ### Fixed
+- **Point-in-time values are validated** (#77). `--until` (CLI), `until` (MCP) and `restore_until`
+  (Dagster config, Airflow param) are parsed as ISO-8601 at the boundary; no offset means UTC; the
+  value is normalised (`2026-07-11T14:32:00+00:00`) and parsed again before it is written into
+  the seed statement, so raw input never reaches Cypher. A bad value is a usage error (CLI exit 2,
+  MCP `usage` error) before any Neo4j call.
 - **S3 deletes in batches of 1000** (#76). `delete_keys` sent every key in one `DeleteObjects`
   call, which S3 rejects above 1000 keys (a large first prune), and ignored per-key errors, counting
   them as deleted. It now batches, tries every batch, returns the number actually deleted, and

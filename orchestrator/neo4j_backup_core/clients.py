@@ -68,7 +68,9 @@ class Neo4jClient:
         if cypher_version == "5":
             opts += ", existingData: 'use'"
         if restore_until:
-            opts += f", seedRestoreUntil: datetime('{restore_until}')"
+            from .until import parse_until  # normalised here too: never the raw input (#77)
+
+            opts += f", seedRestoreUntil: datetime('{parse_until(restore_until)}')"
         self.run_system(f"{prefix}CREATE DATABASE `{name}`{topo} OPTIONS {{ {opts} }} WAIT")
 
     def alter_alias(self, alias: str, target: str):

@@ -45,4 +45,4 @@ def test_cypher5_with_topology_and_pitr():
               restore_until="2026-06-29T11:00:00Z")
     assert s.startswith("CYPHER 5 CREATE DATABASE `orders-t1` TOPOLOGY 3 PRIMARIES 1 SECONDARIES OPTIONS")
     assert "existingData: 'use'" in s
-    assert "seedRestoreUntil: datetime('2026-06-29T11:00:00Z')" in s
+    assert "seedRestoreUntil: datetime('2026-06-29T11:00:00+00:00')" in s
