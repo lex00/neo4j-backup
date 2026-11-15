@@ -137,6 +137,17 @@ class Neo4jClient:
         return {r["name"]: r["database"] for r in rows}
 
 
+class DeleteError(RuntimeError):
+    """Some keys could not be deleted. `deleted` is how many were; `failed` lists
+    (key, code, message) for the rest."""
+
+    def __init__(self, deleted: int, failed: list[tuple]):
+        self.deleted, self.failed = deleted, failed
+        shown = ", ".join(f"{k} ({c})" for k, c, _m in failed[:10])
+        more = f" and {len(failed) - 10} more" if len(failed) > 10 else ""
+        super().__init__(f"deleted {deleted}; failed to delete {len(failed)}: {shown}{more}")
+
+
 @runtime_checkable
 class ObjectStore(Protocol):
     """The object-store interface the pipeline depends on — one shape, per-cloud backends
@@ -280,13 +291,29 @@ class S3ObjectStore(_BaseObjectStore):
     def object_size(self, key: str) -> int:
         return self._client().head_object(Bucket=self.bucket, Key=key)["ContentLength"]
 
+    _DELETE_BATCH = 1000  # S3 DeleteObjects takes at most 1000 keys per request
+
     def delete_keys(self, keys: list[str]) -> int:
+        """Delete `keys` in batches of 1000 (#76). Every batch is attempted; per-key errors from
+        the response are collected and raised together afterwards (`DeleteError`, which carries
+        the number deleted and the failures). Returns the number actually deleted."""
+        keys = list(keys)
         if not keys:
             return 0
-        self._client().delete_objects(
-            Bucket=self.bucket, Delete={"Objects": [{"Key": k} for k in keys]}
-        )
-        return len(keys)
+        client = self._client()
+        deleted, failed = 0, []
+        for i in range(0, len(keys), self._DELETE_BATCH):
+            batch = keys[i:i + self._DELETE_BATCH]
+            resp = client.delete_objects(
+                Bucket=self.bucket,
+                Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
+            )
+            errors = resp.get("Errors", []) or []
+            failed += [(e.get("Key"), e.get("Code"), e.get("Message")) for e in errors]
+            deleted += len(batch) - len(errors)
+        if failed:
+            raise DeleteError(deleted, failed)
+        return deleted
 
     def _copy(self, src_key: str, dst_key: str) -> None:
         self._client().copy_object(

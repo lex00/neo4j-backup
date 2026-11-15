@@ -35,6 +35,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   clusters work unchanged.
 
 ### Fixed
+- **S3 deletes in batches of 1000** (#76). `delete_keys` sent every key in one `DeleteObjects`
+  call, which S3 rejects above 1000 keys (a large first prune), and ignored per-key errors, counting
+  them as deleted. It now batches, tries every batch, returns the number actually deleted, and
+  raises `DeleteError` listing the keys that failed.
 - **A policy that fails to load is an error, not an empty orchestrator** (#75). Dagster's
   schedules and Airflow's backup DAGs used to vanish silently when the policy didn't parse or
   validate, or an `s3://` source failed at a cold start. Now the Dagster code location fails to

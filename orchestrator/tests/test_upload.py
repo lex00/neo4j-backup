@@ -54,6 +54,7 @@ class _FakeS3Full:
 
     def delete_objects(self, Bucket, Delete):
         self.deleted += [o["Key"] for o in Delete["Objects"]]
+        return {}  # boto3 always returns a dict; Errors only when a key failed
 
 
 def test_download_prefix(monkeypatch, tmp_path):
