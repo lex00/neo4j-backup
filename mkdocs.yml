@@ -20,19 +20,23 @@ theme:
 
 nav:
   - Home: README.md
-  - Policy: POLICY.md
-  - Recovery: RECOVERY.md
-  - Bulk import: IMPORT.md
-  - Design: DESIGN.md
-  - Local stack: STACK.md
-  - CLI contract: CLI-CONTRACT.md
-  - CI recipes: CI.md
-  - Agent guide: AGENTS.md
-  - Operator MCP: MCP.md
+  - Getting started: GETTING-STARTED.md
+  - Operator guide: OPERATOR.md
+  - Customer guide: CUSTOMERS.md
+  - Reference:
+    - Policy: POLICY.md
+    - Recovery: RECOVERY.md
+    - Bulk import: IMPORT.md
+    - CLI contract: CLI-CONTRACT.md
+    - CI recipes: CI.md
+    - Operator MCP: MCP.md
+    - Agent guide: AGENTS.md
   - Orchestrators:
     - Dagster: orchestrator/README.md
     - Airflow: airflow/README.md
-  - Deploy / adapt: orchestrator/deploy/DEPLOY.md
+    - Deploy / adapt: orchestrator/deploy/DEPLOY.md
+  - Design: DESIGN.md
+  - Local stack: STACK.md
   - Diagrams: diagrams/README.md
 
 markdown_extensions:

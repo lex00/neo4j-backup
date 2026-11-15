@@ -9,9 +9,15 @@ team-specific. What this project standardises is the **tail** — turning a buil
 ## Why it's a runbook plus one thin command
 
 `neo4j-admin database import full` produces an **offline store**, not a `.backup`. The only route to
-a native `.backup` is an **online** backup of a running server (a `.dump` is the offline artifact,
-and it doesn't fit seed-from-URI). So the pattern inherently needs a throwaway Neo4j on the loader,
-and provisioning that is yours. The raw input is also open and per-dataset — the `--nodes` /
+a native `.backup` is an **online** backup of a running server, so this pattern needs a throwaway
+Neo4j on the loader, and provisioning that is yours.
+
+A `.dump` is the other option: `neo4j-admin database dump` works on the imported store offline,
+without ever starting a server, and seed-from-URI accepts a dump when the URI names the file
+(verified on 2026.05; a directory seed only uses backup chains). A dump restores whole only:
+`seedRestoreUntil` is refused for it. This tool doesn't list, prune or restore `.dump` files yet
+([#98](https://github.com/lex00/neo4j-backup/issues/98)), so seed from a dump with the raw Cypher
+in [RECOVERY.md](RECOVERY.md). The raw input is also open and per-dataset — the `--nodes` /
 `--relationships` mapping is your data model. So `neo4j-backup` **structures the calls; it does not
 model your import args.**
 
@@ -34,8 +40,10 @@ Both honour the runner seams: `RUNNER_EXEC_PREFIX` (run neo4j-admin on the loade
 
 ## The pattern
 
-**1. Source → store (team-owned).** CSV feeds `neo4j-admin database import full` directly; Parquet is
-converted to CSV first by your pipeline. The `--nodes`/`--relationships` mapping is yours.
+**1. Source → store (team-owned).** CSV and Parquet both feed `neo4j-admin database import full`
+directly: add `--input-type=parquet` for Parquet (verified on 2026.05 with no extra jars; Neo4j
+introduced Parquet import as a public beta in 5.25). The `--nodes`/`--relationships` mapping is
+yours.
 
 **2. Provision a fresh loader (team-owned).** Ephemeral hardware with a **fresh, never-started**
 Neo4j Enterprise, a data disk for the store, and scratch for the backup. Enable the backup listener
@@ -62,7 +70,10 @@ a policy group's aliases on a normal source).
 
 **4. Seed (the existing path).** The `.backup` is now an ordinary chain head at
 `<group>/<slug>/<physical>/`; seed-from-URI restores its store into whatever target you name — the
-loader's db name doesn't leak through:
+loader's db name doesn't leak through. It is a restore point only: a backup chain belongs to one
+database, so the seeded database can't add differential backups to the loader's backup. Take a full
+backup of the group straight after the restore (`neo4j-backup backup <group> --kind FULL`), and copy
+the customer's privileges as in the [Operator guide](OPERATOR.md#restore-on-a-customers-request):
 
 ```bash
 neo4j-backup --json verify <group>
@@ -87,7 +98,7 @@ Verify the exact `--nodes`/`--relationships`/option surface against your deploye
 
 ## Non-goals
 
-Provisioning, delivering params to the loader, monitoring, cleanup, Parquet→CSV conversion, modelling
+Provisioning, delivering params to the loader, monitoring, cleanup, modelling
 the import args, and any policy/cadence integration — bulk import stays manual / external-pipeline
 driven. There is no MCP `import` tool: the [MCP server](MCP.md) is operator-assist for the running
 fleet (DR/status), not provisioning.
