@@ -70,12 +70,11 @@ alias_target() {
     2>/dev/null | tail -n +2 | tr -d '"\r' | head -1
 }
 
-# Newest .backup artifact under a bucket prefix. The mc image is minimal (no awk/grep),
-# so mc only lists; parsing happens on the host.
+# Newest .backup artifact under a bucket prefix (its file name). The AWS CLI lists inside
+# the compose network; filtering happens on the host.
 latest_artifact() {
   local prefix="$1"
-  $COMPOSE run --rm -T mc \
-    "mc alias set local http://minio:9000 '$AWS_ACCESS_KEY_ID' '$AWS_SECRET_ACCESS_KEY' >/dev/null 2>&1; \
-     mc find \"local/$BUCKET/$prefix\" --name '*.backup'" \
-    2>/dev/null | tr -d '\r' | grep '\.backup$' | sed 's#.*/##' | sort | tail -1
+  $COMPOSE run --rm -T awscli s3api list-objects-v2 --bucket "$BUCKET" --prefix "$prefix" \
+    --query 'Contents[].Key' --output text \
+    2>/dev/null | tr -d '\r' | tr '\t' '\n' | grep '\.backup$' | sed 's#.*/##' | sort | tail -1
 }

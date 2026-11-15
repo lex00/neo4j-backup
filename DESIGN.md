@@ -572,10 +572,11 @@ option that preserves it. Mechanism:
   the relevant per-group keys so seed-from-URI reads cleartext.
 - Rotation/revocation is per group via the KMS key. Audit is the KMS key's audit trail.
 
-Local dev stands in for cloud KMS with MinIO's built-in KMS (a single demo key, since
-multiple keys need MinIO KES + a real KMS backend). The mechanism (bucket default
-SSE-KMS, transparent read on seed) is faithful; only the per-group-key multiplicity is
-simplified locally.
+Local dev stands in for cloud KMS with the floci emulator's KMS (one demo key). floci
+records a bucket's default SSE-KMS but does not apply it, so locally only writes that send
+the SSE-KMS header are encrypted (`BACKUP_UPLOAD=pipeline` with `S3_SSE`); see STACK.md.
+Until 2026-11 the local stack used MinIO's built-in KMS, which did apply the bucket default
+(#127).
 
 Open sub-item being verified now: whether the server-side seed pull works against a
 plain-HTTP MinIO or requires TLS, and that SSE-KMS objects restore transparently via
@@ -770,8 +771,8 @@ Open risks / findings:
 - Cross-group transactional consistency is not native (bounded skew only).
 - Orchestrator cross-version skew (code location / worker vs host) is not a documented
   guarantee — pin the adapter's runtime close to the host.
-- MinIO plain-HTTP seed, path-style addressing, and SSE-KMS read via seed-from-URI are all
-  validated working — no TLS proxy or `MINIO_DOMAIN` needed.
+- Plain-HTTP seed and path-style addressing are validated against the local emulator (MinIO
+  until 2026-11, floci since #127); SSE-KMS read via seed-from-URI was validated on MinIO.
 
 Deferred / optional: cluster topologies (back up from a secondary/follower); NOM for
 cluster monitoring only (not a backup feature).

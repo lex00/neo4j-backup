@@ -17,14 +17,13 @@ NET="neo4j-backup_ops"
 DATA_VOL="neo4j-backup_neo4j-data"
 
 # 1. Resolve the artifact key (latest under _dbms/system/, or the one passed in). List
-#    non-recursively (`mc ls`, not `mc find`) and select by filename so a stray subdir
-#    can't be picked up; system fulls are flat: _dbms/system/system-<ISO>.backup.
+#    one level only (delimiter /) and select by filename so a stray subdir can't be
+#    picked up; system fulls are flat: _dbms/system/system-<ISO>.backup.
 KEY="${1:-}"
 if [ -z "$KEY" ]; then
-  # the mc image is minimal (no grep), so list inside the container and filter on the host
-  LS=$($COMPOSE run --rm -T mc \
-    "mc alias set local http://minio:9000 $AWS_ACCESS_KEY_ID $AWS_SECRET_ACCESS_KEY >/dev/null && \
-     mc ls local/$BUCKET/${PREFIX}" 2>/dev/null)
+  # list inside the compose network, filter on the host
+  LS=$($COMPOSE run --rm -T awscli s3api list-objects-v2 --bucket "$BUCKET" \
+    --prefix "$PREFIX" --delimiter / --query 'Contents[].Key' --output text 2>/dev/null)
   NAME=$(printf '%s\n' "$LS" | grep -oE 'system-[^ ]+\.backup' | sort | tail -1)
   [ -n "$NAME" ] && KEY="${PREFIX}${NAME}"
 fi
@@ -39,7 +38,7 @@ $COMPOSE stop neo4j >/dev/null
 #    --temp-path must be writable (the compressed artifact is unpacked there).
 docker run --rm -e NEO4J_ACCEPT_LICENSE_AGREEMENT=eval \
   -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
-  -e AWS_REGION="${AWS_REGION:-us-east-1}" -e AWS_ENDPOINT_URL_S3="http://minio:9000" \
+  -e AWS_REGION="${AWS_REGION:-us-east-1}" -e AWS_ENDPOINT_URL_S3="http://s3:4566" \
   --network "$NET" -v "$DATA_VOL":/data "neo4j:${NEO4J_VERSION}" \
   neo4j-admin database restore --from-path="s3://$BUCKET/$KEY" \
     --temp-path=/tmp --overwrite-destination=true

@@ -73,7 +73,7 @@ are on the dedicated **[Policy page](../POLICY.md)**.
 
 Only `NEO4J_PASSWORD` is strictly required; the rest default sensibly.
 
-| Var | Default | Local (MinIO) | Prod (AWS) |
+| Var | Default | Local (floci) | Prod (AWS) |
 |---|---|---|---|
 | `NEO4J_PASSWORD` | — (required) | `devpassword` | your secret |
 | `NEO4J_BOLT_URI` | `neo4j://localhost:7687` | local | `neo4j://<host>:7687` |
