@@ -86,6 +86,17 @@ def main() -> None:
     assert n == expected, f"restored {n} != expected {expected}"
     print(f"   restore OK ({n} nodes via alias)")
 
+    print("== DIFF lane right after the restore (#74) ==")
+    newphys = neo.alias_target("acme-orders")
+    split = bd.split_by_base(["demo/acme-orders"])
+    assert split == {"diff": [], "full": ["demo/acme-orders"]}, split
+    run = bd.neo4j_backup_gold_diff.test()
+    assert _ok(run), f"diff DAG state={getattr(run,'state',run)}"
+    from neo4j_backup_core import artifacts
+    metas, _unknown = artifacts.read(store, paths.physical_prefix("demo", "acme-orders", newphys))
+    assert [m["type"] for m in metas.values()] == ["full"], metas
+    print(f"   diff DAG sent acme-orders to the full pool; {newphys} now has a full")
+
     print("== PRUNE via dag.test() ==")
     run = av.neo4j_prune_dag.test()
     assert _ok(run), f"prune DAG state={getattr(run,'state',run)}"

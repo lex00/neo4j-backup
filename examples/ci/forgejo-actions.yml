@@ -40,7 +40,11 @@ jobs:
       - name: Back up
         run: |
           kind="${{ github.event.schedule == '17 3 * * 0' && 'FULL' || 'DIFF' }}"
-          neo4j-backup --json backup demo --kind "$kind"
+          out="$(neo4j-backup --json backup demo --kind "$kind")"
+          echo "$out"
+          if [ "$kind" = DIFF ] && python -c 'import json,sys; sys.exit(not json.load(sys.stdin)["result"]["needs_full"])' <<<"$out"; then
+            neo4j-backup --json backup demo --kind FULL   # a member had no full to diff against (#74)
+          fi
       # weekly maintenance on the full run: verify + retention (schedule == approval for prune)
       - name: Verify + prune (weekly)
         if: github.event.schedule == '17 3 * * 0'

@@ -145,9 +145,13 @@ them).
 neo4j-backup backup <group> --kind FULL
 ```
 
-The new databases have no backups of their own yet, so the next scheduled differential backup
-would fail ([#74](https://github.com/lex00/neo4j-backup/issues/74)) and anything written until the
-next full backup would be unprotected.
+The new databases have no backups of their own yet. A differential needs a full of the same
+database, so until one exists the diff schedule sends these members to the full lane instead
+(Dagster requests the run with the `backup_kind: full` tag, Airflow runs it in the `neo4j_full`
+pool), and a `backup --kind DIFF` from the CLI skips them and lists them under `needs_full`
+([#74](https://github.com/lex00/neo4j-backup/issues/74)). Running the full yourself straight away
+closes the gap before the next diff tick. The same applies after a bulk load, an adopt, and a
+by-name restore with `--replace` (a new store under the old name).
 
 ### 7. Report back
 

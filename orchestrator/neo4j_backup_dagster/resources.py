@@ -57,6 +57,9 @@ class Neo4jResource(dg.ConfigurableResource):
     def database_exists(self, *a, **k):
         return self._core().database_exists(*a, **k)
 
+    def database_created(self, *a, **k):
+        return self._core().database_created(*a, **k)
+
     def stop_database(self, *a, **k):
         return self._core().stop_database(*a, **k)
 
