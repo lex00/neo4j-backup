@@ -7,6 +7,16 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Documentation
+- Docs reorganised by reader (#116): **Getting started** (the local loop with real output, then a
+  production checklist), an **Operator guide** (onboarding, coverage checks, the restore runbook with
+  a tested workaround for #117, bulk loads, offboarding, lost cluster, settings, commands) and a
+  **Customer guide** (what backups give you, how to ask for a restore, what happens during one).
+  README trimmed to who it's for and a map; the docs site nav follows the readers.
+- IMPORT.md corrected (#96): Parquet imports directly, dumps can be seeded, and a seeded database
+  needs its own full backup. RECOVERY.md warns about #117. DESIGN.md §9 no longer says several
+  clusters work unchanged.
+
 ### Fixed
 - **Local stack** (#127): MinIO's images can no longer be pulled, so `just fresh` failed at its
   first step. The stack now uses the floci S3/KMS emulator (`floci/floci:1.5.34`) and the AWS CLI

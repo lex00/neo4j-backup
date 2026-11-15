@@ -625,8 +625,9 @@ In Dagster this is the `aggregate_chain` and `verify` jobs (validated end-to-end
   guidance.
 - If you approach ~1000 databases, **shard customers/groups across multiple DBMS
   clusters**. This also spreads backup load, compounding with the concurrency control
-  in section 6. The registry and tiering model carry over unchanged; the runner just
-  targets multiple clusters' `--from` lists.
+  in section 6. Today that means one deployment per cluster, each with its own policy and
+  environment: connection, backup source and bucket are process-wide settings. One policy for
+  several clusters is planned ([#106](https://github.com/lex00/neo4j-backup/issues/106)).
 
 ## 10. Neo4j Ops Manager (NOM) evaluation
 

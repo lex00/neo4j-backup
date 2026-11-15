@@ -82,5 +82,5 @@ It is an ergonomic wrapper over this same contract, not a different interface. S
 ## More
 
 - [CLI-CONTRACT.md](CLI-CONTRACT.md) — the envelope, exit-code table, and guard rules in full.
-- [README.md](README.md) — what the project is, the env table, and the local stack.
+- [README.md](README.md) — what the project is; [GETTING-STARTED.md](GETTING-STARTED.md) — the local stack and setup; [OPERATOR.md](OPERATOR.md) — runbooks.
 - [RECOVERY.md](RECOVERY.md) — the human disaster-recovery runbook.
