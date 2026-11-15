@@ -26,7 +26,7 @@ db_groups:
       - acme-graph
       - acme-audit
     tier: gold                      # [used] must match a key under `tiers:` below
-    retention_days: 30              # [used] prune deletes artifacts older than this (keeps chain head)
+    retention_days: 30              # [used] prune deletes whole chains older than this (see below)
 
     owner: acme-corp                # [decl] reporting / ownership tag only
     s3_prefix: s3://backups/acme/   # [decl] not read yet; bucket comes from BACKUP_BUCKET env
@@ -72,7 +72,7 @@ The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, a
 | `aliases` | list of string | **required** (alias-swap) | used | app-facing Neo4j aliases to back up (one unit each). Use in `alias-swap` mode. |
 | `databases` | list of string | **required** (by-name) | used | database **names** to back up/restore directly (must be legal DB names). Use in `by-name` mode instead of `aliases`. |
 | `tier` | string | **required** | used | which `tiers` entry sets the schedule (must exist) |
-| `retention_days` | int | `7` | used | `prune` deletes artifacts older than this |
+| `retention_days` | int | `7` | used | `prune` deletes backups older than this, whole chains only: per member it keeps the newest chain, any chain with a backup inside the window, and the chain that covers the start of the window (the newest full before it), so a point in time inside the window stays reachable |
 | `s3_prefix` | string | **required** | decl | not read; the bucket comes from `BACKUP_BUCKET` |
 | `owner` | string | `null` | decl | reporting / ownership tag |
 | `rpo_minutes` | int | `60` | decl | target, not enforced |

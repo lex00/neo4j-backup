@@ -269,7 +269,7 @@ Everything below is optional and defaults to the tested behaviour. The full list
 | `verify <group>` | checks the latest backups restore and are consistent | no |
 | `aggregate <group>` | combines each chain into one full backup, in place | yes |
 | `restore <group> [--until <time>] [--replace]` | restores a group | yes |
-| `prune` | deletes backups older than each group's retention | yes |
+| `prune` | deletes backups older than each group's retention, whole chains only; the preview reports `kept_for_chains` (past retention but needed) and `unknown_kept` (no metadata yet) | yes |
 | `metadata export` / `metadata restore [--key <k>]` | users, roles, privileges and aliases as Cypher | restore changes the cluster |
 | `system-backup` | full backup of the `system` database | adds a backup |
 | `import <database> -- <args>` | bulk import on a loader ([IMPORT.md](IMPORT.md)) | yes |

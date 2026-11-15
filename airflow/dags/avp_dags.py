@@ -40,7 +40,9 @@ def verify_one(group_alias: str) -> dict:
 
 
 def prune_all() -> int:
-    return ops.prune(config.store(), load_policy(config.policy_path()), _layout)["deleted"]
+    # chain-aware (#73); artifacts without a sidecar are inspected first via run_admin
+    return ops.prune(config.store(), load_policy(config.policy_path()), _layout,
+                     run_admin=run_admin, runner=config.runner(), log=print)["deleted"]
 
 
 def _targets() -> list[str]:

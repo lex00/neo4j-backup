@@ -122,7 +122,7 @@ def test_run_restore_replace_verifies_before_drop(monkeypatch):
 
 def test_run_prune_guards(monkeypatch):
     monkeypatch.setattr(tools.ops, "prune",
-                        lambda *a, dry_run=False, **k: {"deleted": 2, "detail": {}, "keys": ["a", "b"],
+                        lambda *a, dry_run=False, **k: {"deleted": 2, "detail": {}, "keys": ["a", "b"], "kept_for_chains": 0, "unknown_kept": 0,
                                                         "dry_run": dry_run})
     assert tools.run_prune(dry_run=True)["keys"] == ["a", "b"]
     assert tools.run_prune()["needs_confirmation"] is True
