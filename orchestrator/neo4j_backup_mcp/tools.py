@@ -19,6 +19,7 @@ import time
 
 from neo4j_backup_core import env, ops, paths
 from neo4j_backup_core.policy import load_policy
+from neo4j_backup_core.until import parse_until
 
 _UPLOAD = os.environ.get("BACKUP_UPLOAD", "admin")
 _STAGING = os.environ.get("UPLOAD_STAGING_PATH") or None
@@ -153,7 +154,9 @@ def run_restore(group: str, until: str | None = None, replace: bool = False,
                 confirm: bool = False, dry_run: bool = False, verify_first: bool = True) -> dict:
     """Restore a group (alias-swap, or by-name with `replace` to DROP+recreate; `until` = PITR).
     Needs confirm=true; dry_run returns the plan. For a destructive `replace`, runs
-    verify-before-drop (skip with verify_first=false)."""
+    verify-before-drop (skip with verify_first=false). `until` is ISO-8601 (UTC if no offset);
+    anything else is refused before any Neo4j call (#77)."""
+    until = parse_until(until)
     g = load_policy(env.policy_path()).group(group)
     store, neo, layout = env.store(), env.neo4j(), _layout()
     plan = ops.plan_restore(neo, store, g, layout, replace=replace)  # preconditions first

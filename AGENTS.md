@@ -60,7 +60,7 @@ Backup detail: each entry in `result.backups` has `taken` (what neo4j-admin actu
 skipped, not failed: the entry has `skipped: true, needs_full: true` and the alias is listed in
 `result.needs_full`. Follow up with `--kind FULL`.
 
-Restore detail: `--until <ISO-8601>` is point-in-time (needs a differential chain). `--replace` only
+Restore detail: `--until <ISO-8601>` is point-in-time (needs a differential chain); a value with no offset is UTC, and anything that is not an ISO-8601 date-time is refused with exit `2`. `--replace` only
 applies to by-name groups and **drops** an existing target before recreating it — the destructive
 case; it appears in the dry-run plan's `drops`.
 

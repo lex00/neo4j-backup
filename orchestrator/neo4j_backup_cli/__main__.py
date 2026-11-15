@@ -19,6 +19,7 @@ import sys
 from neo4j_backup_core import env, ops, paths
 from neo4j_backup_core.cli_contract import Exit, envelope, make_error
 from neo4j_backup_core.policy import load_policy
+from neo4j_backup_core.until import UntilError, parse_until
 
 _UPLOAD = os.environ.get("BACKUP_UPLOAD", "admin")
 _STAGING = os.environ.get("UPLOAD_STAGING_PATH") or None
@@ -33,6 +34,14 @@ def _run_admin(runner):
     """Subprocess execution of neo4j-admin (shared with the MCP server via `core.env`); its stdout
     goes to stderr so the CLI's stdout stays a clean JSON envelope (the #60 contract)."""
     return env.subprocess_admin(runner, stdout=sys.stderr)
+
+
+def _until_arg(value: str) -> str:
+    """argparse type for --until (#77): a bad value is a usage error (exit 2) before any call."""
+    try:
+        return parse_until(value)
+    except UntilError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
 
 
 def _group(args):
@@ -189,7 +198,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     r = guarded(sub.add_parser("restore", help="restore a group (alias-swap or by-name)"))
     r.add_argument("group")
-    r.add_argument("--until", help="ISO-8601 point-in-time (needs a differential chain)")
+    r.add_argument("--until", type=_until_arg,
+                   help="ISO-8601 point-in-time, UTC if no offset (needs a differential chain)")
     r.add_argument("--replace", action="store_true", help="by-name: DROP+recreate an existing target")
     r.set_defaults(func=cmd_restore)
 

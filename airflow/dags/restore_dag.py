@@ -17,6 +17,7 @@ from airflow.sdk import Param, dag, get_current_context, task
 from neo4j_backup_airflow import config
 from neo4j_backup_core import naming, ops, paths
 from neo4j_backup_core.policy import load_policy
+from neo4j_backup_core.until import parse_until
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
 _layout = paths.get_layout()
@@ -43,7 +44,8 @@ def neo4j_restore():
         gid = ctx["params"]["group_id"]
         return {
             "group_id": gid,
-            "restore_until": ctx["params"]["restore_until"],
+            # ISO-8601, UTC if no offset; a bad value fails here, before any Neo4j call (#77)
+            "restore_until": parse_until(ctx["params"]["restore_until"]),
             "replace": bool(ctx["params"].get("replace")),
             "mode": load_policy(config.policy_path()).group(gid).restore_mode,
             "ts": naming.ts(),               # one timestamp for the whole group
