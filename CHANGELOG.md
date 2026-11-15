@@ -40,6 +40,11 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   value is normalised (`2026-07-11T14:32:00+00:00`) and parsed again before it is written into
   the seed statement, so raw input never reaches Cypher. A bad value is a usage error (CLI exit 2,
   MCP `usage` error) before any Neo4j call.
+- **Names are quoted safely in every DDL statement** (#77). Database and alias names went into
+  backticks unescaped, though aliases may contain a backtick. One helper (`cypher.quote`) now
+  doubles embedded backticks for CREATE/DROP/STOP DATABASE, CREATE/ALTER ALIAS, the privilege
+  copy and the metadata export. The seed URI is checked before it is written into the statement:
+  an s3/gs/azb/file URI with no quote or backslash, inside the backup store.
 - **S3 deletes in batches of 1000** (#76). `delete_keys` sent every key in one `DeleteObjects`
   call, which S3 rejects above 1000 keys (a large first prune), and ignored per-key errors, counting
   them as deleted. It now batches, tries every batch, returns the number actually deleted, and

@@ -18,6 +18,7 @@ from __future__ import annotations
 import secrets
 
 from . import paths
+from .cypher import quote
 
 # Built-in roles exist on a fresh DBMS; don't re-CREATE them (PUBLIC can't be created at
 # all). Their privileges/memberships still replay fine via the statements below.
@@ -63,8 +64,8 @@ def capture(neo) -> dict:
 
 
 def _bt(name: str) -> str:
-    """Backtick-quote an identifier, escaping embedded backticks (Neo4j's own escaping)."""
-    return "`" + str(name).replace("`", "``") + "`"
+    """Backtick-quote an identifier (the shared helper, #77)."""
+    return quote(name)
 
 
 def render(snapshot: dict, ts: str = "") -> str:

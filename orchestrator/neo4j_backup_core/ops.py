@@ -393,7 +393,8 @@ def _restore_by_name(neo4j, group, name: str, key: str, existed: bool, *, store,
         neo4j.drop_database(name)
         log(f"dropped {name} (replace)")
     neo4j.seed_database(name, store.uri(key), restore_until=restore_until,
-                        topology=group.topology_for(name), cypher_version=cypher_version)
+                        topology=group.topology_for(name), cypher_version=cypher_version,
+                        store_base=store.uri(""))
     log(f"restored {name} <= {key}")
     try:
         granted = regrant(neo4j, held, log=log)
@@ -424,7 +425,8 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
     old = neo4j.alias_target(name)  # captured before cutover (for external routing #17)
     newdb = naming.physical(name, ts or naming.ts())
     neo4j.seed_database(newdb, store.uri(key), restore_until=restore_until,
-                        topology=group.topology_for(name), cypher_version=cypher_version)
+                        topology=group.topology_for(name), cypher_version=cypher_version,
+                        store_base=store.uri(""))
     log(f"seeded {newdb} <= {key}")
     return {"mode": "alias-swap", "alias": name, "newdb": newdb, "old": old, "key": key}
 
