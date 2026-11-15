@@ -7,6 +7,19 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-15
+
+Phase 1 of #100 (correctness): restores keep customer privileges and take a baseline full,
+every backup carries its own metadata, prune and `--until` read real chains, the diff lane
+survives a seed, and the Dagster tier schedules work with more than one member.
+
+**Upgrading.** Restore now takes a full backup of each restored database by default
+(`--no-baseline` to skip), and the Dagster `restore_group` job carries the `backup_kind: full`
+tag and needs the `runner` and `pipes_subprocess_client` resources, as does the `prune` asset.
+A policy that fails to load now fails the Dagster code location and the Airflow DAG file instead
+of leaving no schedules. `keep_system` / `keep_metadata` of 0 are refused. Backups taken before
+this release have no metadata sidecar; the next backup or prune of each database fills it in.
+
 ### Added
 - **Baseline full backup after every restore** (#97), on by default. The restore takes a FULL of
   each database it created as its last step, so the next diff has a base and point-in-time
@@ -226,7 +239,8 @@ First tagged release. Validated end to end against a real Neo4j Enterprise + obj
 - Dagster `prune` `list_text_keys` delegation; `RUNNER_NEO4J_ADMIN` wiring.
 - Pinned `grpcio-health-checking<1.82` (protobuf gencode/runtime drift).
 
-[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/lex00/neo4j-backup/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lex00/neo4j-backup/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/lex00/neo4j-backup/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/lex00/neo4j-backup/compare/v0.1.0...v0.2.0
