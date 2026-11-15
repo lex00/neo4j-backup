@@ -496,6 +496,15 @@ class BackupRunner:
             f"--max-off-heap-memory={max_off_heap}", database,
         ]
 
+    def inspect_command(self, location: str) -> list:
+        """`neo4j-admin backup inspect` over a backup folder or one artifact (#118): JSON records
+        with type, transaction range, time and store id. `--empty` keeps diffs with no new
+        transactions; `--verbose` adds the `neo4j <version>` line."""
+        return [
+            *self.exec_prefix, self.neo4j_admin, "backup", "inspect",
+            "--format=JSON", "--empty", "--verbose", location,
+        ]
+
     def import_command(self, database: str, source_args: list) -> list:
         """Off-cluster bulk import (#16): `neo4j-admin database import full <database> <source_args…>`.
         `source_args` (the `--nodes`/`--relationships`/options) is a **passthrough** — dataset-specific

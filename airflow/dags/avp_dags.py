@@ -24,7 +24,7 @@ def aggregate_one(group_alias: str) -> dict:
     try:
         return ops.aggregate_target(run_admin, config.store(), config.runner(), _layout,
                                     group_id, alias, upload=upload.BACKUP_UPLOAD,
-                                    staging=upload.STAGING)
+                                    staging=upload.STAGING, log=print)
     except ops.OpError as e:
         raise RuntimeError(str(e))
 

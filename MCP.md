@@ -35,7 +35,7 @@ Read-only (always available):
 |---|---|
 | `list_targets` | every group/member the policy covers |
 | `latest_artifact(group, member)` | the chain head for one member |
-| `show_chain(group, member)` | the member's artifacts, oldest first |
+| `show_chain(group, member)` | the member's artifacts, oldest first, and its chains (full then diffs, per database folder) with the time window each covers, read from the artifact sidecars |
 | `backup_status` | every target's latest artifact and its age in hours |
 | `preview_restore(group, replace)` | the restore plan / blast radius, without mutating |
 | `preview_prune` | the artifacts retention would delete, without deleting |

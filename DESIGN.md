@@ -339,6 +339,10 @@ Baseline once per location, override per backup job.
 - **`PipesSubprocessClient`** (local/in-pod) — `client.run(command=[...],
   context=context).get_materialize_result()`. The demo's shape. A non-zero exit fails
   the step; `--keep-failed` preserves the artifact for triage.
+- **Output** (#118): `run_admin` returns the command's output to the core ops. In subprocess
+  mode the command is wrapped in a host-side `tee` to a temp file; in k8s mode the pod wraps it
+  and reports the base64 output as a Pipes custom message, read back from the pod logs. Airflow
+  does the same with a plain subprocess and the KubernetesPodOperator XCom file.
 - **Restore does NOT use Pipes** — it is the `neo4j` Bolt resource issuing seed-from-URI
   + `ALTER ALIAS` Cypher (section 7). Pipes is for the backup CLI only.
 
@@ -616,6 +620,16 @@ In Dagster this is the `aggregate_chain` and `verify` jobs (validated end-to-end
 > `(group, alias)` and resolve the live physical from the latest key. Verified end to
 > end via `orchestrator/smoke_phase6.py`. (Diagram:
 > [storage-layout](diagrams/storage-layout.dot).)
+>
+> **Artifact sidecars (#118).** Artifact names don't say whether a file is a full or a diff,
+> and LastModified is upload time, so after every backup and aggregate the tool runs
+> `neo4j-admin backup inspect --format=JSON --empty --verbose` on the physical's folder and
+> writes `<artifact>.meta.json` beside each artifact that lacks one: type, lowest/highest
+> transaction id, backup time, `storeIdHash`, database name and id, neo4j-admin version.
+> Aggregate rewrites them all; prune deletes a sidecar with its artifact. `artifacts.chains`
+> reads them into chains per folder (a full, then the diffs after it) with a time window.
+> Sidecars are ordinary objects, so every cloud backend behaves the same. neo4j-admin reports
+> no per-transaction times, only when each backup was taken.
 
 ## 9. Capacity and scaling
 

@@ -7,6 +7,17 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Added
+- **Artifact metadata** (#118). After every backup and aggregate the tool runs
+  `neo4j-admin backup inspect` on the physical's folder and writes `<artifact>.meta.json` beside
+  each artifact: full or diff, transaction range, backup time, store id hash, database, and the
+  neo4j-admin version. Aggregate rewrites them, prune deletes them with their artifacts, and older
+  artifacts without one are filled in on the next backup. `ops.artifact_chains` reads them into
+  chains with time windows; the MCP `show_chain` tool returns them. A failed inspect is logged and
+  doesn't fail the backup.
+- `run_admin` returns neo4j-admin's output in every adapter (#118): the CLI and MCP subprocess,
+  Dagster Pipes (subprocess and `PipesK8sClient`), Airflow subprocess and KubernetesPodOperator.
+
 ### Documentation
 - Docs reorganised by reader (#116): **Getting started** (the local loop with real output, then a
   production checklist), an **Operator guide** (onboarding, coverage checks, the restore runbook with
@@ -18,6 +29,8 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   clusters work unchanged.
 
 ### Fixed
+- `smoke_k8s.py` and `smoke_phase6.py` called a removed helper (`_physical_prefix`) and failed at
+  start; they use the path layout now.
 - **Restores keep customer privileges** (#117). Neo4j stores a privilege against the physical
   database even when it was granted through an alias, so an alias-swap restore locked out every
   customer user without DBMS-wide grants. The restore now re-grants every privilege on each old

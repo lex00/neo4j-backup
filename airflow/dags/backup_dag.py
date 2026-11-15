@@ -26,7 +26,7 @@ def backup_one(group_alias: str, kind: str) -> dict:
     neo, store, runner = config.neo4j(), config.store(), config.runner()
     try:
         return ops.backup_target(run_admin, neo, store, runner, _layout, group_id, alias, kind,
-                                 upload=upload.BACKUP_UPLOAD, staging=upload.STAGING)
+                                 upload=upload.BACKUP_UPLOAD, staging=upload.STAGING, log=print)
     except ops.OpError as e:
         raise RuntimeError(str(e))
 

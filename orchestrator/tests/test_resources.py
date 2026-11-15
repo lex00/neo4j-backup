@@ -8,12 +8,13 @@ pytest.importorskip("dagster")
 
 from neo4j_backup_core.clients import (
     AzureObjectStore,
+    BackupRunner,
     GcsObjectStore,
     Neo4jClient,
     ObjectStore,
     S3ObjectStore,
 )
-from neo4j_backup_dagster.resources import Neo4jResource, ObjectStoreResource
+from neo4j_backup_dagster.resources import Neo4jResource, ObjectStoreResource, RunnerResource
 
 
 def _public_methods(cls) -> set:
@@ -36,3 +37,8 @@ def test_backends_implement_the_interface():
 def test_neo4j_resource_delegates_all_core_methods():
     missing = _public_methods(Neo4jClient) - set(dir(Neo4jResource))
     assert not missing, f"Neo4jResource missing delegations: {sorted(missing)}"
+
+
+def test_runner_resource_delegates_all_core_methods():
+    missing = _public_methods(BackupRunner) - set(dir(RunnerResource))
+    assert not missing, f"RunnerResource missing delegations: {sorted(missing)}"

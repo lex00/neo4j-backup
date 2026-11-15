@@ -53,7 +53,7 @@ def main() -> None:
         mat(D.backup, "demo/acme-orders", inst, kind="DIFF")
         expected = neo4j.count_nodes(phys)  # state captured by the diff backup
 
-        prefix = D._physical_prefix("demo", "acme-orders", phys)
+        prefix = D._layout.physical_prefix("demo", "acme-orders", phys)
         chain = store.list_artifacts(prefix)
         print(f"   chain under {prefix}: {len(chain)} artifacts (expect 2: full+diff)")
         assert len(chain) == 2, "expected a real 2-artifact chain in one physical prefix"

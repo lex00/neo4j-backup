@@ -69,8 +69,8 @@ class FakeStore:
     def latest_text_key(self, prefix):
         return self._text_latest
 
-    def list_text_keys(self, prefix):
-        return []  # no metadata exports by default
+    def list_text_keys(self, prefix, suffix=".cypher"):
+        return []  # no metadata exports or sidecars by default
 
 
 class FakeNeo4j:

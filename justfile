@@ -82,6 +82,10 @@ cli-smoke:
 mcp-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_mcp.py
 
+# Artifact sidecars (#118): every demo artifact has metadata; chains read; backfill (needs a backup)
+sidecar-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_sidecars.py
+
 # Bulk import (#16): import a tiny CSV -> adopt -> backup -> seed, end to end (needs the stack)
 import-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_import.py

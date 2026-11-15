@@ -29,6 +29,10 @@ def _layout():
     return paths.get_layout()
 
 
+def _log(msg: str) -> None:
+    print(msg, file=sys.stderr)  # stdout is the MCP stdio channel
+
+
 def _run_admin(runner):
     # neo4j-admin output to stderr so it never corrupts the MCP stdio protocol on stdout
     return env.subprocess_admin(runner, stdout=sys.stderr)
@@ -62,11 +66,15 @@ def latest_artifact(group: str, member: str) -> dict:
 
 
 def show_chain(group: str, member: str) -> dict:
-    """List the backup artifacts for one group member, oldest first (the restore chain)."""
+    """List the backup artifacts for one group member, oldest first, and the chains read from
+    their sidecars (#118): per physical folder, full then diffs, with the time window each covers.
+    Artifacts with no sidecar yet are listed under `unknown`."""
     store, layout = env.store(), _layout()
     arts = sorted(store.list_artifacts(layout.alias_prefix(group, member)), key=lambda t: t[2])
     chain = [{"key": k, "bytes": s, "modified": _iso(m)} for (k, s, m) in arts]
-    return {"group": group, "member": member, "count": len(chain), "artifacts": chain}
+    read = ops.artifact_chains(store, layout, group, member)
+    return {"group": group, "member": member, "count": len(chain), "artifacts": chain,
+            "chains": read["chains"], "unknown": read["unknown"]}
 
 
 def backup_status() -> dict:
@@ -109,7 +117,7 @@ def run_backup(group: str, kind: str = "AUTO") -> dict:
     store, runner, neo, layout = env.store(), env.runner(), env.neo4j(), _layout()
     run = _run_admin(runner)
     done = [ops.backup_target(run, neo, store, runner, layout, g.id, m, kind,
-                              upload=_UPLOAD, staging=_STAGING) for m in g.names]
+                              upload=_UPLOAD, staging=_STAGING, log=_log) for m in g.names]
     return {"group": group, "kind": kind, "backups": done}
 
 
@@ -135,7 +143,7 @@ def run_aggregate(group: str, confirm: bool = False, dry_run: bool = False) -> d
         return _needs_confirmation("aggregate", {"collapses": plan})
     run = _run_admin(runner)
     done = [ops.aggregate_target(run, store, runner, layout, g.id, m,
-                                 upload=_UPLOAD, staging=_STAGING) for m in g.names]
+                                 upload=_UPLOAD, staging=_STAGING, log=_log) for m in g.names]
     return {"group": group, "aggregated": done}
 
 

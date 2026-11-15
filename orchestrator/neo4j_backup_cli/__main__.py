@@ -51,7 +51,7 @@ def cmd_backup(args):
     store, runner, neo, layout = env.store(), env.runner(), env.neo4j(), paths.get_layout()
     run = _run_admin(runner)
     done = [ops.backup_target(run, neo, store, runner, layout, group.id, name, args.kind,
-                              upload=_UPLOAD, staging=_STAGING) for name in group.names]
+                              upload=_UPLOAD, staging=_STAGING, log=_log) for name in group.names]
     return envelope("backup", ok=True, group=group.id, result={"backups": done}), Exit.OK
 
 
@@ -124,7 +124,8 @@ def cmd_aggregate(args):
         return short
     run = _run_admin(runner)
     done = [ops.aggregate_target(run, store, runner, layout, group.id, name,
-                                 upload=_UPLOAD, staging=_STAGING) for name in group.names]
+                                 upload=_UPLOAD, staging=_STAGING, log=_log)
+            for name in group.names]
     return envelope("aggregate", ok=True, group=group.id, result={"aggregated": done}), Exit.OK
 
 
