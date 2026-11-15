@@ -117,11 +117,25 @@ def cmd_restore(args):
     group = _group(args)
     store, neo, layout = env.store(), env.neo4j(), paths.get_layout()
     plan = ops.plan_restore(neo, store, group, layout, replace=args.replace)  # preconditions first
+    plan["baseline"] = not args.no_baseline  # a FULL of each new database afterwards (#97)
     short = _guard("restore", group.id, {"plan": plan}, args.confirm, args.dry_run)
     if short:
         return short
     out = ops.restore_group(neo, store, group, layout, restore_until=args.until,
                             replace=args.replace, cypher_version=_CYPHER, log=_log)
+    if args.no_baseline:
+        return envelope("restore", ok=True, group=group.id,
+                        result={**out, "baseline": None}), Exit.OK
+    runner = env.runner()
+    try:
+        out["baseline"] = ops.baseline_after_restore(
+            _run_admin(runner), neo, store, runner, layout, group, out["members"],
+            upload=_UPLOAD, staging=_STAGING, log=_log)
+    except ops.BaselineError as e:
+        # the restore is applied; say so, and what's left to back up
+        return envelope("restore", ok=False, group=group.id,
+                        result={**out, "baseline": e.done},
+                        error=make_error(ops.BaselineError.kind, str(e))), Exit.FAILURE
     return envelope("restore", ok=True, group=group.id, result=out), Exit.OK
 
 
@@ -201,6 +215,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--until", type=_until_arg,
                    help="ISO-8601 point-in-time, UTC if no offset (needs a differential chain)")
     r.add_argument("--replace", action="store_true", help="by-name: DROP+recreate an existing target")
+    r.add_argument("--no-baseline", action="store_true",
+                   help="skip the full backup of each restored database (taken by default, #97)")
     r.set_defaults(func=cmd_restore)
 
     pr = guarded(sub.add_parser("prune", help="delete backups past each group's retention"))

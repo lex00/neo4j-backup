@@ -37,6 +37,17 @@ class OpError(Exception):
     failure type; the message is operator-facing."""
 
 
+class BaselineError(OpError):
+    """The restore was applied but its baseline full backup failed (#97). `done` lists the
+    baselines that were taken; rerun `backup <group> --kind FULL` for the rest."""
+
+    kind = "baseline_failed"
+
+    def __init__(self, msg: str, done: list[dict]):
+        super().__init__(msg)
+        self.done = done
+
+
 def _stage(runner, tag: str, name: str, staging: str | None) -> str:
     return f"{(staging or runner.scratch_path).rstrip('/')}/{tag}/{name}"
 
@@ -161,13 +172,15 @@ def needs_full(neo4j, store, layout, group_id: str, alias: str) -> bool:
 
 def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: str, alias: str,
                   kind: str, *, upload: str = "admin", staging: str | None = None,
-                  log: Log = _NOLOG) -> dict:
+                  log: Log = _NOLOG, physical: str | None = None) -> dict:
     """Back up the physical the alias currently targets (or `alias` itself if it's a physical
     name) into that physical's own prefix, so repeated backups form one chain. A DIFF with no
     full of the current store to diff against is skipped, not failed: the result has
     `skipped: true, needs_full: true` and the caller runs a FULL in the full lane (#74). `taken`
-    is the type neo4j-admin actually wrote (an AUTO can be either), from the sidecar."""
-    physical = neo4j.resolve_physical(alias)
+    is the type neo4j-admin actually wrote (an AUTO can be either), from the sidecar. `physical`
+    names the database explicitly (a restore's new physical, even when an external router, not
+    the alias, points at it)."""
+    physical = physical or neo4j.resolve_physical(alias)
     if not physical:
         raise OpError(f"{alias!r} resolves to no physical database — bootstrap the group first")
     prefix = layout.physical_prefix(group_id, alias, physical)
@@ -489,6 +502,30 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
                                    cypher_version=cypher_version, ts=ts, log=log))
     cutover_seeded(neo4j, members, log=log)
     return {"mode": "alias-swap", "members": members}
+
+
+def baseline_after_restore(run_admin: RunAdmin, neo4j, store, runner, layout, group,
+                           members: list[dict], *, upload: str = "admin",
+                           staging: str | None = None, log: Log = _NOLOG) -> list[dict]:
+    """A FULL backup of every database a restore created (#97), so the next diff has a base
+    (#74) and point-in-time coverage of the new database starts now rather than at the next full
+    schedule. alias-swap members are backed up by their new physical; by-name members by name.
+    Raises BaselineError (the restore stays applied) at the first failure."""
+    done: list[dict] = []
+    for m in members:
+        alias = m.get("alias") or m["name"]
+        physical = m.get("newdb") or m["name"]
+        try:
+            out = backup_target(run_admin, neo4j, store, runner, layout, group.id, alias, "FULL",
+                                upload=upload, staging=staging, log=log, physical=physical)
+        except Exception as e:  # noqa: BLE001 - any failure: the restore itself is done
+            raise BaselineError(
+                f"restore applied, but the baseline full of {physical} failed ({e}); run "
+                f"`neo4j-backup backup {group.id} --kind FULL`", done) from e
+        done.append({"member": alias, "physical": physical, "artifact": out["artifact"],
+                     "taken": out["taken"]})
+        log(f"baseline {physical} -> {out['artifact']}")
+    return done
 
 
 def plan_restore(neo4j, store, group, layout, *, replace: bool = False) -> dict:

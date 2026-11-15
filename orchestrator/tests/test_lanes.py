@@ -135,3 +135,41 @@ def test_tier_schedules_evaluate_with_several_members():
             reqs = sched.evaluate_tick(ctx).run_requests
         assert len(reqs) == 2 and len({r.run_key for r in reqs}) == 2
         assert all(r.tags["backup_kind"] == "full" for r in reqs)  # empty store: every member needs a full
+
+
+# --- #97: baseline full after a restore ---------------------------------------------------------
+
+class G:
+    id = "g"
+
+
+def test_baseline_after_restore_gives_the_next_diff_a_base():
+    store = MemStore()
+    assert ops.needs_full(Neo(), store, LAYOUT, "g", "orders") is True  # just restored
+    full = rec("1-full.backup", True, 1, 9, "2026-11-15T10:00:30", folder=FOLDER)
+    taken = []
+
+    def run(cmd):
+        if "inspect" in cmd:
+            return "neo4j 2026.05.0\n" + json.dumps([full])
+        taken.append(cmd)
+        store.add(FOLDER + "1-full.backup")
+        return ""
+    done = ops.baseline_after_restore(run, Neo(), store, RUNNER, LAYOUT, G(),
+                                      [{"mode": "alias-swap", "alias": "orders", "newdb": PHYS}])
+    assert done == [{"member": "orders", "physical": PHYS, "artifact": FOLDER + "1-full.backup",
+                     "taken": "full"}]
+    assert "FULL" in taken[0] and taken[0][-1] == PHYS
+    assert ops.needs_full(Neo(), store, LAYOUT, "g", "orders") is False  # the diff lane can run
+
+
+def test_baseline_failure_keeps_what_was_done():
+    store = MemStore()
+
+    def run(cmd):
+        raise RuntimeError("runner down")
+    with pytest.raises(ops.BaselineError) as e:
+        ops.baseline_after_restore(run, Neo(), store, RUNNER, LAYOUT, G(),
+                                   [{"mode": "by-name", "name": "orders"}])
+    assert e.value.kind == "baseline_failed" and e.value.done == []
+    assert "restore applied" in str(e.value)

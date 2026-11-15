@@ -8,6 +8,12 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 ## [Unreleased]
 
 ### Added
+- **Baseline full backup after every restore** (#97), on by default. The restore takes a FULL of
+  each database it created as its last step, so the next diff has a base and point-in-time
+  coverage starts straight away. CLI `--no-baseline` / `baseline: false` (Dagster config, Airflow
+  param, MCP) skips it. Dagster runs it as `baseline_op` after the cutover and tags the
+  `restore_group` job `backup_kind: full`; Airflow runs a mapped `baseline` task in the
+  `neo4j_full` pool. A failed baseline leaves the restore applied and reports `baseline_failed`.
 - **Artifact metadata** (#118). After every backup and aggregate the tool runs
   `neo4j-admin backup inspect` on the physical's folder and writes `<artifact>.meta.json` beside
   each artifact: full or diff, transaction range, backup time, store id hash, database, and the

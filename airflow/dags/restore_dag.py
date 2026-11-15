@@ -1,6 +1,8 @@
-"""Restore DAG — pure Cypher over Bolt (no runner). Mirrors the Dagster `restore_group` job.
-Params drive group + PITR (+ replace for by-name); the seed fan-out is mapped, the barrier
-does the alias-swap cutover (or nothing in by-name mode).
+"""Restore DAG — the seed and cutover are pure Cypher over Bolt. Mirrors the Dagster
+`restore_group` job. Params drive group + PITR (+ replace for by-name, + baseline); the seed
+fan-out is mapped, the barrier does the alias-swap cutover (or nothing in by-name mode), and a
+mapped `baseline` task in the `neo4j_full` pool then takes a FULL of each restored database
+with the runner (#97).
 
 Modes (per group, from policy `restore_mode`): alias-swap seeds a fresh physical per alias and
 swaps the alias to it (non-destructive, default); by-name (#48) restores each database into its
@@ -14,7 +16,8 @@ from datetime import datetime
 
 from airflow.sdk import Param, dag, get_current_context, task
 
-from neo4j_backup_airflow import config
+from neo4j_backup_airflow import config, upload
+from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import naming, ops, paths
 from neo4j_backup_core.policy import load_policy
 from neo4j_backup_core.until import parse_until
@@ -34,6 +37,7 @@ _SEED_CYPHER_VERSION = os.environ.get("SEED_CYPHER_VERSION") or None
         "group_id": Param("demo", type="string"),
         "restore_until": Param(None, type=["null", "string"]),  # ISO-8601, needs a chain
         "replace": Param(False, type="boolean"),  # by-name only: DROP+recreate an existing target
+        "baseline": Param(True, type="boolean"),  # FULL of each restored database afterwards (#97)
     },
     tags=["neo4j-backup", "restore"],
 )
@@ -47,6 +51,7 @@ def neo4j_restore():
             # ISO-8601, UTC if no offset; a bad value fails here, before any Neo4j call (#77)
             "restore_until": parse_until(ctx["params"]["restore_until"]),
             "replace": bool(ctx["params"].get("replace")),
+            "baseline": bool(ctx["params"].get("baseline", True)),
             "mode": load_policy(config.policy_path()).group(gid).restore_mode,
             "ts": naming.ts(),               # one timestamp for the whole group
         }
@@ -70,11 +75,29 @@ def neo4j_restore():
             raise RuntimeError(str(e))
 
     @task
-    def swap(seeded: list[dict]):  # barrier: runs once, after every seed completes
+    def swap(seeded: list[dict]) -> list[dict]:  # barrier: runs once, after every seed completes
+        seeded = list(seeded)
         ops.cutover_seeded(config.neo4j(), seeded, log=print)
+        return seeded
+
+    @task(pool="neo4j_full")  # a full backup: the full lane's pool (#97)
+    def baseline(plan: dict, member: dict) -> dict | None:
+        """A FULL of one restored database, after the cutover. A failure fails this task only;
+        the restore is already applied (rerun the task or `backup --kind FULL`)."""
+        if not plan["baseline"]:
+            print("baseline skipped (baseline=false)")
+            return None
+        group = load_policy(config.policy_path()).group(plan["group_id"])
+        try:
+            return ops.baseline_after_restore(
+                run_admin, config.neo4j(), config.store(), config.runner(), _layout, group,
+                [member], upload=upload.BACKUP_UPLOAD, staging=upload.STAGING, log=print)[0]
+        except ops.BaselineError as e:
+            raise RuntimeError(f"[{e.kind}] {e}")
 
     p = plan()
-    swap(seed.partial(plan=p).expand(name=members(p)))
+    restored = swap(seed.partial(plan=p).expand(name=members(p)))
+    baseline.partial(plan=p).expand(member=restored)
 
 
 neo4j_restore_dag = neo4j_restore()  # the DAG object (Airflow discovers it in globals)

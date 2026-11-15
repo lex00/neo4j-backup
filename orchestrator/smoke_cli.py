@@ -70,6 +70,13 @@ def _system(cypher: str) -> None:
         s.run(cypher).consume()
 
 
+def _write(database: str, cypher: str) -> None:
+    from neo4j import GraphDatabase
+
+    with GraphDatabase.driver(BOLT, auth=ADMIN) as d, d.session(database=database) as s:
+        s.run(cypher).consume()
+
+
 def _customer_reads(database: str) -> int:
     """Count nodes in `database` as the restricted user; raises on access denied."""
     from neo4j import GraphDatabase
@@ -135,10 +142,17 @@ def main() -> None:
     assert any("smoke117" in c for c in orders["privileges"]), orders
 
     run_cli("aggregate", "demo", "--confirm")
-    run_cli("restore", "demo", "--confirm")
+    restored = run_cli("restore", "demo", "--confirm")
+    base = restored["result"]["baseline"]  # a FULL of each new database (#97)
+    assert [b["taken"] for b in base] == ["full"] * 3, base
     after = _customer_reads("acme-orders")  # raises 42NFF if the privileges were dropped
     assert after == before, (before, after)
     print(f"== customer user still reads acme-orders after restore ({after} nodes) ==")
+    _write("acme-orders", "CREATE (:AfterRestore)")
+    diff = run_cli("backup", "demo", "--kind", "DIFF")  # the baseline gives the diff a base
+    assert diff["result"]["needs_full"] == [], diff
+    assert {b["taken"] for b in diff["result"]["backups"]} == {"diff"}, diff
+    print("== after the restore's baseline, DIFF takes a diff ==")
     by_name_privileges()
     run_cli("metadata", "export")
     run_cli("metadata", "restore", "--confirm")

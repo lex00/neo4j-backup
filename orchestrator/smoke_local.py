@@ -62,11 +62,13 @@ def main() -> None:
         print("== RESTORE group via Dagster job (Bolt Cypher) ==")
         rr = restore_group.execute_in_process(
             run_config={"ops": {"restore_group_op": {"config": {"group_id": "demo"}}}},
-            resources={"neo4j": RESOURCES["neo4j"], "store": RESOURCES["store"]},
+            resources=RESOURCES,  # the baseline step (#97) needs the runner too
             instance=instance,
         )
         assert rr.success, "restore job failed"
-        print("   restore OK")
+        base = rr.output_for_node("baseline_op")
+        assert len(base) == 3 and all(b["taken"] == "full" for b in base), base
+        print(f"   restore OK; baseline fulls: {[b['physical'] for b in base]}")
 
     # Verify through the alias (the app's view).
     rows = neo4j.run_system(

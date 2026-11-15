@@ -15,7 +15,8 @@ applies them automatically. You never assemble the chain by hand.
 > database before the switch. When you run the Cypher below by hand, copy them yourself before the
 > `ALTER ALIAS`: run each command from
 > `SHOW PRIVILEGES AS COMMANDS` whose `ON GRAPH` / `ON DATABASE` names the old database, with the
-> new database's name in its place. Take a full backup of the restored group afterwards too.
+> new database's name in its place. Then take a full backup of the restored group
+> (`neo4j-backup backup <group> --kind FULL`); the tool's restore does that itself (#97).
 
 **Driving it.** This runbook is the raw Cypher — useful for understanding and for a fully manual
 recovery. In practice the same seed-and-cutover is driven for a whole group by an orchestrator

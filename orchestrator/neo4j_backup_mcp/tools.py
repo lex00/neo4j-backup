@@ -151,15 +151,19 @@ def run_aggregate(group: str, confirm: bool = False, dry_run: bool = False) -> d
 
 
 def run_restore(group: str, until: str | None = None, replace: bool = False,
-                confirm: bool = False, dry_run: bool = False, verify_first: bool = True) -> dict:
+                confirm: bool = False, dry_run: bool = False, verify_first: bool = True,
+                baseline: bool = True) -> dict:
     """Restore a group (alias-swap, or by-name with `replace` to DROP+recreate; `until` = PITR).
     Needs confirm=true; dry_run returns the plan. For a destructive `replace`, runs
     verify-before-drop (skip with verify_first=false). `until` is ISO-8601 (UTC if no offset);
-    anything else is refused before any Neo4j call (#77)."""
+    anything else is refused before any Neo4j call (#77). `baseline` (default true) takes a FULL
+    of each restored database afterwards (#97); if that fails the restore stays applied and the
+    result has `baseline_error`."""
     until = parse_until(until)
     g = load_policy(env.policy_path()).group(group)
     store, neo, layout = env.store(), env.neo4j(), _layout()
     plan = ops.plan_restore(neo, store, g, layout, replace=replace)  # preconditions first
+    plan["baseline"] = baseline
     if dry_run:
         return {"group": group, "dry_run": True, "plan": plan}
     if not confirm:
@@ -173,7 +177,17 @@ def run_restore(group: str, until: str | None = None, replace: bool = False,
         verified = True
     out = ops.restore_group(neo, store, g, layout, restore_until=until, replace=replace,
                             cypher_version=_CYPHER)
-    return {"group": group, "verified_before_drop": verified, "restored": out}
+    result = {"group": group, "verified_before_drop": verified, "restored": out}
+    if baseline:
+        runner = env.runner()
+        try:
+            result["baseline"] = ops.baseline_after_restore(
+                _run_admin(runner), neo, store, runner, layout, g, out["members"],
+                upload=_UPLOAD, staging=_STAGING, log=_log)
+        except ops.BaselineError as e:
+            result.update({"ok": False, "baseline": e.done,
+                           "error": {"kind": e.kind, "msg": str(e)}})
+    return result
 
 
 def run_prune(confirm: bool = False, dry_run: bool = False) -> dict:

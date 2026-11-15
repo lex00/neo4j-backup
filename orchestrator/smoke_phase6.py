@@ -68,7 +68,7 @@ def main() -> None:
         print("== RESTORE group ==")
         rr = D.restore_group.execute_in_process(
             run_config={"ops": {"restore_group_op": {"config": {"group_id": "demo"}}}},
-            resources={"neo4j": RES["neo4j"], "store": RES["store"]},
+            resources=RES,  # the baseline step (#97) needs the runner too
             instance=inst,
         )
         assert rr.success

@@ -139,19 +139,22 @@ the switch and every alias still points at its old database. In a by-name group 
 the privileges are read before the drop and granted again after the create (DROP DATABASE removes
 them).
 
-### 6. Take a full backup of the restored group
+### 6. Check the baseline backup
 
-```bash
-neo4j-backup backup <group> --kind FULL
-```
+The restored databases start with no backups of their own, and a differential needs a full of the
+same database. So the restore ends by taking a full backup of each database it created, the
+baseline ([#97](https://github.com/lex00/neo4j-backup/issues/97)); the result lists them under
+`baseline`. Point-in-time coverage of the new databases starts there. In Dagster it is the
+`baseline_op` step of `restore_group` (the job runs with the `backup_kind: full` tag, so it queues
+behind a running full); in Airflow it is the `baseline` task in the `neo4j_full` pool. Skip it with
+`--no-baseline` (CLI), `baseline: false` (Dagster config, Airflow param, MCP).
 
-The new databases have no backups of their own yet. A differential needs a full of the same
-database, so until one exists the diff schedule sends these members to the full lane instead
-(Dagster requests the run with the `backup_kind: full` tag, Airflow runs it in the `neo4j_full`
-pool), and a `backup --kind DIFF` from the CLI skips them and lists them under `needs_full`
-([#74](https://github.com/lex00/neo4j-backup/issues/74)). Running the full yourself straight away
-closes the gap before the next diff tick. The same applies after a bulk load, an adopt, and a
-by-name restore with `--replace` (a new store under the old name).
+If the baseline fails, the restore is still applied: the CLI exits 1 with error kind
+`baseline_failed` and the restore result, and you rerun `neo4j-backup backup <group> --kind FULL`.
+Until a full exists, the diff schedule sends those members to the full lane and
+`backup --kind DIFF` lists them under `needs_full`
+([#74](https://github.com/lex00/neo4j-backup/issues/74)). The same holds after a bulk load, an
+adopt, and a by-name restore with `--replace`.
 
 ### 7. Report back
 
@@ -180,8 +183,7 @@ removes the privileges granted on it.
   database's chain; restore that by hand with the Cypher in [RECOVERY.md](RECOVERY.md)
   ([#114](https://github.com/lex00/neo4j-backup/issues/114)).
 
-**Planned:** the full backup as part of the restore ([#97](https://github.com/lex00/neo4j-backup/issues/97)),
-`--ticket` and `--reason` on the command ([#119](https://github.com/lex00/neo4j-backup/issues/119)),
+**Planned:** `--ticket` and `--reason` on the command ([#119](https://github.com/lex00/neo4j-backup/issues/119)),
 `rollback` ([#122](https://github.com/lex00/neo4j-backup/issues/122)) and `cleanup`
 ([#93](https://github.com/lex00/neo4j-backup/issues/93)).
 
@@ -189,7 +191,7 @@ removes the privileges granted on it.
 
 When a customer's data starts as CSV or Parquet files, follow [IMPORT.md](IMPORT.md): import it
 on a separate loader machine, back it up into the group's folder in the bucket, then
-`neo4j-backup restore <group> --confirm`. Take a full backup afterwards, as for any restore.
+`neo4j-backup restore <group> --confirm`, which takes the baseline full backup as for any restore.
 
 For a customer whose graph is rebuilt in full from external sources on a schedule, run the same
 steps each cycle. Their writes since the previous load are replaced each time.

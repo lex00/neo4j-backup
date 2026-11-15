@@ -102,15 +102,45 @@ def test_restore_without_confirm_is_guard_refusal(monkeypatch):
     assert env["error"]["kind"] == "confirm_required"
 
 
-def test_restore_with_confirm_applies(monkeypatch):
+def _restore_fakes(monkeypatch, baseline):
     monkeypatch.setattr(cli.ops, "plan_restore", lambda *a, **k: {"drops": []})
     applied = {}
-    monkeypatch.setattr(cli.ops, "restore_group",
-                        lambda *a, **k: applied.setdefault("ran", True) or {"members": []})
+
+    def restore(*a, **k):
+        applied["ran"] = True
+        return {"mode": "alias-swap", "members": [{"alias": "orders", "newdb": "orders-2"}]}
+    monkeypatch.setattr(cli.ops, "restore_group", restore)
+    monkeypatch.setattr(cli.ops, "baseline_after_restore", baseline)
+    return applied
+
+
+def test_restore_with_confirm_applies_and_takes_a_baseline(monkeypatch):
+    seen = []
+    applied = _restore_fakes(monkeypatch, lambda *a, **k: seen.append(a[-1]) or
+                             [{"member": "orders", "artifact": "k.backup", "taken": "full"}])
     env, code = run(["restore", "demo", "--confirm"])
     assert_conformant(env, expect_ok=True)
     assert_exit(code, Exit.OK)
     assert applied["ran"] is True
+    assert env["result"]["baseline"][0]["artifact"] == "k.backup"
+    assert seen[0] == [{"alias": "orders", "newdb": "orders-2"}]  # the restored members
+
+
+def test_restore_no_baseline_skips_it(monkeypatch):
+    _restore_fakes(monkeypatch, lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran")))
+    env, code = run(["restore", "demo", "--confirm", "--no-baseline"])
+    assert_exit(code, Exit.OK) and env["result"]["baseline"] is None
+
+
+def test_restore_baseline_failure_is_its_own_error_kind(monkeypatch):
+    def fail(*a, **k):
+        raise cli.ops.BaselineError("restore applied, but the baseline failed", done=[])
+    _restore_fakes(monkeypatch, fail)
+    env, code = run(["restore", "demo", "--confirm"])
+    assert_conformant(env, expect_ok=False)
+    assert_exit(code, Exit.FAILURE)
+    assert env["error"]["kind"] == "baseline_failed"
+    assert env["result"]["members"][0]["newdb"] == "orders-2"  # the restore is reported as applied
 
 
 # --- guarded commands: prune ------------------------------------------------------------------
