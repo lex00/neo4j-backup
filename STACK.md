@@ -1,6 +1,6 @@
 # Local Dev Stack
 
-Single-node Neo4j Enterprise + MinIO object store + a node-agentless backup runner,
+Single-node Neo4j Enterprise + the floci S3/KMS emulator + a node-agentless backup runner,
 driven by `just`. Single node is deliberately the starting point: it exercises the
 whole backup/restore loop (online backup, seed-from-URI restore, PITR). Cluster
 topologies are deferred until source-member selection and placement actually need
@@ -20,7 +20,7 @@ just fresh        # up + bootstrap: boots the stack and the demo group from scra
 just backup demo  # online backup of the demo group to object storage
 just artifacts    # list what landed in the bucket
 just restore demo # restore the group via seed-from-URI into <db>_restored
-just urls         # Neo4j Browser + MinIO console links
+just urls         # Neo4j Browser link and the local S3 endpoint
 ```
 
 The same loop runs through each front-end against this stack: `just cli-smoke` drives the
@@ -71,20 +71,32 @@ reference each other logically (shared customer/product ids):
 The PITR alignment story uses this group: one `seedRestoreUntil` timestamp across all
 three so they restore to a single consistent instant.
 
-## Validation status (2026-06-29)
+## Object store: floci
 
-Validated end-to-end on this stack (`just fresh` → `backup` → `restore`):
+The local object store is [floci](https://hub.docker.com/r/floci/floci) (`floci/floci:1.5.34`), a
+LocalStack-compatible AWS emulator, with the AWS CLI (`amazon/aws-cli`) for setup and listing. It
+replaced MinIO in 2026-11, when MinIO's images stopped being publicly pullable (#127). Inside the
+compose network the endpoint is `http://s3:4566`; on the host it is `http://localhost:9000`. It
+accepts any credentials.
 
-- **MinIO plain-HTTP seed + path-style** — works; no TLS proxy or `MINIO_DOMAIN` needed.
-- **SSE-KMS at rest + read via seed-from-URI** — works; `mc stat` shows
-  `Encryption: SSE-KMS (arn:aws:kms:demo-group-key)`, and the server reads it
-  transparently on restore.
-- **`eval` license** — Neo4j Enterprise booted fine.
-- **Backup → restore → alias swap → data verified** through alias routing.
+`createbuckets` (`docker/create-bucket.sh`) creates the KMS key `alias/demo-group-key` and the
+`neo4j-backups` bucket, and sets the bucket's default encryption to that key. floci records the
+default but does not apply it to objects, so neo4j-admin's direct writes are stored unencrypted
+locally. Writes that send the SSE-KMS header themselves are encrypted: run with
+`BACKUP_UPLOAD=pipeline` and `S3_SSE=aws:kms` to see it. On real S3 the bucket default applies to
+every write, as before.
 
-Two fixes applied during validation (now in the scripts): `latest_artifact` uses
-`mc find` + host parsing (the `mc` image has no awk/grep); and the restore drops
-`seedConfig` (CloudSeedProvider rejects it — region/endpoint come from server env).
+## Validation status (2026-11-15, floci)
+
+Validated end-to-end on this stack: `just fresh`, `just backup demo`, `just artifacts`,
+`just restore demo` (seed-from-URI over plain HTTP, path-style, then alias swap), `just demo-pitr`,
+`just cli-smoke`, `just import-smoke`, `orchestrator/smoke_local.py` (Dagster) and
+`just restore-system`.
+
+Earlier notes (MinIO, 2026-06-29): seed-from-URI worked over plain HTTP with path-style
+addressing, SSE-KMS objects were read transparently on restore, and the restore drops
+`seedConfig` (CloudSeedProvider rejects it; region and endpoint come from the server's
+environment).
 
 Remaining notes:
 

@@ -11,7 +11,7 @@ default:
 _env:
     @[ -f .env ] || (cp .env.example .env && echo "created .env from .env.example")
 
-# start the single-node stack (neo4j + minio + runner)
+# start the single-node stack (neo4j + floci S3 emulator + runner)
 up: _env
     {{compose}} up -d --wait
 
@@ -100,7 +100,7 @@ airflow-k8s-smoke:
 
 # list backup artifacts in object storage
 artifacts prefix="":
-    {{compose}} run --rm -T mc "mc alias set local http://minio:9000 $AWS_ACCESS_KEY_ID $AWS_SECRET_ACCESS_KEY >/dev/null && mc ls -r local/$BACKUP_BUCKET/{{prefix}}"
+    {{compose}} run --rm -T awscli s3 ls --recursive "s3://$BACKUP_BUCKET/{{prefix}}"
 
 # tail logs (optionally for one service)
 logs service="":
@@ -113,7 +113,7 @@ ps:
 # print service URLs / credentials
 urls:
     @echo "Neo4j Browser : http://localhost:7474  (neo4j / $NEO4J_PASSWORD)"
-    @echo "MinIO console : http://localhost:9001  ($AWS_ACCESS_KEY_ID / $AWS_SECRET_ACCESS_KEY)"
+    @echo "S3 (floci)    : http://localhost:9000  (any credentials; list with: just artifacts)"
 
 # validate a release: __version__ matches, CHANGELOG has the section, then print tag/push cmds
 release version:

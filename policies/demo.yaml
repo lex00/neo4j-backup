@@ -20,10 +20,10 @@ db_groups:
     rto_minutes: 120
     # Server-side SSE-KMS (DESIGN.md "Backup-file encryption"): per-group key = the
     # bucket's default KMS key, read transparently by seed-from-URI restore. Local dev
-    # stands in with MinIO's built-in KMS key (KMS_KEY_NAME).
+    # stands in with the floci emulator's KMS key alias/<KMS_KEY_NAME> (see STACK.md).
     encryption:
       mode: sse-kms
-      kms_key_ref: demo-group-key   # cloud KMS key id/alias; local: MinIO key name
+      kms_key_ref: demo-group-key   # cloud KMS key id/alias; local: floci key alias name
     # Seed topology (DESIGN.md §3): the cluster shape a restore/bulk-import seeds into,
     # so recovery keeps its redundancy instead of the DBMS default. OMITTED here because
     # the local stack is single-node — the TOPOLOGY clause is illegal on standalone. On a

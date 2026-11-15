@@ -14,7 +14,7 @@ export AIRFLOW__CORE__LOAD_EXAMPLES=False
 export AIRFLOW__CORE__DAGS_FOLDER="$REPO/airflow/dags"
 export AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS=True  # local: skip the login wall
 
-# Wire the DAGs to the Compose Neo4j + MinIO + runner (override via env / .env as needed).
+# Wire the DAGs to the Compose Neo4j + S3 emulator + runner (override via env / .env as needed).
 export NEO4J_BACKUP_POLICY="${NEO4J_BACKUP_POLICY:-$REPO/policies/demo.yaml}"
 export NEO4J_BOLT_URI="${NEO4J_BOLT_URI:-neo4j://localhost:7687}"
 export NEO4J_PASSWORD="${NEO4J_PASSWORD:-devpassword}"

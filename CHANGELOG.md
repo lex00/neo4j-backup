@@ -7,6 +7,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Fixed
+- **Local stack** (#127): MinIO's images can no longer be pulled, so `just fresh` failed at its
+  first step. The stack now uses the floci S3/KMS emulator (`floci/floci:1.5.34`) and the AWS CLI
+  (`amazon/aws-cli`) for setup and listing. Host port 9000 still serves S3. **Recreate your `.env`**
+  from `.env.example`: `AWS_ENDPOINT_URL_S3` is now `http://s3:4566` and `MINIO_KMS_SECRET_KEY` is
+  gone. floci records the bucket's default SSE-KMS but doesn't apply it; see STACK.md.
+
 ## [0.4.0] — 2026-07-11
 
 Bulk import off-cluster, plus a docs-coherency pass across the front-end story.

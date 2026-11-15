@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bring up a local k3d cluster to validate RUNNER_MODE=k8s. Reuses the Compose Neo4j +
-# MinIO (running Neo4j on k8s is the team's infra concern, not this tooling's code) —
+# local S3 emulator (running Neo4j on k8s is the team's infra concern, not this tooling's code) —
 # the backup pod reaches them via host.k3d.internal. Requires the Compose stack up
 # (`just up`) with the backup port (6362) published.
 set -euo pipefail

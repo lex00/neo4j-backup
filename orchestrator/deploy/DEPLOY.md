@@ -58,4 +58,4 @@ IAM** is yours — the project does not impose it. SSE-KMS is server-side at the
 group (S3 default encryption is bucket-wide), but a shared bucket + one key is fine. The
 policy carries `s3_prefix` and `kms_key_ref` per group so you can wire per-group
 buckets/keys if you want. Grant the DB nodes `kms:Decrypt` so seed-from-URI restore
-reads encrypted artifacts. Locally one MinIO bucket + one key stands in.
+reads encrypted artifacts. Locally one floci bucket + one key stands in (see STACK.md for how floci handles encryption).

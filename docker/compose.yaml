@@ -1,4 +1,4 @@
-# Base local stack: single Neo4j Enterprise instance + MinIO object store + a
+# Base local stack: single Neo4j Enterprise instance + floci S3 emulator + a
 # node-agentless backup runner. Cluster topologies layer on via compose.cluster.yaml.
 #
 # Placement model (the "control placement of components" requirement):
@@ -16,7 +16,7 @@ networks:
 
 volumes:
   neo4j-data:
-  minio-data:
+  s3-data:
   # Runner scratch for --temp-path. In production this is a sized, dedicated volume
   # (instance-store/PVC) holding up to the largest full backup — several TB — never
   # the orchestrator's disk. Locally it is just a docker volume.
@@ -61,44 +61,40 @@ services:
       retries: 30
       start_period: 30s
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: "${AWS_ACCESS_KEY_ID}"
-      MINIO_ROOT_PASSWORD: "${AWS_SECRET_ACCESS_KEY}"
-      # Built-in KMS (single key) standing in for cloud KMS, for SSE-KMS at rest.
-      MINIO_KMS_SECRET_KEY: "${MINIO_KMS_SECRET_KEY}"
+  # Local S3 + KMS emulator (floci). MinIO's images are no longer publicly pullable.
+  # S3 API on 4566 inside the network; mapped to host port 9000 so host-side tools and
+  # smokes keep using http://localhost:9000.
+  s3:
+    image: floci/floci:1.5.34
     ports:
-      - "9000:9000"      # S3 API
-      - "9001:9001"      # MinIO console
+      - "9000:4566"      # S3/KMS API (host 9000 -> floci 4566)
     networks: [ops]
     volumes:
-      - minio-data:/data
+      - s3-data:/app/data
     healthcheck:
-      test: ["CMD-SHELL", "mc ready local || exit 1"]
-      interval: 10s
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health >/dev/null || exit 1"]
+      interval: 5s
       timeout: 5s
-      retries: 20
-      start_period: 10s
+      retries: 30
+      start_period: 5s
 
-  # One-shot: ensure the backup bucket exists, then exit.
+  # One-shot: ensure the KMS key alias and the backup bucket exist, then exit.
+  # floci stores the bucket's default encryption but does not apply it to objects; writes
+  # that send the SSE-KMS header themselves (BACKUP_UPLOAD=pipeline with S3_SSE) are encrypted.
   createbuckets:
-    image: minio/mc:latest
+    image: amazon/aws-cli:2.27.50
     depends_on:
-      minio:
+      s3:
         condition: service_healthy
     networks: [ops]
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >
-        mc alias set local http://minio:9000 "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" &&
-        mc mb --ignore-existing "local/$BACKUP_BUCKET" &&
-        mc encrypt set sse-kms "$KMS_KEY_NAME" "local/$BACKUP_BUCKET" &&
-        echo "bucket $BACKUP_BUCKET ready (SSE-KMS default: $KMS_KEY_NAME)"
+    entrypoint: ["/bin/sh", "/init/create-bucket.sh"]
+    volumes:
+      - ./create-bucket.sh:/init/create-bucket.sh:ro
     environment:
       AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
       AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      AWS_REGION: "${AWS_REGION}"
+      AWS_ENDPOINT_URL: "http://s3:4566"
       BACKUP_BUCKET: "${BACKUP_BUCKET}"
       KMS_KEY_NAME: "${KMS_KEY_NAME}"
 
@@ -119,21 +115,22 @@ services:
       AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
       AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
       AWS_REGION: "${AWS_REGION}"
-      AWS_ENDPOINT_URL_S3: "${AWS_ENDPOINT_URL_S3}"  # MinIO endpoint override (AWS SDK v2)
+      AWS_ENDPOINT_URL_S3: "${AWS_ENDPOINT_URL_S3}"  # local S3 endpoint override (AWS SDK v2)
       SCRATCH_PATH: "${SCRATCH_PATH}"
       HEAP_SIZE: "${RUNNER_HEAP_SIZE}"               # caps neo4j-admin JVM heap (verify var)
     volumes:
       - scratch:/scratch                              # --temp-path staging (sized for fulls)
 
-  # On-demand MinIO client for inspecting/resolving artifacts. Not started by `up`.
-  mc:
-    image: minio/mc:latest
+  # On-demand AWS CLI for inspecting/resolving artifacts. Not started by `up`.
+  awscli:
+    image: amazon/aws-cli:2.27.50
     profiles: ["tools"]
     networks: [ops]
-    entrypoint: ["/bin/sh", "-c"]
     environment:
       AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
       AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      AWS_REGION: "${AWS_REGION}"
+      AWS_ENDPOINT_URL: "http://s3:4566"
       BACKUP_BUCKET: "${BACKUP_BUCKET}"
 
   # Azure Blob emulator (#52) — validates the Azure ObjectStore backend / floci-style local
