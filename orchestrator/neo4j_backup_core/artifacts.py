@@ -92,31 +92,38 @@ def read(store, prefix: str) -> tuple[dict[str, dict], list[str]]:
 
 
 def chains(store, prefix: str) -> dict:
-    """The backup chains under `prefix` (an alias or physical prefix), grouped by the folder each
-    artifact sits in (one physical). Each chain starts at a full and runs through the diffs after
-    it, in transaction order; its window is the full's time to the newest artifact's time.
-    Artifacts without a sidecar are listed under `unknown`."""
+    """The backup chains under `prefix` (an alias or physical prefix). Artifacts are grouped by
+    folder and then by store (`database_id`): a by-name restore or a reused physical name puts a
+    second store's backups in the same folder (#120), and neo4j-admin and seed-from-URI keep them
+    apart by database id. Each chain starts at a full and runs through that store's diffs after
+    it, in time order; its window is the full's time to the newest artifact's time. Artifacts
+    without a sidecar are listed under `unknown`."""
     metas, unknown = read(store, prefix)
-    by_folder: dict[str, list[dict]] = {}
+    groups: dict[tuple[str, str], list[dict]] = {}
     for key, meta in metas.items():
-        by_folder.setdefault(posixpath.dirname(key) + "/", []).append(meta)
+        folder = posixpath.dirname(key) + "/"
+        groups.setdefault((folder, meta.get("database_id") or ""), []).append(meta)
     out = []
-    for folder in sorted(by_folder):
-        arts = sorted(by_folder[folder], key=lambda r: (r.get("time") or "", r["type"] != "full"))
+    for folder, _dbid in sorted(groups, key=lambda g: (g[0], min(m.get("time") or "" for m in
+                                                                  groups[g]))):
+        arts = sorted(groups[(folder, _dbid)],
+                      key=lambda r: (r.get("time") or "", r["type"] != "full"))
         current: dict | None = None
         orphans: list[dict] = []
         for a in arts:
             entry = {k: a.get(k) for k in ("key", "type", "lowest_tx", "highest_tx", "time")}
             if a["type"] == "full":
                 current = {"folder": folder, "database": a.get("database"),
+                           "database_id": a.get("database_id"),
                            "store_id_hash": a.get("store_id_hash"), "artifacts": [entry]}
                 out.append(current)
             elif current is None:
-                orphans.append(entry)  # diffs with no full before them in this folder
+                orphans.append(entry)  # diffs with no full before them from this store
             else:
                 current["artifacts"].append(entry)
         if orphans:
             out.append({"folder": folder, "database": arts[0].get("database"),
+                        "database_id": arts[0].get("database_id"),
                         "store_id_hash": arts[0].get("store_id_hash"), "artifacts": orphans,
                         "broken": "no full backup before these diffs"})
     for c in out:

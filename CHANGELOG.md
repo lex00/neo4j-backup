@@ -17,6 +17,9 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   doesn't fail the backup.
 - `run_admin` returns neo4j-admin's output in every adapter (#118): the CLI and MCP subprocess,
   Dagster Pipes (subprocess and `PipesK8sClient`), Airflow subprocess and KubernetesPodOperator.
+- Chains are split by store (`databaseId`) as well as folder (#120). A by-name restore with
+  `--replace` recreates the database under the same name, and the next AUTO backup writes a new
+  full into the same folder; the two stores' backups are now read as separate chains.
 
 ### Documentation
 - Docs reorganised by reader (#116): **Getting started** (the local loop with real output, then a

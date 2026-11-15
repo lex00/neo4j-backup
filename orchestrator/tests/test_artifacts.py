@@ -12,8 +12,8 @@ RUNNER = BackupRunner(scratch_path="/scratch")
 T = datetime(2026, 11, 15, tzinfo=timezone.utc)
 
 
-def rec(file, full, lo, hi, time, db="orders-a", folder="demo/orders/orders-a/"):
-    return {"uri": f"s3://bucket/{folder}{file}", "database": db, "databaseId": "id-1",
+def rec(file, full, lo, hi, time, db="orders-a", folder="demo/orders/orders-a/", dbid="id-1"):
+    return {"uri": f"s3://bucket/{folder}{file}", "database": db, "databaseId": dbid,
             "time": time, "compressed": True, "full": full, "lowestTransaction": lo,
             "highestTransaction": hi, "storeIdHash": -1, "recovered": full}
 
@@ -175,3 +175,23 @@ def test_prune_deletes_sidecars_with_their_artifacts():
     del store.objects[FOLDER + "f1.backup"]  # as if prune deleted it
     assert artifacts.drop_orphans(store, "demo/orders/") == [FOLDER + "f1.backup.meta.json"]
     assert FOLDER + "d1.backup.meta.json" in store.objects
+
+
+def test_chains_split_two_stores_in_one_folder():
+    # #120: a by-name restore recreates the database under the same name; AUTO falls back to a
+    # full in the same folder. Seen on the stack: same storeIdHash, different databaseId.
+    store = MemStore()
+    recs = [rec("f1.backup", True, 1, 5, "2026-11-15T21:57:42", dbid="A"),
+            rec("d1.backup", False, 6, 6, "2026-11-15T21:57:53", dbid="A"),
+            rec("f2.backup", True, 1, 7, "2026-11-15T21:58:08", dbid="B"),
+            rec("d2.backup", False, 8, 8, "2026-11-15T21:58:27", dbid="B"),
+            # a diff of A taken late (by time) must not join B's chain
+            rec("d3.backup", False, 7, 7, "2026-11-15T21:59:00", dbid="A")]
+    for r in recs:
+        store.add(FOLDER + r["uri"].rsplit("/", 1)[1])
+    ops.record_artifacts(admin(recs)[1], RUNNER, store, FOLDER)
+    out = artifacts.chains(store, "demo/orders/")
+    got = [(c["database_id"], [a["key"].rsplit("/", 1)[1] for a in c["artifacts"]])
+           for c in out["chains"]]
+    assert got == [("A", ["f1.backup", "d1.backup", "d3.backup"]),
+                   ("B", ["f2.backup", "d2.backup"])]
