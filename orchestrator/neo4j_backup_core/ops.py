@@ -283,6 +283,14 @@ def plan_member_prune(chains: list[dict], cutoff: datetime) -> tuple[list[str], 
     return delete, held
 
 
+def keep_count(name: str, value) -> int:
+    """How many of the newest DBMS backups to keep: an integer >= 1 (#78). 0 meant "delete none"
+    for system fulls and "delete all" for metadata exports; neither is a retention setting."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise OpError(f"{name} must be an integer >= 1 (the newest N are kept), got {value!r}")
+    return value
+
+
 def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 14,
           dry_run: bool = False, run_admin: RunAdmin | None = None, runner=None,
           now: datetime | None = None, log: Log = _NOLOG) -> dict:
@@ -292,7 +300,10 @@ def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 
     are inspected first when `run_admin`/`runner` are given (this writes sidecars even on a dry
     run, so the preview and the real prune see the same chains); otherwise they are kept and
     counted in `unknown_kept`. Also keeps the newest `keep_metadata` DBMS metadata exports and
-    `keep_system` system fulls. `dry_run` lists the victims (`keys`) without deleting."""
+    `keep_system` system fulls (both integers >= 1, #78). `dry_run` lists the victims (`keys`)
+    without deleting."""
+    keep_count("keep_system", keep_system)
+    keep_count("keep_metadata", keep_metadata)
     now = now or datetime.now(timezone.utc)
     victims: list[str] = []
     detail: dict[str, int] = {}
@@ -324,8 +335,7 @@ def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 
             swept.append(prefix)
     # DBMS metadata: keep the newest N (mirrors metadata.prune, but enumerable for dry-run)
     marts = sorted(store.list_text_keys(layout.metadata_prefix()), key=lambda t: t[1])
-    _sweep([k for (k, _m) in (marts[:-keep_metadata] if keep_metadata > 0 else marts)],
-           "_dbms/metadata")
+    _sweep([k for (k, _m) in marts[:-keep_metadata]], "_dbms/metadata")
     sysarts = sorted(store.list_artifacts(layout.system_prefix()), key=lambda t: t[2])
     _sweep([k for (k, _s, _m) in sysarts[:-keep_system]], "_dbms/system")
     # sidecars (#118) go with their artifacts

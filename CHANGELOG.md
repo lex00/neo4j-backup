@@ -35,6 +35,8 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   clusters work unchanged.
 
 ### Fixed
+- `keep_system` and `keep_metadata` mean the same thing (#78): the newest N are kept, N >= 1.
+  0 used to delete no system fulls but every metadata export; it is now refused.
 - **Point-in-time values are validated** (#77). `--until` (CLI), `until` (MCP) and `restore_until`
   (Dagster config, Airflow param) are parsed as ISO-8601 at the boundary; no offset means UTC; the
   value is normalised (`2026-07-11T14:32:00+00:00`) and parsed again before it is written into

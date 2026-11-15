@@ -114,3 +114,46 @@ def test_two_stores_in_one_folder_prune_independently():
     put(store, P1, "b-full.backup", True, 1, 7, day(9), dbid="B")
     put(store, P1, "b-diff.backup", False, 8, 8, day(1), dbid="B")
     assert sorted(ops.prune(store, Pol(), LAYOUT, now=NOW)["keys"]) == sorted(gone)
+
+
+# --- #78: keep counts ---------------------------------------------------------------------------
+
+def _dbms(store, n=3):
+    from datetime import datetime, timezone
+    for i in range(n):
+        store.put_text(f"_dbms/metadata-{i}.cypher", "x")
+        store.add(f"_dbms/system/s{i}.backup")
+
+
+def test_keep_one_keeps_only_the_newest_of_each():
+    store = MemStore()
+    _dbms(store)
+    out = ops.prune(store, Pol(G(names=[])), LAYOUT, keep_system=1, keep_metadata=1, now=NOW)
+    assert sorted(out["keys"]) == ["_dbms/metadata-0.cypher", "_dbms/metadata-1.cypher",
+                                   "_dbms/system/s0.backup", "_dbms/system/s1.backup"]
+
+
+def test_default_keeps_fourteen():
+    store = MemStore()
+    _dbms(store, 16)
+    out = ops.prune(store, Pol(G(names=[])), LAYOUT, dry_run=True, now=NOW)
+    assert out["detail"] == {"_dbms/metadata": 2, "_dbms/system": 2}
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("kw", [{"keep_system": 0}, {"keep_metadata": 0}, {"keep_system": -1},
+                                {"keep_metadata": "3"}])
+def test_zero_or_bad_keep_is_refused(kw):
+    store = MemStore()
+    _dbms(store)
+    with pytest.raises(ops.OpError, match="must be an integer >= 1"):
+        ops.prune(store, Pol(G(names=[])), LAYOUT, now=NOW, **kw)
+    assert len(store.objects) == 6  # nothing touched
+
+
+def test_metadata_prune_refuses_zero():
+    from neo4j_backup_core import metadata
+    with pytest.raises(ValueError):
+        metadata.prune(MemStore(), keep=0)
