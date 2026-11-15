@@ -194,11 +194,6 @@ All of them read the same policy and produce the same backups, so you can change
 8. Turn on the schedules. In Dagster the `reconcile_registry` sensor and the tier schedules
    start stopped; switch them on. In Airflow, unpause the DAGs.
 
-### Know the open issues first
+### What's planned
 
-Read these before you rely on the tool for customers:
-
-- [#75](https://github.com/lex00/neo4j-backup/issues/75) if the policy fails to load, Dagster
-  shows no schedules instead of an error.
-
-The rest of what's planned is tracked in [#100](https://github.com/lex00/neo4j-backup/issues/100).
+What's planned is tracked in [#100](https://github.com/lex00/neo4j-backup/issues/100).

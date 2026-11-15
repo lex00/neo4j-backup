@@ -12,7 +12,7 @@ import tempfile
 import dagster as dg
 
 from neo4j_backup_core import capture, ops, paths
-from neo4j_backup_core.policy import load_policy, parse_partition_key
+from neo4j_backup_core.policy import load_policy, load_policy_at_startup, parse_partition_key
 from .resources import Neo4jResource, ObjectStoreResource, RunnerResource
 
 POLICY_PATH = os.environ.get("NEO4J_BACKUP_POLICY", "policies/demo.yaml")
@@ -355,9 +355,10 @@ def _make_schedule(tier_name: str, lane: str, cron: str):
 
 
 def _build_schedules() -> list:
-    try:
-        policy = load_policy(POLICY_PATH)
-    except Exception:
+    # A policy that fails to load fails the code location with its error (#75); only "no policy
+    # configured at all" builds no schedules.
+    policy = load_policy_at_startup(POLICY_PATH, configured="NEO4J_BACKUP_POLICY" in os.environ)
+    if policy is None:
         return []
     return [_make_schedule(tier_name, lane, cron)
             for tier_name, tier in policy.tiers.items()
