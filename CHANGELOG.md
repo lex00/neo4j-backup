@@ -35,6 +35,12 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   clusters work unchanged.
 
 ### Fixed
+- **A policy that fails to load is an error, not an empty orchestrator** (#75). Dagster's
+  schedules and Airflow's backup DAGs used to vanish silently when the policy didn't parse or
+  validate, or an `s3://` source failed at a cold start. Now the Dagster code location fails to
+  load and the Airflow DAG file shows an import error, with the policy error. Fetch errors are
+  retried with backoff (1, 2, 4 seconds) before failing. Only "no policy configured"
+  (`NEO4J_BACKUP_POLICY` unset and the default file absent) builds nothing, and says so in the log.
 - **Diff lane after a seed** (#74). A differential needs a full of the same database, so after an
   alias-swap restore, a bulk load, an adopt or a by-name `--replace` every diff failed until the
   next full. Now a member whose current database has no full taken since it was created goes to

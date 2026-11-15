@@ -259,7 +259,11 @@ Everything below is optional and defaults to the tested behaviour. The full list
 - Storage layout: `PATH_LAYOUT` brings your own bucket key scheme.
 - Policy source: `NEO4J_BACKUP_POLICY=s3://…` lets you change the policy without a redeploy,
   with a cache and last-known-good fallback (`POLICY_CACHE_TTL`); `POLICY_LOADER` for an
-  authenticated source such as Vault.
+  authenticated source such as Vault. If the policy can't be loaded when Dagster or Airflow
+  starts, the Dagster code location fails to load and the Airflow backup DAG file shows an import
+  error, both with the policy error; a fetch error is retried a few times (1, 2, 4 seconds) first.
+  With no policy configured at all (`NEO4J_BACKUP_POLICY` unset and no `policies/demo.yaml`), no
+  schedules are built.
 - Encryption on every write: `S3_SSE` adds the SSE-KMS header to the tool's own writes, and
   `BACKUP_UPLOAD=pipeline` sends neo4j-admin's backups through the same path, for buckets that
   reject writes without the header.

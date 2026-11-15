@@ -6,6 +6,7 @@ step; it runs via the execution dispatcher (subprocess or k8s pod per RUNNER_MOD
 neo4j_backup_airflow.execution). Airflow 3.x Task SDK + dynamic mapping.
 """
 
+import os
 from datetime import datetime
 
 from airflow.sdk import dag, task
@@ -13,7 +14,7 @@ from airflow.sdk import dag, task
 from neo4j_backup_airflow import config, upload
 from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import ops, paths
-from neo4j_backup_core.policy import load_policy
+from neo4j_backup_core.policy import load_policy, load_policy_at_startup
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
 _layout = paths.get_layout()
@@ -103,12 +104,11 @@ def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str):
 
 
 # Generate one DAG per (tier, lane) from the policy, at module scope (Airflow discovers
-# DAGs in module globals). Try/except so a missing/unreachable policy doesn't break DAG
-# parsing — and so an s3:// source works (os.path.exists would be False for it) (#43).
-try:
-    _pol = load_policy(config.policy_path())
-except Exception:  # noqa: BLE001 — no policy yet / source unreachable; skip DAG generation
-    _pol = None
+# DAGs in module globals). A policy that fails to load raises here, so it shows as an import
+# error in the DagBag instead of as missing DAGs (#75); transient fetch errors are retried first.
+# Only "no policy configured at all" generates nothing.
+_pol = load_policy_at_startup(config.policy_path(),
+                              configured="NEO4J_BACKUP_POLICY" in os.environ)
 if _pol is not None:
     for _tier, _t in _pol.tiers.items():
         globals()[f"neo4j_backup_{_tier}_full"] = make_backup_dag(_tier, "full", _t.full_cron, "FULL")

@@ -185,6 +185,43 @@ def _read_source(source: str) -> str:
     return Path(path).read_text()
 
 
+def _transient(e: Exception) -> bool:
+    """A fetch error worth retrying (network, S3 throttling), not a policy that's wrong."""
+    if isinstance(e, (yaml.YAMLError, ValueError, FileNotFoundError, KeyError, TypeError)):
+        return False  # bad YAML, schema/validation error (pydantic raises ValueError), no file
+    return True
+
+
+def load_policy_at_startup(source: str | Path, *, configured: bool, attempts: int = 4,
+                           delay: float = 1.0, sleep=time.sleep) -> Policy | None:
+    """Load the policy when an orchestrator builds its schedules or DAGs (#75).
+
+    - No policy configured (`configured` is False and the local default file doesn't exist):
+      returns None and logs it, so the caller can build nothing on purpose.
+    - A policy that doesn't parse or validate: raises, so the code location (Dagster) or the
+      DAG file (Airflow) fails to load with the error, instead of silently having no schedules.
+    - A transient fetch error (S3 at cold start, with no last-known-good): retried with
+      exponential backoff (`delay`, 2*`delay`, …) for `attempts` tries, then raised.
+    """
+    src = str(source)
+    if not configured and not src.startswith(("s3://", "file://")) and not Path(src).exists() \
+            and not os.environ.get("POLICY_LOADER"):
+        _log.info("no policy configured (NEO4J_BACKUP_POLICY unset, %s absent); "
+                  "building no schedules", src)
+        return None
+    for i in range(attempts):
+        try:
+            return load_policy(src)
+        except Exception as e:  # noqa: BLE001
+            if not _transient(e) or i == attempts - 1:
+                _log.error("policy from %s failed to load: %s", src, e)
+                raise
+            wait = delay * (2 ** i)
+            _log.warning("policy fetch from %s failed (%s); retrying in %.0fs", src, e, wait)
+            sleep(wait)
+    return None  # unreachable
+
+
 def load_policy(source: str | Path, *, force: bool = False) -> Policy:
     """Load + validate the policy from a local path or `s3://bucket/key.yaml` (#43).
 
