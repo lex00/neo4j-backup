@@ -15,7 +15,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
-from . import naming
+from . import cron, naming
 
 _log = logging.getLogger(__name__)
 
@@ -101,7 +101,29 @@ class Policy(BaseModel):
         for g in self.db_groups:
             if g.tier not in self.tiers:
                 raise ValueError(f"group {g.id!r} references unknown tier {g.tier!r}")
+        for w in self.warnings():
+            _log.warning("policy: %s", w)
         return self
+
+    def warnings(self) -> list[str]:
+        """Settings that load but probably aren't what the team wants (#73): a tier whose full
+        backups are further apart than a group's retention_days. Prune keeps the chain covering
+        the start of the window, so nothing breaks, but backups are kept longer than
+        `retention_days` (up to the full interval) and the policy reads as shorter than it is."""
+        out = []
+        for g in self.db_groups:
+            try:
+                gap = cron.max_gap(self.tiers[g.tier].full_cron)
+            except ValueError:
+                continue  # a form the schedulers accept but cron.py doesn't read (@daily, MON)
+            if gap is not None and gap.total_seconds() > g.retention_days * 86400:
+                out.append(
+                    f"group {g.id!r}: tier {g.tier!r} takes a full backup up to every "
+                    f"{_days(gap)} (full_cron {self.tiers[g.tier].full_cron!r}), longer than "
+                    f"retention_days {g.retention_days}; prune keeps each chain until a newer "
+                    f"full covers the window, so backups stay up to {_days(gap)} plus "
+                    f"{g.retention_days} days")
+        return out
 
     def group(self, gid: str) -> DbGroup:
         for g in self.db_groups:
@@ -115,6 +137,11 @@ class Policy(BaseModel):
 
     def groups_for_tier(self, tier: str) -> list[DbGroup]:
         return [g for g in self.db_groups if g.tier == tier]
+
+
+def _days(gap) -> str:
+    d = gap.total_seconds() / 86400
+    return f"{d:g} days" if d != 1 else "1 day"
 
 
 def parse_partition_key(key: str) -> tuple[str, str]:

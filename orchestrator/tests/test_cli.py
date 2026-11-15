@@ -30,6 +30,7 @@ def stub_env(monkeypatch):
     pol = types.SimpleNamespace(
         group=lambda gid: _Group(),
         partition_keys=lambda: ["demo/orders", "demo/customers"],
+        warnings=lambda: [],
     )
     monkeypatch.setattr(cli, "load_policy", lambda p: pol)
     return monkeypatch

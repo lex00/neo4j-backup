@@ -17,6 +17,9 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   doesn't fail the backup.
 - `run_admin` returns neo4j-admin's output in every adapter (#118): the CLI and MCP subprocess,
   Dagster Pipes (subprocess and `PipesK8sClient`), Airflow subprocess and KubernetesPodOperator.
+- Policy load warns when a tier's full backups are further apart than a group's `retention_days`
+  (#73); `neo4j-backup targets` returns the warnings. Crons the check can't read (`@weekly`, day
+  names) are skipped, not rejected.
 - Chains are split by store (`databaseId`) as well as folder (#120). A by-name restore with
   `--replace` recreates the database under the same name, and the next AUTO backup writes a new
   full into the same folder; the two stores' backups are now read as separate chains.
