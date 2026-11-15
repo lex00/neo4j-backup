@@ -100,6 +100,17 @@ class Neo4jClient:
             return target
         return name if self.database_exists(name) else None
 
+    def database_created(self, name: str):
+        """When the database's current store was created (UTC datetime), or None if it doesn't
+        exist. A by-name DROP + CREATE gives a new creation time under the same name (#74)."""
+        rows = self.run_system(
+            "SHOW DATABASE $n YIELD name, creationTime RETURN creationTime", n=name)
+        times = [r["creationTime"] for r in rows if r.get("creationTime") is not None]
+        if not times:
+            return None
+        t = min(times)
+        return t.to_native() if hasattr(t, "to_native") else t
+
     def stop_database(self, name: str):
         self.run_system(f"STOP DATABASE `{name}` WAIT")
 

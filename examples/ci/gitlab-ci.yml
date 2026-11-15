@@ -34,7 +34,13 @@ variables:
   stage: backup
   resource_group: neo4j-backup-demo    # serialize: never overlap this group's backups
   script:
-    - neo4j-backup --json backup demo --kind "$KIND"   # non-zero exit fails the pipeline
+    - out="$(neo4j-backup --json backup demo --kind "$KIND")"   # non-zero exit fails the pipeline
+    - echo "$out"
+    # after a restore the new database has no full yet; the diff is skipped and reported (#74)
+    - |
+      if [ "$KIND" = DIFF ] && python -c 'import json,sys; sys.exit(not json.load(sys.stdin)["result"]["needs_full"])' <<<"$out"; then
+        neo4j-backup --json backup demo --kind FULL
+      fi
 
 backup:diff:
   extends: .backup

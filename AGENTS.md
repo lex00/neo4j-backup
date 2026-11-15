@@ -55,6 +55,11 @@ Configuration is environment + policy (`NEO4J_PASSWORD`, `NEO4J_BOLT_URI`, `BACK
 | `metadata restore` | Replay a metadata export into `system` | **yes** | `--key <k>`, `--dry-run`, `--confirm` |
 | `system-backup` | Binary FULL backup of the `system` database | writes artifact | |
 
+Backup detail: each entry in `result.backups` has `taken` (what neo4j-admin actually wrote: `full` or
+`diff`). A `--kind DIFF` for a database with no full of its own yet (after a restore or load) is
+skipped, not failed: the entry has `skipped: true, needs_full: true` and the alias is listed in
+`result.needs_full`. Follow up with `--kind FULL`.
+
 Restore detail: `--until <ISO-8601>` is point-in-time (needs a differential chain). `--replace` only
 applies to by-name groups and **drops** an existing target before recreating it — the destructive
 case; it appears in the dry-run plan's `drops`.

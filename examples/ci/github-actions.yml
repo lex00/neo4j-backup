@@ -56,7 +56,12 @@ jobs:
         run: |
           # weekly-full schedule -> FULL, daily schedule -> DIFF, manual -> the chosen kind
           kind="${{ github.event.inputs.kind || (github.event.schedule == '17 3 * * 0' && 'FULL' || 'DIFF') }}"
-          neo4j-backup --json backup demo --kind "$kind"   # non-zero exit fails the job
+          out="$(neo4j-backup --json backup demo --kind "$kind")"   # non-zero exit fails the job
+          echo "$out"
+          # after a restore the new database has no full yet; the diff is skipped and reported
+          if [ "$kind" = DIFF ] && python -c 'import json,sys; sys.exit(not json.load(sys.stdin)["result"]["needs_full"])' <<<"$out"; then
+            neo4j-backup --json backup demo --kind FULL   # a member had no full to diff against (#74)
+          fi
 
   # Weekly consistency check + retention. Runs only on the weekly schedule; --confirm is set because
   # the schedule *is* the human approval for the guarded (destructive) prune.

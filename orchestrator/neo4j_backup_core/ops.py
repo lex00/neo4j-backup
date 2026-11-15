@@ -126,19 +126,65 @@ def run_verify(run_admin: RunAdmin, runner, store, physical: str, src: str, scra
 
 # --- target-level ops: resolve the target, then run the right leg ------------------------------
 
-def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: str, alias: str,
-                  kind: str, *, upload: str = "admin", staging: str | None = None,
-                  log: Log = _NOLOG) -> dict:
-    """Back up the physical the alias currently targets (or `alias` itself if it's a physical
-    name) into that physical's own prefix, so repeated backups form one chain."""
+def base_full(neo4j, store, layout, group_id: str, alias: str) -> dict:
+    """Whether the database the alias points at has a full backup of its current store to diff
+    against (#74). A seed (alias-swap restore, import, adopt) starts a new physical with an empty
+    folder, and a by-name DROP + CREATE starts a new store under the old name, so only a full taken
+    after the database's creation counts (sidecar times, #118). Returns `physical`, `full` (the
+    newest such full's key, or None) and `unknown` (backups in the folder without a sidecar, which
+    might be a base; callers treat those as "maybe")."""
     physical = neo4j.resolve_physical(alias)
     if not physical:
         raise OpError(f"{alias!r} resolves to no physical database — bootstrap the group first")
     prefix = layout.physical_prefix(group_id, alias, physical)
+    metas, unknown = artifacts.read(store, prefix)
+    created = neo4j.database_created(physical)
+    fulls = sorted((m.get("time") or "", k) for k, m in metas.items()
+                   if m.get("type") == "full"
+                   and (created is None or _sidecar_time(m.get("time")) >= _floor(created)))
+    return {"physical": physical, "prefix": prefix, "full": fulls[-1][1] if fulls else None,
+            "unknown": len(unknown)}
+
+
+def _floor(t: datetime) -> datetime:
+    # sidecar times have whole seconds; compare at that precision
+    t = t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    return t.replace(microsecond=0)
+
+
+def needs_full(neo4j, store, layout, group_id: str, alias: str) -> bool:
+    """True when a DIFF of this member would fail for want of a base full (#74). Unknown
+    (pre-#118) backups count as a possible base, so this never forces a full on a guess."""
+    b = base_full(neo4j, store, layout, group_id, alias)
+    return b["full"] is None and b["unknown"] == 0
+
+
+def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: str, alias: str,
+                  kind: str, *, upload: str = "admin", staging: str | None = None,
+                  log: Log = _NOLOG) -> dict:
+    """Back up the physical the alias currently targets (or `alias` itself if it's a physical
+    name) into that physical's own prefix, so repeated backups form one chain. A DIFF with no
+    full of the current store to diff against is skipped, not failed: the result has
+    `skipped: true, needs_full: true` and the caller runs a FULL in the full lane (#74). `taken`
+    is the type neo4j-admin actually wrote (an AUTO can be either), from the sidecar."""
+    physical = neo4j.resolve_physical(alias)
+    if not physical:
+        raise OpError(f"{alias!r} resolves to no physical database — bootstrap the group first")
+    prefix = layout.physical_prefix(group_id, alias, physical)
+    if kind.upper() == "DIFF":
+        if artifacts.read(store, prefix)[1]:  # pre-#118 backups: inspect so the check can see them
+            record_artifacts(run_admin, runner, store, prefix, log=log)
+        if needs_full(neo4j, store, layout, group_id, alias):
+            log(f"{group_id}/{alias}: no full backup of {physical} to diff against; "
+                f"skipping the diff, a full is needed")
+            return {"group": group_id, "alias": alias, "physical": physical, "kind": kind,
+                    "artifact": None, "taken": None, "skipped": True, "needs_full": True}
     artifact = run_backup(run_admin, runner, store, physical, prefix, kind,
                           upload=upload, staging=staging, log=log)
+    metas, _unknown = artifacts.read(store, prefix)
+    taken = (metas.get(artifact) or {}).get("type") if artifact else None
     return {"group": group_id, "alias": alias, "physical": physical, "kind": kind,
-            "artifact": artifact}
+            "artifact": artifact, "taken": taken, "skipped": False, "needs_full": False}
 
 
 def head_physical(store, layout, group_id: str, alias: str) -> tuple[str, str]:

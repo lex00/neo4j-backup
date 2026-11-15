@@ -35,6 +35,15 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
   clusters work unchanged.
 
 ### Fixed
+- **Diff lane after a seed** (#74). A differential needs a full of the same database, so after an
+  alias-swap restore, a bulk load, an adopt or a by-name `--replace` every diff failed until the
+  next full. Now a member whose current database has no full taken since it was created goes to
+  the full lane: the Dagster diff schedule requests a FULL with the `backup_kind: full` tag, the
+  Airflow diff DAG runs it in the `neo4j_full` pool, and `backup --kind DIFF` skips it (no
+  failure) and lists it under `needs_full`; the CI examples then run `--kind FULL`. Every backup
+  result reports `taken`, the type neo4j-admin actually wrote.
+- **Dagster tier schedules failed on every tick** when a tier had more than one member: Dagster
+  rejects several run requests without a `run_key`. Each request now has one.
 - **Prune keeps whole chains** (#73). It used to keep only the newest backup per member, so with
   weekly fulls and `retention_days: 7` (the shipped `silver` and `bronze` tiers) it deleted the
   full that the remaining diffs needed, and the newest backup could no longer be restored. Prune now

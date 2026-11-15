@@ -31,6 +31,22 @@ def backup_one(group_alias: str, kind: str) -> dict:
         raise RuntimeError(str(e))
 
 
+def split_by_base(keys: list[str]) -> dict:
+    """{"diff": [...], "full": [...]}: which members can take a diff and which need a full
+    first (#74). A failed check leaves the member in the diff list; backup_one then skips it."""
+    neo, store = config.neo4j(), config.store()
+    out: dict[str, list[str]] = {"diff": [], "full": []}
+    for key in keys:
+        group_id, alias = key.split("/", 1)
+        try:
+            full = ops.needs_full(neo, store, _layout, group_id, alias)
+        except Exception as e:  # noqa: BLE001
+            print(f"{key}: base check failed ({e}); requesting the diff")
+            full = False
+        out["full" if full else "diff"].append(key)
+    return out
+
+
 def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str):
     @dag(
         dag_id=f"neo4j_backup_{tier_name}_{lane}",
@@ -41,16 +57,47 @@ def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str):
         tags=["neo4j-backup", "backup", lane, tier_name],
     )
     def _backup():
-        @task
-        def targets() -> list[str]:
+        def _all() -> list[str]:
             pol = load_policy(config.policy_path())
             return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name) for a in g.names]
 
-        @task(pool=f"neo4j_{lane}")  # lanes: pool neo4j_full (1) / neo4j_diff (N)
+        if lane == "full":
+            @task
+            def targets() -> list[str]:
+                return _all()
+
+            @task(pool="neo4j_full")  # lanes: pool neo4j_full (1) / neo4j_diff (N)
+            def backup(group_alias: str) -> dict:
+                return backup_one(group_alias, "FULL")
+
+            backup.expand(group_alias=targets())
+            return
+
+        # diff lane (#74): members whose current database has no full to diff against (just
+        # seeded, or recreated by a by-name restore) get a FULL in the full pool instead
+        @task
+        def split() -> dict:
+            return split_by_base(_all())
+
+        @task
+        def diff_targets(s: dict) -> list[str]:
+            return s["diff"]
+
+        @task
+        def full_targets(s: dict) -> list[str]:
+            return s["full"]
+
+        @task(pool="neo4j_diff")
         def backup(group_alias: str) -> dict:
             return backup_one(group_alias, kind)
 
-        backup.expand(group_alias=targets())
+        @task(pool="neo4j_full")
+        def backup_full(group_alias: str) -> dict:
+            return backup_one(group_alias, "FULL")
+
+        s = split()
+        backup.expand(group_alias=diff_targets(s))
+        backup_full.expand(group_alias=full_targets(s))
 
     return _backup()
 

@@ -53,7 +53,10 @@ def cmd_backup(args):
     run = _run_admin(runner)
     done = [ops.backup_target(run, neo, store, runner, layout, group.id, name, args.kind,
                               upload=_UPLOAD, staging=_STAGING, log=_log) for name in group.names]
-    return envelope("backup", ok=True, group=group.id, result={"backups": done}), Exit.OK
+    # a DIFF with no full to diff against is skipped, not failed (#74); the caller runs a FULL
+    needs = [d["alias"] for d in done if d.get("needs_full")]
+    return envelope("backup", ok=True, group=group.id,
+                    result={"backups": done, "needs_full": needs}), Exit.OK
 
 
 def cmd_verify(args):

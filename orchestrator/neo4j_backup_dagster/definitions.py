@@ -104,6 +104,10 @@ def backup(
         metadata={
             "group": group_id, "alias": alias, "physical": out["physical"],
             "kind": config.kind, "artifact": artifact or "",
+            # what neo4j-admin actually wrote (an AUTO may be either), from the sidecar (#74)
+            "taken": out["taken"] or "",
+            # a DIFF with no full to diff against is skipped; the diff schedule asks for a full
+            "skipped": out["skipped"], "needs_full": out["needs_full"],
             "bytes": dg.MetadataValue.int(size), "upload": BACKUP_UPLOAD,
         }
     )
@@ -289,38 +293,75 @@ def reconcile_registry(context: dg.SensorEvaluationContext):
     return dg.SensorResult(dynamic_partitions_requests=reqs)
 
 
+def _lane_request(key: str, lane: str, tick: str = "") -> dg.RunRequest:
+    kind = "FULL" if lane == "full" else "DIFF"
+    return dg.RunRequest(
+        # Dagster rejects a tick with several requests unless each has a run_key; unique per
+        # member, lane and tick
+        run_key=f"{key}:{lane}:{tick}",
+        partition_key=key,
+        tags={"backup_kind": lane},  # tag concurrency limits keep the lanes apart (#6)
+        run_config=dg.RunConfig(ops={"backup": BackupConfig(kind=kind)}),
+    )
+
+
+def diff_lane_requests(keys, neo4j, store, log=lambda _m: None, tick: str = "") -> list:
+    """Diff-lane run requests for these partition keys (#74). A member whose current database
+    has no full backup to diff against (just seeded by a restore, import or adopt, or recreated by
+    a by-name restore) gets a FULL request in the full lane instead, so the diff lane never runs
+    a full and never fails for want of a base. If the check itself fails (Neo4j or the store
+    unreachable), the DIFF is requested as before and the asset skips it if there's no base."""
+    out = []
+    for key in keys:
+        group_id, alias = parse_partition_key(key)
+        try:
+            full = ops.needs_full(neo4j, store, _layout, group_id, alias)
+        except Exception as e:  # noqa: BLE001 - never block the whole tick on one member
+            log(f"{key}: base check failed ({e}); requesting the diff")
+            full = False
+        out.append(_lane_request(key, "full" if full else "diff", tick))
+    return out
+
+
+def _make_schedule(tier_name: str, lane: str, cron: str):
+    def _tick(context) -> str:
+        try:
+            t = context.scheduled_execution_time  # set by the daemon; raises if unset (tests)
+        except Exception:  # noqa: BLE001
+            t = None
+        return t.isoformat() if t else ""
+
+    def _keys(context, pol):
+        # Only request partitions that currently exist — a policy read that's ahead of
+        # (or behind) the reconcile sensor must not request a non-existent partition (#43).
+        existing = set(context.instance.get_dynamic_partitions(targets.name))
+        return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name) for a in g.names
+                if f"{g.id}/{a}" in existing]
+
+    if lane == "full":
+        @dg.schedule(job=backup_job, cron_schedule=cron, name=f"{tier_name}_{lane}",
+                     default_status=dg.DefaultScheduleStatus.STOPPED)
+        def _full(context):
+            return [_lane_request(k, "full", _tick(context))
+                    for k in _keys(context, load_policy(POLICY_PATH))]
+        return _full
+
+    @dg.schedule(job=backup_job, cron_schedule=cron, name=f"{tier_name}_{lane}",
+                 default_status=dg.DefaultScheduleStatus.STOPPED)
+    def _diff(context, neo4j: Neo4jResource, store: ObjectStoreResource):
+        return diff_lane_requests(_keys(context, load_policy(POLICY_PATH)), neo4j, store,
+                                  log=context.log.warning, tick=_tick(context))
+    return _diff
+
+
 def _build_schedules() -> list:
     try:
         policy = load_policy(POLICY_PATH)
     except Exception:
         return []
-    schedules = []
-    for tier_name, tier in policy.tiers.items():
-        for lane, cron in (("full", tier.full_cron), ("diff", tier.diff_cron)):
-            kind = "FULL" if lane == "full" else "DIFF"
-
-            @dg.schedule(
-                job=backup_job, cron_schedule=cron, name=f"{tier_name}_{lane}",
-                default_status=dg.DefaultScheduleStatus.STOPPED,
-            )
-            def _sched(context, _tier=tier_name, _lane=lane, _kind=kind):
-                pol = load_policy(POLICY_PATH)
-                # Only request partitions that currently exist — a policy read that's ahead of
-                # (or behind) the reconcile sensor must not request a non-existent partition (#43).
-                existing = set(context.instance.get_dynamic_partitions(targets.name))
-                return [
-                    dg.RunRequest(
-                        partition_key=f"{g.id}/{a}",
-                        tags={"backup_kind": _lane},
-                        run_config=dg.RunConfig(ops={"backup": BackupConfig(kind=_kind)}),
-                    )
-                    for g in pol.groups_for_tier(_tier)
-                    for a in g.names
-                    if f"{g.id}/{a}" in existing
-                ]
-
-            schedules.append(_sched)
-    return schedules
+    return [_make_schedule(tier_name, lane, cron)
+            for tier_name, tier in policy.tiers.items()
+            for lane, cron in (("full", tier.full_cron), ("diff", tier.diff_cron))]
 
 
 defs = dg.Definitions(
