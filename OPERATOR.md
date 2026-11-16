@@ -160,6 +160,10 @@ The same restore from the orchestrators:
 The result lists, per member, the old database (`old`), the new one (`newdb`) and the privileges
 granted on the new one (`privileges`). Keep it for the report.
 
+`--member <alias>` (repeatable) restores only those members (#121); the dry-run warns that they
+will no longer be aligned in time with the rest of the group. Privileges, the baseline and the
+`--until` chain choice apply per member as usual.
+
 `--check` runs the group's `load.checks` (#111) on each new database before the swap; a failed
 check drops the new databases (keep them with `--keep-failed`) and moves no alias. The result has
 each member's check results under `checks`.
@@ -215,8 +219,6 @@ removes the privileges granted on it.
 
 ### Limits today
 
-- A restore always covers the whole group; one database alone isn't possible
-  ([#121](https://github.com/lex00/neo4j-backup/issues/121)).
 
 **Planned:** `rollback` ([#122](https://github.com/lex00/neo4j-backup/issues/122)) and `cleanup`
 ([#93](https://github.com/lex00/neo4j-backup/issues/93)).

@@ -40,6 +40,7 @@ _SEED_CYPHER_VERSION = os.environ.get("SEED_CYPHER_VERSION") or None
         "baseline": Param(True, type="boolean"),  # FULL of each restored database afterwards (#97)
         "from_load": Param(False, type="boolean"),  # newest load artifact per member (#144)
         "from_dump": Param({}, type="object"),  # member -> load key or external dump URI (#159)
+        "members": Param([], type="array"),  # restore only these members (#121)
         "ticket": Param(None, type=["null", "string"]),  # change ticket, recorded (#119)
         "reason": Param(None, type=["null", "string"]),
     },
@@ -58,8 +59,9 @@ def neo4j_restore():
         # chain covers fails before any seed task runs (#114)
         loads = ctx["params"].get("from_dump") or ("latest" if ctx["params"].get("from_load")
                                                    else None)
-        ops.choose_seeds(config.store(), _layout, load_policy(config.policy_path()).group(gid),
-                         until, loads)
+        ops.choose_seeds(config.store(), _layout,
+                         ops.only_members(load_policy(config.policy_path()).group(gid),
+                                          ctx["params"].get("members")), until, loads)
         return {
             "group_id": gid,
             # ISO-8601, UTC if no offset; a bad value fails here, before any Neo4j call (#77)
@@ -67,6 +69,7 @@ def neo4j_restore():
             "replace": bool(ctx["params"].get("replace")),
             "baseline": bool(ctx["params"].get("baseline", True)),
             "loads": loads,
+            "members": list(ctx["params"].get("members") or []),
             **rec,
             "mode": load_policy(config.policy_path()).group(gid).restore_mode,
             "ts": naming.ts(),               # one timestamp for the whole group
@@ -75,7 +78,8 @@ def neo4j_restore():
     @task
     def members(plan: dict) -> list[str]:
         # a top-level list return — Airflow can only .expand() over a whole XCom, not a key
-        return list(load_policy(config.policy_path()).group(plan["group_id"]).names)
+        group = load_policy(config.policy_path()).group(plan["group_id"])
+        return list(ops.only_members(group, plan.get("members")).names)  # (#121)
 
     @task
     def seed(plan: dict, name: str) -> dict:

@@ -287,7 +287,7 @@ def _loads_arg(args):
 
 
 def cmd_restore(args):
-    group = _group(args)
+    group = ops.only_members(_group(args), args.member)  # some members only (#121)
     store, neo, layout = env.store(), env.neo4j(), paths.get_layout()
     loads = _loads_arg(args)
     plan = ops.plan_restore(neo, store, group, layout, replace=args.replace, until=args.until,
@@ -428,6 +428,8 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--from-dump", action="append", metavar="MEMBER=KEY_OR_URI",
                      help="seed a member from a dump: a key in its _seed/ folder, or a URI the "
                           "servers can read (an external dump, #159); repeat per member")
+    r.add_argument("--member", action="append", metavar="ALIAS_OR_DATABASE",
+                   help="restore only this member (repeatable); the rest of the group stays (#121)")
     r.add_argument("--check", action="store_true",
                    help="run the group's load.checks on the new databases before the swap (#111)")
     r.add_argument("--keep-failed", action="store_true",

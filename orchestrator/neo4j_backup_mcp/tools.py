@@ -216,7 +216,8 @@ def run_restore(group: str, until: str | None = None, replace: bool = False,
                 confirm: bool = False, dry_run: bool = False, verify_first: bool = True,
                 baseline: bool = True, ticket: str | None = None,
                 reason: str | None = None, from_load: bool = False,
-                from_dump: dict[str, str] | None = None) -> dict:
+                from_dump: dict[str, str] | None = None,
+                members: list[str] | None = None) -> dict:
     """Restore a group (alias-swap, or by-name with `replace` to DROP+recreate; `until` = PITR).
     Needs confirm=true; dry_run returns the plan. For a destructive `replace`, runs
     verify-before-drop (skip with verify_first=false). `until` is ISO-8601 (UTC if no offset);
@@ -224,7 +225,7 @@ def run_restore(group: str, until: str | None = None, replace: bool = False,
     of each restored database afterwards (#97); if that fails the restore stays applied and the
     result has `baseline_error`."""
     until = parse_until(until)
-    g = load_policy(env.policy_path()).group(group)
+    g = ops.only_members(load_policy(env.policy_path()).group(group), members)  # (#121)
     store, neo, layout = env.store(), env.neo4j(), _layout()
     loads = from_dump or ("latest" if from_load else None)  # load artifacts (#144, #159)
     plan = ops.plan_restore(neo, store, g, layout, replace=replace, until=until,

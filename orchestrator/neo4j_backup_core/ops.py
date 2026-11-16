@@ -708,6 +708,27 @@ def choose_seeds(store, layout, group, until: str | None = None,
             for name in group.names}
 
 
+class _Members:
+    """A group seen through a subset of its members (#121): every attribute as the group's, but
+    `names` (and so the restore, privileges, baseline and chain choice) only the chosen ones."""
+
+    def __init__(self, group, names: list[str]):
+        self._group, self.names = group, names
+
+    def __getattr__(self, attr):
+        return getattr(self._group, attr)
+
+
+def only_members(group, members: list[str] | None):
+    """`group` limited to `members` (a restore of some members, #121), or the group itself."""
+    if not members:
+        return group
+    unknown = [m for m in members if m not in group.names]
+    if unknown:
+        raise OpError(f"{unknown} are not members of {group.id} (members: {group.names})")
+    return _Members(group, [n for n in group.names if n in members])
+
+
 def _restore_by_name(neo4j, group, name: str, key: str, existed: bool, *, store,
                      restore_until, cypher_version, log: Log, uri: str | None = None) -> dict:
     """DROP (if present) then CREATE under the same name. DROP removes the database's privileges,
@@ -885,7 +906,8 @@ def plan_restore(neo4j, store, group, layout, *, replace: bool = False,
     used and what would happen — by-name `create` or `drop+recreate`, alias-swap seed + swap. Runs
     the same preconditions (missing artifact, unreplaceable existing target) so a dry-run fails the
     same way a real restore would. `drops` is the destructive surface (databases to be DROPped).
-    With `until`, each member's `seed` shows the chosen chain and window (#114)."""
+    With `until`, each member's `seed` shows the chosen chain and window (#114). Restoring only
+    some members (#121) adds a `warning`: they are no longer aligned in time with the rest."""
     neo4j = _per(neo4j, group.id)
     members: list[dict] = []
     seeds = choose_seeds(store, layout, group, until, loads)
@@ -910,5 +932,10 @@ def plan_restore(neo4j, store, group, layout, *, replace: bool = False,
                             "privileges": _privileges_of(neo4j, old)})
     for m in members:
         m["seed"] = seeds[m.get("alias") or m["name"]]
-    return {"mode": group.restore_mode, "members": members,
-            "drops": [d for m in members for d in m["drops"]]}
+    out = {"mode": group.restore_mode, "members": members,
+           "drops": [d for m in members for d in m["drops"]]}
+    if isinstance(group, _Members) and len(group.names) < len(group._group.names):
+        rest = [n for n in group._group.names if n not in group.names]
+        out["warning"] = (f"restoring {group.names} only: they will no longer be aligned in time "
+                          f"with {rest}, the rest of group {group.id}")
+    return out

@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Restore some members of a group** (#121): `restore --member <alias>` (repeatable; MCP
+  `members`, Dagster config `members`, Airflow param `members`). The dry-run warns that they will
+  no longer be aligned in time with the rest; privileges, baseline and chain choice apply per
+  member.
 - **`restore-points <group>`** (#113; MCP `restore_points`): per member, the current database,
   each chain's point-in-time window (older physicals included), the load artifacts, gaps (diffs
   missing in a window, no backups since the last swap), and the restore command for each.

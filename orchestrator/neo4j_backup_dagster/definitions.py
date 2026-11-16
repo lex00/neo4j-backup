@@ -300,6 +300,7 @@ class RestoreConfig(dg.Config):
     baseline: bool = True  # take a FULL of each restored database afterwards (#97)
     from_load: bool = False  # seed each member from its newest load artifact (#144)
     from_dump: dict[str, str] = {}  # member -> load key or external dump URI (#159)
+    members: list[str] = []  # restore only these members (#121); empty: the whole group
     ticket: str | None = None  # the change ticket; recorded in the log and as run tags (#119)
     reason: str | None = None
 
@@ -320,7 +321,7 @@ def restore_group_op(
     tags = {f"neo4j_backup/{k}": v for k, v in rec.items() if v}
     if tags:
         context.instance.add_run_tags(context.run_id, tags)
-    group = load_policy(POLICY_PATH).group(config.group_id)
+    group = ops.only_members(load_policy(POLICY_PATH).group(config.group_id), config.members)
     try:
         out = ops.restore_group(
             neo4j, store, group, _layout, restore_until=until,
@@ -329,7 +330,8 @@ def restore_group_op(
         )
     except ops.OpError as e:
         raise dg.Failure(str(e))
-    return {"group_id": config.group_id, "baseline": config.baseline, "members": out["members"],
+    return {"group_id": config.group_id, "only": config.members,
+            "baseline": config.baseline, "members": out["members"],
             **rec}
 
 
@@ -348,7 +350,8 @@ def baseline_op(
     if not restored["baseline"]:
         context.log.info("baseline skipped (baseline=false)")
         return []
-    group = load_policy(POLICY_PATH).group(restored["group_id"])
+    group = ops.only_members(load_policy(POLICY_PATH).group(restored["group_id"]),
+                             restored.get("only"))
     try:
         done = ops.baseline_after_restore(
             _admin(context, runner, pipes_subprocess_client), neo4j, store, runner, _layout,
