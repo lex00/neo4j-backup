@@ -64,6 +64,12 @@ gate on meaning rather than a bare non-zero:
   dry-run and refusal envelopes too. With `NEO4J_BACKUP_REQUIRE_TICKET=true`, an applied change
   without `--ticket` is a `GUARD` refusal with error kind `ticket_required`; `--dry-run` never
   needs one.
+- **Every failure is an envelope** (#140): an unexpected exception still gives one JSON object
+  with `ok: false` and exit `1`. Error kinds: `op_failed` (a refused or failed operation),
+  `admin_failed` (neo4j-admin exited non-zero), `seed_failed` (a group restore failed while
+  seeding; `result.dropped` lists the members already seeded, which were dropped since no alias
+  pointed at them), `baseline_failed`, `neo4j_error` (the driver raised), `internal_error`
+  (anything else). The traceback goes to stderr only with `--debug` or `NEO4J_BACKUP_DEBUG=1`.
 
 ## For implementers
 

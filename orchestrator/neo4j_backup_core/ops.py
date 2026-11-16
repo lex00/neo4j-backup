@@ -37,6 +37,45 @@ class OpError(Exception):
     failure type; the message is operator-facing."""
 
 
+class SeedError(OpError):
+    """A group restore failed while seeding (#140). The members seeded before the failure had
+    no alias pointing at them and held no new writes, so they were dropped: `dropped` names them,
+    `kept` any that couldn't be dropped."""
+
+    kind = "seed_failed"
+
+    def __init__(self, msg: str, dropped: list[str], kept: list[str]):
+        super().__init__(msg)
+        self.dropped, self.kept = dropped, kept
+
+
+def seed_all(neo4j, group, names, seed_one, *, log: Log = _NOLOG) -> list[dict]:
+    """`seed_one(name)` for each alias-swap member; if one raises, drop the physicals already
+    seeded (nothing points at them yet) and raise SeedError naming them (#140)."""
+    seeded: list[dict] = []
+    for name in names:
+        try:
+            seeded.append(seed_one(name))
+        except Exception as e:  # noqa: BLE001 - any failure: undo the unswapped seeds
+            dropped, kept = [], []
+            for s in seeded:
+                db = s.get("newdb")
+                if not db:
+                    continue
+                try:
+                    neo4j.drop_database(db)
+                    dropped.append(db)
+                    log(f"dropped {db} (seeded before the failure, never swapped in)")
+                except Exception:  # noqa: BLE001
+                    kept.append(db)
+            raise SeedError(
+                f"{group.id}/{name}: seeding failed ({type(e).__name__}: {e}); no alias moved"
+                + (f"; dropped the members already seeded: {dropped}" if dropped else "")
+                + (f"; couldn't drop {kept}, drop them yourself" if kept else ""),
+                dropped, kept) from e
+    return seeded
+
+
 class BaselineError(OpError):
     """The restore was applied but its baseline full backup failed (#97). `done` lists the
     baselines that were taken; rerun `backup <group> --kind FULL` for the rest."""
@@ -1051,10 +1090,9 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
             members.append({**out, "seed": seeds[name]})
         return {"mode": "by-name", "members": members}
     ts = naming.ts()  # one timestamp for every physical seeded in this group restore
-    for name in group.names:
-        members.append(seed_member(neo4j, store, group, layout, name, restore_until=restore_until,
-                                   cypher_version=cypher_version, ts=ts, log=log,
-                                   seed=seeds[name]))
+    members = seed_all(neo4j, group, group.names, lambda name: seed_member(
+        neo4j, store, group, layout, name, restore_until=restore_until,
+        cypher_version=cypher_version, ts=ts, log=log, seed=seeds[name]), log=log)
     if check:  # `restore --check` (#111): the policy's checks before any alias moves
         check_seeded(neo4j, group, members, keep_failed=keep_failed, require_data=False, log=log)
     cutover_seeded(neo4j, members, log=log, store=store, group_id=group.id)

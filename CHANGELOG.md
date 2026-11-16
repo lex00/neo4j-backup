@@ -208,6 +208,10 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- The CLI keeps its contract on any error (#140): one JSON envelope, exit 1, error kind
+  `neo4j_error` for driver errors or `internal_error`; the traceback only with `--debug` or
+  `NEO4J_BACKUP_DEBUG=1`. A group restore that fails while seeding drops the members already
+  seeded (no alias pointed at them) and lists them (`seed_failed`, `result.dropped`).
 - `NAMING_TS_FMT` is honoured by `naming.py` as by `naming.sh` (#86); a format containing `-`
   (the join character) is refused on both sides.
 - Database-name validation follows Neo4j (#85): a leading letter, then `[a-z0-9.-]`, 3-63
