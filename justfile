@@ -95,6 +95,10 @@ rebuild-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_rebuild_dagster.py
     airflow/.venv/bin/python airflow/smoke_rebuild.py
 
+# Restore operations (#121, #122, #93, #92, #123, #88): member restore, rollback, cleanup, adopt, status, naming
+ops-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_ops.py
+
 # Azure backend on Azurite (#79, #80): upload, copy with wait, streamed download (needs a backup)
 azure-smoke:
     docker compose --env-file .env -f docker/compose.yaml --profile azure up -d azurite
