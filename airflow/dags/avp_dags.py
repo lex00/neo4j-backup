@@ -88,6 +88,22 @@ def make_prune_dag(tier: str, cron: str):
     return _prune()
 
 
+def make_cleanup_dag(tier: str, cron: str):
+    """`neo4j_cleanup_<tier>` on the tier's `cleanup_cron` (#93): drop superseded databases."""
+    @dag(dag_id=f"neo4j_cleanup_{tier}", schedule=cron, start_date=datetime(2025, 1, 1),
+         catchup=False, max_active_runs=1, tags=["neo4j-backup", "cleanup", tier])
+    def _cleanup():
+        @task
+        def cleanup() -> int:
+            pol = load_policy(config.policy_path())
+            return sum(len(ops.cleanup(config.neo4j(), g, log=print)["drops"])
+                       for g in pol.groups_for_tier(tier))
+
+        cleanup()
+
+    return _cleanup()
+
+
 # One DAG per tier and job, from the policy's crons (#104); the old fixed neo4j_verify /
 # neo4j_aggregate / neo4j_prune DAGs are gone. A policy that fails to load is an import error.
 _pol = load_policy_at_startup(config.policy_path(), configured="NEO4J_BACKUP_POLICY" in os.environ)
@@ -100,3 +116,5 @@ if _pol is not None:
                                                                     _t.aggregate_cron)
         if _t.prune_cron:
             globals()[f"neo4j_prune_{_tier}"] = make_prune_dag(_tier, _t.prune_cron)
+        if _t.cleanup_cron:
+            globals()[f"neo4j_cleanup_{_tier}"] = make_cleanup_dag(_tier, _t.cleanup_cron)

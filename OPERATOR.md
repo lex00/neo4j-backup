@@ -221,14 +221,23 @@ running it again goes forward again. In Dagster it's the `rollback_job`, in Airf
 
 ### Clean up later
 
-After a soak period, drop the old databases (`DROP DATABASE <old>`). Dropping a database also
-removes the privileges granted on it.
+After a soak period, drop the superseded databases:
+
+```bash
+neo4j-backup --json cleanup <group> --dry-run                 # the exact DROP set
+neo4j-backup --json cleanup <group> --keep 1 --older-than 7 --confirm --ticket CHG-1234
+```
+
+Cleanup only touches databases the naming scheme says the tool created for a member (`owns`,
+#89) and that no alias targets. It always keeps the current target and the `--keep` newest
+before it (default 1, for `rollback`). Databases you created yourself are never candidates.
+Privileges copied to a database (#117) are revoked before it's dropped. It can also run on the
+tier's `cleanup_cron` (Dagster `<tier>_cleanup`, Airflow `neo4j_cleanup_<tier>`); MCP has
+`run_cleanup`. by-name groups have nothing to clean up.
 
 ### Limits today
 
 
-**Planned:** `cleanup`
-([#93](https://github.com/lex00/neo4j-backup/issues/93)).
 
 ## Load a customer's data in bulk
 

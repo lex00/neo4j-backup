@@ -441,6 +441,29 @@ def rollback_job():
     rollback_op()
 
 
+class CleanupConfig(dg.Config):
+    tier: str | None = None    # every group of the tier (its cleanup_cron schedule)
+    group_id: str | None = None
+    keep: int = 1
+
+
+@dg.op
+def cleanup_op(context: dg.OpExecutionContext, config: CleanupConfig, neo4j: Neo4jResource):
+    """Drop superseded databases (#93), per group, keeping the current one and `keep` before."""
+    pol = load_policy(POLICY_PATH)
+    groups = ([pol.group(config.group_id)] if config.group_id
+              else pol.groups_for_tier(config.tier) if config.tier else pol.db_groups)
+    neos = Neo4jSet(neo4j._core(), policy_source=POLICY_PATH)
+    out = [ops.cleanup(neos, g, keep=config.keep, log=context.log.info) for g in groups]
+    context.log.info(f"dropped {sum(len(o['drops']) for o in out)} databases")
+    return out
+
+
+@dg.job
+def cleanup_job():
+    cleanup_op()
+
+
 # The full-lane tag: the baseline step is a full backup, so the job queues behind the full lane's
 # tag concurrency limit like a scheduled full does (#97).
 @dg.job(tags={"backup_kind": "full"})
@@ -541,6 +564,13 @@ def _tier_keys(context, pol, tier_name: str) -> list[str]:
 def _make_maintenance_schedule(tier_name: str, lane: str, cron: str, status):
     """`{tier}_verify`, `{tier}_aggregate` (one run per member of the tier), `{tier}_prune` (one
     run over the tier's groups) from the tier's crons (#104)."""
+    if lane == "cleanup":
+        @dg.schedule(job=cleanup_job, cron_schedule=cron, name=f"{tier_name}_cleanup",
+                     default_status=status)
+        def _cleanup(context):
+            return dg.RunRequest(run_key=f"{tier_name}:cleanup:{_tick(context)}", run_config={
+                "ops": {"cleanup_op": {"config": {"tier": tier_name}}}})
+        return _cleanup
     if lane == "prune":
         @dg.schedule(job=prune_job, cron_schedule=cron, name=f"{tier_name}_prune",
                      default_status=status)
@@ -626,7 +656,7 @@ def _build_schedules() -> list:
     out += [_make_maintenance_schedule(tier_name, lane, cron, status)
             for tier_name, tier in policy.tiers.items()
             for lane, cron in (("verify", tier.verify_cron), ("aggregate", tier.aggregate_cron),
-                               ("prune", tier.prune_cron))
+                               ("prune", tier.prune_cron), ("cleanup", tier.cleanup_cron))
             if cron]
     return out + _make_dbms_schedules(policy, status)
 
@@ -634,7 +664,7 @@ def _build_schedules() -> list:
 defs = dg.Definitions(
     assets=[backup, aggregate, verify, prune, metadata_export, system_backup],
     jobs=[backup_job, verify_job, aggregate_job, prune_job, dbms_metadata_job, dbms_system_job,
-          restore_group, metadata_restore, load_job, rollback_job],
+          restore_group, metadata_restore, load_job, rollback_job, cleanup_job],
     schedules=_build_schedules(),
     sensors=[reconcile_registry],
     resources={

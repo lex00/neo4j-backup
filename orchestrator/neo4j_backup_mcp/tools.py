@@ -324,7 +324,23 @@ def run_rollback(group: str, members: list[str] | None = None, confirm: bool = F
     return ops.rollback(neo, store, g, members=members, log=_log)
 
 
+@_recorded
+def run_cleanup(group: str, keep: int = 1, older_than_days: float | None = None,
+                confirm: bool = False, dry_run: bool = False, ticket: str | None = None,
+                reason: str | None = None) -> dict:
+    """Drop superseded databases of a group (#93): only ones the tool created and no alias
+    targets, keeping the current one and `keep` before it. Needs confirm=true; dry_run lists
+    the exact DROP set."""
+    g = load_policy(env.policy_path()).group(group)
+    plan = ops.plan_cleanup(env.neo4j(), g, keep=keep, older_than_days=older_than_days)
+    if dry_run:
+        return {"dry_run": True, **plan}
+    if not confirm:
+        return _needs_confirmation("cleanup", {"drops": plan["drops"]})
+    return ops.cleanup(env.neo4j(), g, keep=keep, older_than_days=older_than_days, log=_log)
+
+
 READ_TOOLS = [list_targets, latest_artifact, show_chain, backup_status, restore_points,
               preview_restore, preview_prune]
 WRITE_TOOLS = [run_backup, run_verify, run_aggregate, run_restore, run_prune, run_load,
-               run_rollback]
+               run_rollback, run_cleanup]
