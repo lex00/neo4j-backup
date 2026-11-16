@@ -303,6 +303,32 @@ def load_artifacts(store, layout, group_id: str, alias: str) -> list[dict]:
             for (k, m, kind) in store.list_load_artifacts(lp)]
 
 
+def import_to_dump(run_admin: RunAdmin, runner, store, layout, group_id: str, member: str,
+                   database: str, source_args: list, *, upload: str = "admin",
+                   staging: str | None = None, log: Log = _NOLOG) -> dict:
+    """Import on the loader, dump the offline store and put the dump in the member's load folder
+    (#158): `<group>/<slug>/_seed/<ts>/<database>.dump`. The loader never starts a server, so
+    the import can't be quarantined (IMPORT.md). `upload=pipeline` dumps to the runner's local
+    staging and uploads through the store (SSE headers); otherwise neo4j-admin writes directly."""
+    store, runner = _store(store, group_id), _per(runner, group_id)
+    upload = _upload(runner, upload)
+    prefix = f"{layout.load_prefix(group_id, member)}{naming.ts()}/"
+    imported = import_database(run_admin, runner, database, source_args)
+    if upload == "pipeline":
+        stage = _stage(runner, "_dump", database, staging)
+        os.makedirs(stage, exist_ok=True)
+        _admin(run_admin, runner.dump_command(database, stage), store)
+        key = store.upload_file(os.path.join(stage, f"{database}.dump"),
+                                f"{prefix}{database}.dump")
+        shutil.rmtree(stage, ignore_errors=True)
+    else:
+        _admin(run_admin, runner.dump_command(database, store.uri(prefix)), store)
+        key = f"{prefix}{database}.dump"
+    log(f"imported {database} and dumped it to {key}")
+    return {"database": database, "group": group_id, "member": member, "key": key,
+            "uri": store.uri(key), "argv": imported["argv"]}
+
+
 def import_database(run_admin: RunAdmin, runner, database: str, source_args: list) -> dict:
     """Bulk-import raw data into an offline store on the loader (#16): the reusable tail's first step.
     Structures + runs `neo4j-admin database import full`; `source_args` is a passthrough. The rest of

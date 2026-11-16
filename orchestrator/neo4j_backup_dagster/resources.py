@@ -200,6 +200,9 @@ class RunnerResource(dg.ConfigurableResource):
     def inspect_command(self, *a, **k):
         return self._core().inspect_command(*a, **k)
 
+    def dump_command(self, *a, **k):
+        return self._core().dump_command(*a, **k)
+
     def import_command(self, *a, **k):
         return self._core().import_command(*a, **k)
 

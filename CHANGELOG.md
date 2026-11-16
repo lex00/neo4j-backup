@@ -14,6 +14,9 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **`import --to-dump <group>/<member>`** (#158, part of #98): import on the loader, dump the
+  offline store (no server start), and put the dump in the member's `_seed/<ts>/` folder;
+  `BACKUP_UPLOAD=pipeline` uploads it through the tool. IMPORT.md makes it the default route.
 - **Load artifacts** (#156, part of #98). A `.dump` (or a `.backup` kept as a load) lives in
   `<group>/<slug>/_seed/`; `PathLayout.load_prefix` names it and `list_load_artifacts` lists it
   on every backend, while `list_artifacts` never returns anything under `_seed/`, so a load

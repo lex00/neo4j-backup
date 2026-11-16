@@ -308,7 +308,7 @@ Everything below is optional and defaults to the tested behaviour. The full list
 | `prune` | deletes backups older than each group's retention, whole chains only; the preview reports `kept_for_chains` (past retention but needed) and `unknown_kept` (no metadata yet) | yes |
 | `metadata export` / `metadata restore [--key <k>]` | users, roles, privileges and aliases as Cypher | restore changes the cluster |
 | `system-backup` | full backup of the `system` database | adds a backup |
-| `import <database> -- <args>` | bulk import on a loader ([IMPORT.md](IMPORT.md)) | yes |
+| `import [--to-dump <group>/<member>] <database> -- <args>` | bulk import on a loader; with `--to-dump`, dump it into the member's `_seed/` folder ([IMPORT.md](IMPORT.md)) | yes |
 
 Every command follows the [CLI contract](CLI-CONTRACT.md): `--json` prints one result object, exit
 codes are stable for scripts, and commands that change things need `--confirm` (preview with
