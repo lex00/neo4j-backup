@@ -1,3 +1,0 @@
-[console_scripts]
-neo4j-backup = neo4j_backup_cli.__main__:main
-neo4j-backup-mcp = neo4j_backup_mcp.server:main

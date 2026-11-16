@@ -15,3 +15,6 @@ _site/
 airflow/.venv/
 .airflow_home/
 .seed/
+
+# Build artifacts of `pip install -e` (#82)
+*.egg-info/
