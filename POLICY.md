@@ -212,6 +212,9 @@ configured `SECRET_PROVIDER`. An S3 `credentials_ref` resolves to JSON:
 | `s3_prefix` | string | `null` | deprecated | never read; logs a warning. Use `storage` |
 | `tenant` | string | `null` | used | a label for selecting a customer's groups: `backup`, `verify`, `aggregate` and `targets` take `--tenant <t>` instead of a group, and MCP read and backup tools take `tenant` (#102). **It is a label, not an access control**: the deployment can reach every database in its clusters whatever the tenant. Settable in a profile. `restore` stays per group |
 | `owner` | string | `null` | deprecated | the old name for `tenant`; still read as the tenant, with a warning |
+| `state` | `active` \| `retired` | `active` | wired | offboarding (#124): a retired group has no schedules; its artifacts stay restorable until `retired_on` + `retire_after_days`, then prune deletes them |
+| `retired_on` | date | `null` | wired | required with `state: retired`: the day the retention period starts |
+| `retire_after_days` | int | `retention_days` | wired | how long a retired group's artifacts are kept |
 | `rpo_minutes` | int | `60` | wired | how old a member's newest backup or load may be before `status` (CLI) and `backup_status` (MCP) report it `stale` (#123); policy load warns when the tier's `diff_cron` (or `rebuild_cron`, for a group not backed up by design) runs further apart. A profile can set it |
 | `rto_minutes` | int | `120` | decl | target, not enforced |
 | `encryption` | object | `{mode: sse-kms}` | decl | recorded intent; SSE-KMS applied by your bucket |

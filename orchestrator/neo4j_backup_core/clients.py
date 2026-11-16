@@ -191,6 +191,7 @@ class ObjectStore(Protocol):
     def latest_text_key(self, prefix: str, suffix: str = ".cypher") -> str | None: ...
     def list_load_artifacts(self, prefix: str): ...
     def create_exclusive(self, key: str, text: str) -> bool: ...
+    def list_prefixes(self, prefix: str = "") -> list[str]: ...
 
 
 def object_store(bucket: str, endpoint_url: str | None = None, region: str = "us-east-1",
@@ -325,6 +326,14 @@ class S3ObjectStore(_BaseObjectStore):
             "s3", endpoint_url=self.endpoint_url, region_name=self.region, config=cfg, **creds
         )
 
+    def list_prefixes(self, prefix: str = "") -> list[str]:
+        """The 'folders' directly under `prefix` (#124), each ending in '/'."""
+        out = []
+        paginator = self._client().get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix, Delimiter="/"):
+            out += [p["Prefix"] for p in page.get("CommonPrefixes", [])]
+        return out
+
     def list_artifacts(self, prefix: str):
         out = []
         paginator = self._client().get_paginator("list_objects_v2")
@@ -439,6 +448,10 @@ class AzureObjectStore(_BaseObjectStore):
         conn = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
         return BlobServiceClient.from_connection_string(conn).get_container_client(self.container)
 
+    def list_prefixes(self, prefix: str = "") -> list[str]:
+        return [b.name for b in self._c().walk_blobs(name_starts_with=prefix, delimiter="/")
+                if b.name.endswith("/")]
+
     def list_artifacts(self, prefix: str):
         return [(b.name, b.size, b.last_modified)
                 for b in self._c().list_blobs(name_starts_with=prefix)
@@ -522,6 +535,12 @@ class GcsObjectStore(_BaseObjectStore):
         else:
             client = storage.Client()
         return client.bucket(self.bucket_name)
+
+    def list_prefixes(self, prefix: str = "") -> list[str]:
+        it = self._b().list_blobs(prefix=prefix, delimiter="/")
+        for _page in it.pages:  # prefixes are filled in as the pages are read
+            pass
+        return sorted(it.prefixes)
 
     def list_artifacts(self, prefix: str):
         return [(b.name, b.size, b.updated)

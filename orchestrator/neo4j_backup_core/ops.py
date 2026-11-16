@@ -513,8 +513,29 @@ def prune(store, policy, layout, *, keep_system: int | None = None,
     swept: list[str] = []
     base = store
     loads_victims: list[str] = []
+    retired_out: list[dict] = []
     for g in (policy.db_groups if groups is None else groups):
         store = _store(base, g.id)  # each group's own store (#105)
+        if getattr(g, "retired", False):  # offboarding (#124): all or nothing, by date
+            ends = g.deletes_on()
+            if now.date() < ends:
+                retired_out.append({"group": g.id, "deletes_on": ends.isoformat(),
+                                    "deleted": False})
+                continue
+            prefixes = [layout.alias_prefix(g.id, a) for a in g.names]
+            keys = [k for p in prefixes for (k, _s, _m) in store.list_artifacts(p)]
+            loads = [k for a in g.names for (k, _m, _kind) in
+                     store.list_load_artifacts(layout.load_prefix(g.id, a))]
+            victims.extend(keys + loads)
+            detail[f"{g.id}/retired"] = len(keys) + len(loads)
+            if not dry_run:
+                for p in prefixes:
+                    store.delete_prefix(p)
+            retired_out.append({"group": g.id, "deletes_on": ends.isoformat(),
+                                "deleted": not dry_run, "prefixes": prefixes})
+            log(f"{g.id}: retired since {g.retired_on}; "
+                + ("would delete" if dry_run else "deleted") + f" {', '.join(prefixes)}")
+            continue
         cutoff = now - timedelta(days=g.retention_days)
         keep_loads = g.load.keep_loads if hasattr(g, "load") else 14
         for a in g.names:
@@ -552,7 +573,8 @@ def prune(store, policy, layout, *, keep_system: int | None = None,
             sidecars += len(artifacts.drop_orphans(st, prefix))
     return {"deleted": len(victims), "detail": detail, "keys": victims, "dry_run": dry_run,
             "sidecars_deleted": sidecars, "kept_for_chains": held_total,
-            "unknown_kept": len(unknown_kept), "loads": loads_victims}
+            "unknown_kept": len(unknown_kept), "loads": loads_victims,
+            "retired": retired_out}
 
 
 # --- DBMS metadata (pure Bolt, no runner) ------------------------------------------------------

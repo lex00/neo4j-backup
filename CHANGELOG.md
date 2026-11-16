@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Offboarding: retired groups** (#124): `state: retired` with `retired_on` and
+  `retire_after_days` stops a group's schedules; its artifacts stay restorable until the period
+  ends, then prune deletes them. `status` lists retired groups with `deletes_on`, and store
+  folders no group owns under `unmanaged` (never deleted). New store method `list_prefixes`.
 - **Freshness against `rpo_minutes`** (#123): CLI `status [group|--tenant t] [--stale]` and MCP
   `backup_status` give each target's newest restorable point (backup or load) and a state:
   `ok`, `stale` or `by_design` (#112). `--stale` exits 1 when any target is stale. Policy load

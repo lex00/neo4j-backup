@@ -69,3 +69,67 @@ def test_policy_warns_when_the_cadence_misses_rpo_and_profiles_set_it():
     assert any("'a'" in w and "diff_cron" in w for w in rpo)
     assert any("'c'" in w and "rebuild_cron" in w for w in rpo)  # load-only: its rebuilds
     assert not any("'b'" in w for w in rpo)
+
+
+# --- #124: retired groups and unmanaged prefixes -----------------------------------------------
+
+import pytest  # noqa: E402
+
+from neo4j_backup_core import ops  # noqa: E402
+
+RETIRED = {"db_groups": [
+    {"id": "live", "tier": "gold", "aliases": ["a"]},
+    {"id": "gone", "tier": "gold", "aliases": ["b"], "state": "retired",
+     "retired_on": "2026-11-01", "retire_after_days": 10}],
+    "tiers": {"gold": {"full_cron": "0 2 * * *", "diff_cron": "0 * * * *"}}}
+
+
+def test_retired_needs_a_date_and_leaves_the_schedules():
+    p = P.Policy.model_validate(RETIRED)
+    assert [g.id for g in p.groups_for_tier("gold")] == ["live"]
+    assert [g.id for g in p.groups_for_tier("gold", include_retired=True)] == ["live", "gone"]
+    assert p.group("gone").deletes_on().isoformat() == "2026-11-11"
+    bad = {**RETIRED, "db_groups": [{"id": "x", "tier": "gold", "aliases": ["x"],
+                                     "state": "retired"}]}
+    with pytest.raises(Exception, match="retired_on"):
+        P.Policy.model_validate(bad)
+
+
+class PStore(Store):
+    def __init__(self, arts, prefixes=()):
+        super().__init__(arts)
+        self.prefixes, self.deleted = list(prefixes), []
+
+    def list_prefixes(self, prefix=""):
+        return self.prefixes
+
+    def delete_prefix(self, p):
+        self.deleted.append(p)
+        return 1
+
+    def delete_keys(self, keys):
+        return len(keys)
+
+    def list_text_keys(self, prefix, suffix=".cypher"):
+        return []
+
+
+def test_prune_keeps_a_retired_group_until_its_date_then_deletes_it():
+    p = P.Policy.model_validate(RETIRED)
+    s = PStore(dict([art("gone", "b", 60 * 24 * 30)]))
+    before = ops.prune(s, p, L, groups=[p.group("gone")], dbms=False,
+                       now=datetime(2026, 11, 10, tzinfo=timezone.utc))
+    assert s.deleted == [] and before["retired"][0]["deleted"] is False
+    after = ops.prune(s, p, L, groups=[p.group("gone")], dbms=False,
+                      now=datetime(2026, 11, 11, tzinfo=timezone.utc))
+    assert s.deleted == [L.alias_prefix("gone", "b")] and after["retired"][0]["deleted"]
+
+
+def test_status_lists_retired_groups_and_unmanaged_prefixes():
+    p = P.Policy.model_validate(RETIRED)
+    s = PStore({}, prefixes=["live/", "gone/", "old-customer/", "_dbms/", "_state/"])
+    out = freshness.status(s, L, p.db_groups, now=NOW, policy=p)
+    assert {r["target"]: r["state"] for r in out["targets"]}["gone/b"] == "retired"
+    assert out["retired"] == [{"group": "gone", "retired_on": "2026-11-01",
+                               "deletes_on": "2026-11-11"}]
+    assert out["unmanaged"] == ["old-customer/"] and s.deleted == []

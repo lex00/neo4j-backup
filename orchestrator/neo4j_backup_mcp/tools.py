@@ -119,7 +119,8 @@ def backup_status(tenant: str | None = None) -> dict:
 
     policy = load_policy(env.policy_path())
     groups = policy.select(tenant=tenant) if tenant else policy.db_groups
-    return freshness.status(env.store(), _layout(), groups)
+    return freshness.status(env.store(), _layout(), groups,
+                            policy=None if tenant else policy)
 
 
 @_selectable

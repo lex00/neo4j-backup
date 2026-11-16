@@ -47,6 +47,26 @@ def _when(m) -> datetime | None:
     return None
 
 
+def unmanaged_prefixes(store, layout, policy) -> list[str]:
+    """Top-level folders in the policy's stores that belong to no group (#124): a group removed
+    from the policy without being retired. Reported, never deleted. Folders starting with `_`
+    are the tool's own (`_dbms/`, `_state/`, `_verify/`, ...)."""
+    known = {layout.alias_prefix(g.id, a).split("/", 1)[0] + "/"
+             for g in policy.db_groups for a in g.names}
+    store_name = getattr(policy, "store_name", None)
+    names = ({store_name(g.id) for g in policy.db_groups} if store_name else set()) | {"default"}
+    out = set()
+    for name in sorted(names):
+        try:
+            st = store.named(name) if hasattr(store, "named") else store
+            for p in st.list_prefixes(""):
+                if not p.startswith("_") and p not in known:
+                    out.add(p if name == "default" else f"{name}:{p}")
+        except Exception:  # noqa: BLE001 - a store without listings, or unreachable
+            continue
+    return sorted(out)
+
+
 def member_status(store, layout, group, alias: str, *, now: datetime,
                   neo4j=None) -> dict:
     st = ops._store(store, group.id)
@@ -61,8 +81,11 @@ def member_status(store, layout, group, alias: str, *, now: datetime,
     newest = max(points) if points else None
     age_min = round((now - newest).total_seconds() / 60, 1) if newest else None
     rpo = getattr(group, "rpo_minutes", None)
-    reason = _by_design(group, neo4j, alias)
-    if reason:
+    retired = getattr(group, "retired", False)
+    reason = None if retired else _by_design(group, neo4j, alias)
+    if retired:  # offboarded (#124): no schedules; its data goes on deletes_on
+        state = "retired"
+    elif reason:
         state = "by_design"
     elif newest is None or (rpo is not None and age_min > rpo):
         state = "stale"
@@ -76,11 +99,21 @@ def member_status(store, layout, group, alias: str, *, now: datetime,
             "latest_load": loads[-1]["key"] if loads else None,
             "newest_point": newest.isoformat() if newest else None,
             "age_minutes": age_min, "rpo_minutes": rpo, "state": state,
-            **({"reason": reason} if reason else {})}
+            **({"reason": reason} if reason else {}),
+            **({"deletes_on": group.deletes_on().isoformat()} if retired else {})}
 
 
-def status(store, layout, groups, *, neo4j=None, now: datetime | None = None) -> dict:
+def status(store, layout, groups, *, neo4j=None, now: datetime | None = None,
+           policy=None) -> dict:
+    """Every target's freshness; with `policy`, also the retired groups and when their data
+    goes, and the store folders no group owns (#124)."""
     now = now or datetime.now(timezone.utc)
     rows = [member_status(store, layout, g, a, now=now, neo4j=neo4j)
             for g in groups for a in g.names]
-    return {"targets": rows, "stale": [r["target"] for r in rows if r["state"] == "stale"]}
+    out = {"targets": rows, "stale": [r["target"] for r in rows if r["state"] == "stale"]}
+    if policy is not None:
+        out["retired"] = [{"group": g.id, "retired_on": g.retired_on.isoformat(),
+                           "deletes_on": g.deletes_on().isoformat()}
+                          for g in groups if getattr(g, "retired", False)]
+        out["unmanaged"] = unmanaged_prefixes(store, layout, policy)
+    return out
