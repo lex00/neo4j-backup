@@ -114,6 +114,7 @@ class Load(BaseModel):
 
 class DbGroup(BaseModel):
     id: str
+    profile: str | None = None  # the profile its settings came from (#101), for reporting
     owner: str | None = None
     # A group is alias-swap (apps connect via aliases; restore seeds a new physical + swaps the
     # alias — the default, non-destructive) OR by-name (#48: no alias; restore targets the
@@ -192,9 +193,71 @@ class Tier(BaseModel):
         return self
 
 
+PROFILE_FORBIDDEN = ("id", "aliases", "databases", "overrides", "profile")
+_MERGED_PER_KEY = ("load",)  # dict fields merged key by key; everything else is replaced
+
+
+def resolve_profiles(raw: dict) -> tuple[dict, dict[str, dict[str, str]]]:
+    """Apply `profiles:` to the raw policy dict (#101), before validation, so a profile can supply
+    required fields. Returns (resolved raw dict, provenance): provenance maps group id -> field
+    -> "group" | "profile:<name>" (`load.<key>` for the per-key merged `load`). A group's own
+    values win; `load` merges per key; lists (args, checks) and other values are replaced."""
+    if not isinstance(raw, dict):
+        return raw, {}
+    profiles = raw.get("profiles") or {}
+    if not isinstance(profiles, dict):
+        raise ValueError("profiles must be a map of name -> group settings")
+    for name, prof in profiles.items():
+        if not isinstance(prof, dict):
+            raise ValueError(f"profile {name!r} must be a map of group settings")
+        bad = [k for k in prof if k in PROFILE_FORBIDDEN]
+        if bad:
+            raise ValueError(f"profile {name!r} can't set {', '.join(bad)} (per group only)")
+        unknown = [k for k in prof if k not in DbGroup.model_fields]
+        if unknown:
+            raise ValueError(f"profile {name!r}: unknown group field(s) {', '.join(unknown)}")
+    groups, prov = [], {}
+    for g in raw.get("db_groups") or []:
+        if not isinstance(g, dict):
+            groups.append(g)
+            continue
+        src = {k: "group" for k in g if k != "profile"}
+        name = g.get("profile")
+        if name is not None:
+            if name not in profiles:
+                known = ", ".join(sorted(profiles)) or "none defined"
+                raise ValueError(f"group {g.get('id')!r} uses unknown profile {name!r} "
+                                 f"(profiles: {known})")
+            merged = {}
+            for k, v in profiles[name].items():
+                merged[k] = v
+                src[k] = f"profile:{name}"
+            for k, v in g.items():
+                if k in _MERGED_PER_KEY and isinstance(v, dict) and isinstance(merged.get(k), dict):
+                    for kk in merged[k]:
+                        src[f"{k}.{kk}"] = f"profile:{name}"
+                    for kk in v:
+                        src[f"{k}.{kk}"] = "group"
+                    src[k] = "merged"
+                    merged[k] = {**merged[k], **v}
+                else:
+                    merged[k] = v
+                    src[k] = "group" if k != "profile" else src.get(k)
+            g = merged
+        groups.append(g)
+        prov[str(g.get("id"))] = {k: v for k, v in src.items() if v}
+    return {**raw, "db_groups": groups}, prov
+
+
 class Policy(BaseModel):
     db_groups: list[DbGroup]
     tiers: dict[str, Tier]
+    profiles: dict[str, dict] = Field(default_factory=dict)  # #101; resolved before validation
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_profiles(cls, data):
+        return resolve_profiles(data)[0] if isinstance(data, dict) else data
 
     @model_validator(mode="after")
     def _tiers_resolve(self) -> "Policy":
@@ -251,6 +314,47 @@ class Policy(BaseModel):
 def _days(gap) -> str:
     d = gap.total_seconds() / 86400
     return f"{d:g} days" if d != 1 else "1 day"
+
+
+def explain(source: str | Path, group_id: str) -> dict:
+    """A group's effective settings and where each came from (#101): `group` (the group's
+    resolved fields) and `from` (field -> "group" | "profile:<name>" | "default"; `load` fields
+    as `load.<key>`). Reads and validates the whole policy; touches no cluster or store."""
+    raw = yaml.safe_load(_read_source(str(source)))
+    resolved, prov = resolve_profiles(raw)
+    policy = Policy.model_validate(raw)
+    group = policy.group(group_id)
+    src = prov.get(group_id, {})
+    dumped = group.model_dump(mode="json")
+    origin = {}
+    for k, v in dumped.items():
+        if k == "load":
+            for kk in v:
+                origin[f"load.{kk}"] = src.get(f"load.{kk}") or (
+                    src["load"] if src.get("load", "").startswith(("group", "profile"))
+                    else "default")
+        else:
+            origin[k] = src.get(k, "default")
+    return {"group": dumped, "from": origin}
+
+
+def validate_file(source: str | Path) -> list[str]:
+    """Every problem with a policy file, as messages (empty = valid). Reads only the file (#101):
+    no cluster, no store, so it can run as a pull-request check on the policy repo."""
+    try:
+        raw = yaml.safe_load(Path(str(source)).read_text())
+    except FileNotFoundError:
+        return [f"{source}: no such file"]
+    except yaml.YAMLError as e:
+        return [f"{source}: not valid YAML: {e}"]
+    try:
+        Policy.model_validate(raw)
+    except ValidationError as e:
+        return [f"{'.'.join(str(x) for x in err['loc']) or 'policy'}: "
+                f"{err['msg'].removeprefix('Value error, ')}" for err in e.errors()]
+    except ValueError as e:
+        return [str(e)]
+    return []
 
 
 def parse_partition_key(key: str) -> tuple[str, str]:

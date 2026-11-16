@@ -8,6 +8,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 ## [Unreleased]
 
 ### Added
+- **Profiles** (#101). `profiles:` names a customer type's settings once; a group sets
+  `profile:` and overrides what differs (`load:` merges per key). Applied before validation, in
+  one place, so every front-end sees the resolved groups. `neo4j-backup policy show <group>`
+  prints a group's effective settings and where each came from; `neo4j-backup policy validate
+  <file>` checks a file without a cluster or store (exit 2 if invalid). The demo policy ships
+  `app-live`, `data-interval`, `data-scratch` and `data-then-live`, and a `nightly` tier with
+  only `rebuild_cron`.
 - **`load:` block in the policy** (#103): `mode` (live, once, rebuild), `writes`, `protect_writes`,
   `keep_loads`, `baseline`, `source` and `build`, with validation of the combinations (errors name
   the group). Groups without it behave as before. Tiers gain `rebuild_cron`; `full_cron` and

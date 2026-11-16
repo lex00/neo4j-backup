@@ -84,6 +84,41 @@ tiers:
 The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, and
 `s3_prefix` (the last is required by the schema even though it's declarative today).
 
+## Profiles
+
+A platform team serves the same kinds of customer again and again. `profiles:` names a set of
+group settings once; a group points at one with `profile:` and sets only what differs.
+
+```yaml
+profiles:
+  app-live:       { tier: gold, retention_days: 14 }
+  data-interval:  { tier: nightly, load: { mode: rebuild, writes: read-only, keep_loads: 14 } }
+  data-scratch:   { tier: nightly, load: { mode: rebuild, writes: read-write, protect_writes: false, keep_loads: 7 } }
+  data-then-live: { tier: gold, load: { mode: once, writes: read-write, protect_writes: true } }
+
+db_groups:
+  - id: recs-sandbox
+    profile: data-scratch
+    aliases: [recs]
+    s3_prefix: s3://backups/recs/
+    load: { keep_loads: 3, build: { kind: import, input_type: csv, args: [--nodes=Item=items.csv] } }
+```
+
+- A profile may set any group field except `id`, `aliases`, `databases` and `overrides`.
+- The group's own values win. `load:` merges key by key; everything else, lists included
+  (`build.args`), is replaced.
+- Profiles are applied before validation, so a profile can supply required fields such as
+  `tier`. An unknown profile, or an unknown field in a profile, fails policy load.
+- Every front-end (Dagster, Airflow, the CLI, MCP) sees the resolved groups.
+- `neo4j-backup policy show <group>` prints the effective settings and the source of each
+  (`group`, `profile:<name>`, `default`). `neo4j-backup policy validate <file>` checks a file
+  without touching a cluster or store.
+
+The four types in `policies/demo.yaml`: `app-live` (an application writing live, backed up on
+`gold`), `data-interval` (rebuilt every night from source files, read-only), `data-scratch`
+(rebuilt every night, writes allowed but not kept), `data-then-live` (loaded once, then written
+live and backed up). A group on `data-interval` or `data-scratch` adds its own `load.build`.
+
 ## Field reference
 
 **`db_groups[]`**
@@ -91,6 +126,7 @@ The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, a
 | Field | Type | Required / default | Status | Meaning |
 |---|---|---|---|---|
 | `id` | string | **required** | used | group identifier; part of the storage path + partition key |
+| `profile` | string | `null` | used | a name under `profiles:`; its settings apply unless the group sets them (#101) |
 | `restore_mode` | `alias-swap` \| `by-name` | `alias-swap` | used | `alias-swap` (apps use aliases; restore seeds a new physical + swaps the alias — non-destructive) or `by-name` (#48: no alias; restore targets the database by its own name) |
 | `aliases` | list of string | **required** (alias-swap) | used | app-facing Neo4j aliases to back up (one unit each). Use in `alias-swap` mode. |
 | `databases` | list of string | **required** (by-name) | used | database **names** to back up/restore directly (must be legal DB names). Use in `by-name` mode instead of `aliases`. |

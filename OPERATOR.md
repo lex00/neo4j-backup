@@ -42,7 +42,20 @@ at every restore, because the name changes.
 3. Grant the customer's role on the database. Grants made through the alias are stored
    against the database behind it; see [the restore runbook](#restore-on-a-customers-request) for
    what that means after a restore.
-4. Add a group to the policy with the alias, tier and `retention_days`, and deliver the policy
+4. Add a group to the policy. Usually that's a profile and the alias:
+
+   ```yaml
+   - id: shop
+     profile: app-live          # tier gold, 14 days; or data-interval, data-scratch, data-then-live
+     aliases: [shop]
+     s3_prefix: s3://neo4j-backups/shop/
+   ```
+
+   Set anything that differs from the profile on the group (`retention_days: 30`, or one
+   `load:` key). Check what the group ends up with, and where each value comes from, with
+   `neo4j-backup policy show shop`, and check the file before it ships with
+   `neo4j-backup policy validate <file>` (exit 0 valid, 2 invalid; no cluster or store needed,
+   so it suits a pull-request check on the policy repo). Then deliver the policy
    (a file the workers read, or `s3://…` with `NEO4J_BACKUP_POLICY`). Dagster's
    `reconcile_registry` sensor adds the new targets within five minutes; Airflow picks them up at
    the next DAG parse.
@@ -52,11 +65,8 @@ at every restore, because the name changes.
 7. Tell the customer their tier, how far back they can restore (`retention_days`), and how to
    ask for a restore. The [Customer guide](CUSTOMERS.md) is written for them.
 
-**Planned:** customer types as reusable profiles
-([#101](https://github.com/lex00/neo4j-backup/issues/101)), a `tenant` label to select all of a
-customer's groups ([#102](https://github.com/lex00/neo4j-backup/issues/102)), `policy validate`
-for pull requests on the policy file ([#101](https://github.com/lex00/neo4j-backup/issues/101)),
-an `adopt` command ([#92](https://github.com/lex00/neo4j-backup/issues/92)), and an option for
+**Planned:** a `tenant` label to select all of a
+customer's groups ([#102](https://github.com/lex00/neo4j-backup/issues/102)), an `adopt` command ([#92](https://github.com/lex00/neo4j-backup/issues/92)), and an option for
 new schedules to start running ([#104](https://github.com/lex00/neo4j-backup/issues/104)).
 
 ## Check that customers are covered
@@ -286,6 +296,7 @@ Everything below is optional and defaults to the tested behaviour. The full list
 | Command | Does | Changes anything? |
 |---|---|---|
 | `targets` | lists the policy's groups and members | no |
+| `policy show <group>` / `policy validate <file>` | a group's effective settings and their source / check a policy file | no |
 | `backup <group> [--kind AUTO\|FULL\|DIFF]` | backs up every database in a group | adds backups |
 | `verify <group>` | checks the latest backups restore and are consistent | no |
 | `aggregate <group>` | combines each chain into one full backup, in place | yes |

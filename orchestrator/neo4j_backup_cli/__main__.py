@@ -18,6 +18,7 @@ import sys
 
 from neo4j_backup_core import env, ops, paths, record
 from neo4j_backup_core.cli_contract import Exit, envelope, make_error
+from neo4j_backup_core import policy as policy_mod
 from neo4j_backup_core.policy import load_policy
 from neo4j_backup_core.until import UntilError, parse_until
 
@@ -87,6 +88,35 @@ def cmd_system_backup(args):
 def cmd_metadata_export(args):
     out = ops.export_metadata(env.neo4j(), env.store(), paths.get_layout())
     return envelope("metadata-export", ok=True, result=out), Exit.OK
+
+
+def cmd_policy_show(args):
+    """The group as every front-end sees it, after profiles (#101), with each value's source."""
+    try:
+        out = policy_mod.explain(env.policy_path(), args.group)
+    except KeyError:
+        return envelope("policy-show", ok=False, group=args.group,
+                        error=make_error("usage", f"no group {args.group!r} in the policy")), \
+            Exit.USAGE
+    if not args.json:
+        for k, v in out["group"].items():
+            if k == "load":
+                for kk, vv in v.items():
+                    print(f"load.{kk}: {vv}  [{out['from'][f'load.{kk}']}]", file=sys.stderr)
+            else:
+                print(f"{k}: {v}  [{out['from'][k]}]", file=sys.stderr)
+    return envelope("policy-show", ok=True, group=args.group, result=out), Exit.OK
+
+
+def cmd_policy_validate(args):
+    """Validate a policy file without touching any cluster or store: exit 0 valid, 2 invalid."""
+    errors = policy_mod.validate_file(args.file)
+    if errors:
+        for e in errors:
+            print(f"invalid: {e}", file=sys.stderr)
+        return envelope("policy-validate", ok=False, result={"file": args.file, "errors": errors},
+                        error=make_error("invalid_policy", "; ".join(errors))), Exit.USAGE
+    return envelope("policy-validate", ok=True, result={"file": args.file, "errors": []}), Exit.OK
 
 
 def cmd_import(args):
@@ -257,6 +287,15 @@ def build_parser() -> argparse.ArgumentParser:
     im.add_argument("source_args", nargs=argparse.REMAINDER,
                     help="passthrough to neo4j-admin (e.g. --nodes=/path.csv --relationships=/rel.csv)")
     im.set_defaults(func=cmd_import)
+
+    po = sub.add_parser("policy", help="inspect or check the policy (no cluster or store access)")
+    posub = po.add_subparsers(dest="policy_command", required=True, metavar="<show|validate>")
+    ps = posub.add_parser("show", help="a group's effective settings and where each came from")
+    ps.add_argument("group")
+    ps.set_defaults(func=cmd_policy_show)
+    pv = posub.add_parser("validate", help="load and validate a policy file; exit 0 or 2")
+    pv.add_argument("file")
+    pv.set_defaults(func=cmd_policy_validate)
 
     m = sub.add_parser("metadata", help="DBMS metadata (users/roles/privileges/aliases)")
     msub = m.add_subparsers(dest="metadata_command", required=True, metavar="<export|restore>")
