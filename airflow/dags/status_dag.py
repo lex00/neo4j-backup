@@ -7,7 +7,7 @@ from datetime import datetime
 
 from airflow.sdk import dag, task
 
-from neo4j_backup_airflow import config
+from neo4j_backup_airflow import alerts, config
 from neo4j_backup_core import freshness, paths
 from neo4j_backup_core.policy import load_policy, load_policy_at_startup
 
@@ -15,7 +15,8 @@ _layout = paths.get_layout()
 
 
 def make_status_dag(cron: str):
-    @dag(dag_id="neo4j_status", schedule=cron, start_date=datetime(2025, 1, 1), catchup=False,
+    @dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id="neo4j_status", schedule=cron, start_date=datetime(2025, 1, 1), catchup=False,
          max_active_runs=1, tags=["neo4j-backup", "status"])
     def _status():
         @task

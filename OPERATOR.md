@@ -57,8 +57,10 @@ at every restore, because the name changes.
    the next DAG parse.
 5. If the tier is new, switch on its schedules: Dagster creates them stopped, unless the policy
    says `schedules: running`.
-6. Run the first backup now rather than waiting for the schedule, then verify it:
-   `neo4j-backup backup <group> --kind FULL` and `neo4j-backup verify <group>`.
+6. Run the first backup now rather than waiting for the schedule, then verify it. CLI:
+   `neo4j-backup backup <group> --kind FULL` and `neo4j-backup verify <group>`. Dagster:
+   materialize the group's `backup` partitions with kind `FULL`, then `verify`. Airflow:
+   trigger `neo4j_backup_<tier>_full` with `{"group_id": "<group>"}`, then `neo4j_verify_<tier>`.
 7. Tell the customer their tier, how far back they can restore (`retention_days`), and how to
    ask for a restore. The [Customer guide](CUSTOMERS.md) is written for them.
 
@@ -85,31 +87,36 @@ neo4j-backup --json adopt shop --confirm      # CREATE ALIAS shop FOR DATABASE l
 ```
 
 Nothing is copied or dropped, and the application moves to the alias when it's ready. If any
-alias already points somewhere else (`conflict`), nothing happens. A member whose database
-already has the alias's name can't get an alias of that name; `--migrate --replace` makes the
-database read-only, backs it up, verifies the backup, seeds a new physical from it, checks it,
-copies its privileges, DROPs the original and creates the alias. Applications using the name
-follow the alias without a change. Writes fail from the backup until the alias exists, and the
-name resolves to nothing between the DROP and the CREATE ALIAS, so schedule it as an outage;
-the original database is gone afterwards, so try it on a copy first. A failure before the DROP
-puts the original back to read-write. Each
-adopted target is recorded for `rollback` and `cleanup`. MCP has `run_adopt`.
-`bootstrap/adopt.sh` stays as the local demo helper.
+alias already points somewhere else (`conflict`), nothing happens. Each adopted member is
+recorded for `rollback` and `cleanup`. MCP has `run_adopt`.
+
+A database that already has the alias's name can't get an alias of that name, because names
+and aliases share one namespace (`migrate` in the preview). `--migrate --replace` moves it:
+
+1. Makes the database read-only. Writes fail from here until step 5.
+2. Backs it up and verifies the backup.
+3. Seeds a new database from the backup, checks it, and copies the privileges to it.
+4. Drops the original. The name resolves to nothing until step 5.
+5. Creates the alias, with the old name, for the new database. Applications using the name
+   follow it without a change.
+
+Schedule it as an outage, and try it on a copy first: the original is gone afterwards. A
+failure before step 4 puts the original back to read-write.
 
 ## Check that customers are covered
 
 - Runs: failed backups show as failed runs in Dagster or Airflow, or as a non-zero exit from
   the CLI in CI or cron.
-- Freshness: `neo4j-backup status` (or `--tenant <t>`, or one group) gives each target's newest
+- Freshness: `neo4j-backup status` (or `--tenant <t>`, or one group) gives each member's newest
   restorable point (backup or load) and a state against the group's `rpo_minutes`: `ok`,
-  `stale`, or `by_design` for members not backed up by design. `status --stale` exits 1
-  when any target is stale, so cron or CI can alert on it. In the orchestrators the same check
-  runs on the policy's `dbms.status_cron` (default every 15 minutes) as Dagster's `status_check`
-  schedule and Airflow's `neo4j_status` DAG, and fails its run when a target is stale: alert on
-  failed runs. A backup that was skipped (no full to build on yet) shows as a warning on
-  Dagster's `backup_taken` check and as a skipped Airflow task. The MCP tool `backup_status`
-  returns the same ([MCP.md](MCP.md)). Policy load warns when a tier's cadence can't meet a group's
-  `rpo_minutes`.
+  `stale`, or `by_design` for members not backed up on purpose. The MCP tool `backup_status`
+  returns the same ([MCP.md](MCP.md)).
+- Scheduled freshness check: Dagster's `status_check` schedule and Airflow's `neo4j_status` DAG
+  run the same check on the policy's `dbms.status_cron` (every 15 minutes by default) and fail
+  when a member is stale, which sends an alert (below).
+- Skipped backups: a diff with no full to build on is skipped, not failed, and the diff lane
+  takes a full instead. It shows as a warning on Dagster's `backup_taken` check and as a
+  skipped Airflow task.
 - Restorability: `neo4j-backup verify <group>` copies the latest backups aside, combines them
   into a full backup and runs a consistency check, without touching the cluster. It runs on each
   tier's `verify_cron` (default daily 06:00): Dagster's `<tier>_verify` schedule, Airflow's
@@ -255,7 +262,7 @@ neo4j-backup --json rollback <group> --confirm --ticket CHG-1234
 ```
 
 Every restore, load and rebuild records each alias's previous database in
-`_state/<group>.json` in the group's store (until the records layer exists), and rollback
+`_state/<group>.json` in the group's store, and rollback
 uses the most recent swap. It refuses, before changing anything, if the previous database no
 longer exists. Privileges granted on the current database since the swap are copied back first,
 and no baseline is taken (the old chain is still there). A rollback is itself recorded, so
@@ -416,6 +423,45 @@ an alias is moved to another database, backups follow the alias to a database wi
 and its differential backups are skipped (the backup asks for a full, which the next full
 schedule takes). Check `SHOW ALIASES` against your last
 restore results when backups for a group start failing.
+
+## Alerts
+
+Set `NEO4J_BACKUP_ALERT_WEBHOOK` to a chat webhook (Slack, Teams, Mattermost) and every failed
+run posts one line to it: Dagster's `alert_on_failure` sensor, and the failure callback of
+every Airflow DAG here. That covers failed backups and the freshness check above. Without the
+variable nothing is sent, and you need your own (Dagster+ alert policies, Airflow notifiers;
+see the Airflow page's [Turn it on](airflow/README.md#turn-it-on)).
+
+These alerts depend on the scheduler running. Add one check that doesn't: run
+`neo4j-backup status --stale` from cron, CI or a Kubernetes CronJob outside the scheduler. It
+exits 1 when any member is stale, so the job's own failure alerting reports it:
+
+```bash
+# every 30 minutes, from any host or pod with the CLI and read access to the bucket
+*/30 * * * * neo4j-backup --json status --stale > /dev/null || notify "neo4j backups are stale"
+```
+
+If the scheduler stops, backups stop, members go stale, and this check fails.
+
+## Try a test group
+
+Before trusting the tool with a customer, run the whole loop on a database nobody uses:
+
+```cypher
+CREATE DATABASE `try-1` WAIT;
+CREATE ALIAS `try` FOR DATABASE `try-1`;
+```
+
+```yaml
+- id: try                      # in the policy, on any tier
+  tier: gold
+  aliases: [try]
+```
+
+Then back it up and verify it (step 6 of [Onboard a customer](#onboard-a-customer)), preview a
+restore (`restore try --dry-run`, or `dry_run` in Dagster or Airflow), restore it, check the
+alias points at the new database, and `rollback`. Remove the group and drop the databases when
+you're done (see [Offboard a customer](#offboard-a-customer)).
 
 ## Settings
 

@@ -1,0 +1,76 @@
+# Values for the `dagster` Helm chart (https://dagster-io.github.io/helm) that add this code
+# location and the concurrency it needs. Merge into your chart values; check the render with
+#   helm template dagster dagster/dagster -f helm-values.yaml
+#
+# The secret it reads (create it in the release's namespace first):
+#   kubectl create secret generic neo4j-backup-env \
+#     --from-literal=NEO4J_PASSWORD='...' \
+#     --from-literal=NEO4J_BOLT_URI='neo4j://neo4j.internal:7687' \
+#     --from-literal=NEO4J_BACKUP_SOURCE='neo4j-2.internal:6362' \
+#     --from-literal=BACKUP_BUCKET='my-neo4j-backups' \
+#     --from-literal=NEO4J_BACKUP_ALERT_WEBHOOK='https://hooks.slack.com/services/...'
+
+dagster-user-deployments:
+  enabled: true
+  deployments:
+    - name: neo4j-backup
+      image:
+        repository: registry.example.com/neo4j-backup-dagster
+        tag: "0.7.0"
+        pullPolicy: IfNotPresent
+      dagsterApiGrpcArgs: ["-m", "neo4j_backup_dagster.definitions"]
+      port: 4000
+      includeConfigInLaunchedRuns:
+        enabled: true                 # run pods get this deployment's env, secrets and volumes
+      envSecrets:
+        - name: neo4j-backup-env
+      env:
+        - name: NEO4J_BACKUP_POLICY
+          value: s3://ops-config/neo4j-backup/policy.yaml
+        - name: AWS_REGION
+          value: eu-west-1
+        - name: SCRATCH_PATH
+          value: /scratch
+        - name: RUNNER_PAGECACHE
+          value: 2G
+        - name: RUNNER_HEAP_SIZE
+          value: 4G
+      # an IRSA / workload-identity service account with the bucket, KMS and Secrets Manager
+      # permissions listed in DEPLOY.md
+      serviceAccount:
+        create: false
+        name: neo4j-backup
+      resources:
+        requests: { cpu: 500m, memory: 1Gi }
+        limits: { memory: 2Gi }
+      # subprocess runner mode: every run pod mounts the shared scratch volume (ReadWriteMany,
+      # sized for the fulls that run at once; see DEPLOY.md)
+      volumes:
+        - name: scratch
+          persistentVolumeClaim:
+            claimName: neo4j-backup-scratch
+      volumeMounts:
+        - name: scratch
+          mountPath: /scratch
+
+# Run tag limits (the run coordinator is on by default in the chart): the same limits as
+# deploy/dagster.yaml.
+dagsterDaemon:
+  runCoordinator:
+    enabled: true
+    type: QueuedRunCoordinator
+    config:
+      queuedRunCoordinator:
+        tagConcurrencyLimits:
+          - key: backup_kind
+            value: full
+            limit: 1
+          - key: backup_kind
+            value: diff
+            limit: 6
+          - key: neo4j_cluster
+            value: { applyLimitPerUniqueValue: true }
+            limit: 4
+          - key: neo4j_group
+            value: { applyLimitPerUniqueValue: true }
+            limit: 1

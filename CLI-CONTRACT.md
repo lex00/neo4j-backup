@@ -50,24 +50,25 @@ gate on meaning rather than a bare non-zero:
 
 ## Safety: dry-run, blast radius, confirm
 
-- **`--dry-run`** on every mutating command: print the planned actions, exit `0`, change neither
+- `--dry-run` on every mutating command: print the planned actions, exit `0`, change neither
   Neo4j nor the object store (it reads both to make the plan).
-- **Blast radius** for destructive ops (`restore --replace`, `prune`): before acting — and always
-  under `--dry-run` — the `result` echoes what will be dropped/created (physical names, alias swaps,
+- Blast radius for destructive ops (`restore --replace`, `prune`): before acting, and always
+  under `--dry-run`, the `result` echoes what will be dropped/created (physical names, alias swaps,
   artifact keys). The MCP layer surfaces this same structure.
-- **`--confirm` required for destructive ops. No interactive prompts, ever** — an
-  agent/CI can't answer one, so a missing confirmation is a `GUARD` refusal, not a hang. Read-only
+- `--confirm` required for destructive ops. No interactive prompts: an
+  agent or CI job can't answer one, so a missing confirmation is a `GUARD` refusal, not a hang. Read-only
   is the default posture.
-- **`--ticket` / `--reason`** on every mutating command: one line each (at most 500 characters),
+- `--ticket` / `--reason` on every mutating command: one line each (at most 500 characters),
   logged to stderr and returned in `result.ticket` / `result.reason` (null when not given), in the
   dry-run and refusal envelopes too. With `NEO4J_BACKUP_REQUIRE_TICKET=true`, an applied change
   without `--ticket` is a `GUARD` refusal with error kind `ticket_required`; `--dry-run` never
   needs one.
-- **Every failure is an envelope**: an unexpected exception still gives one JSON object
+- Every failure is an envelope: an unexpected exception still gives one JSON object
   with `ok: false` and exit `1`. Error kinds: `op_failed` (a refused or failed operation),
   `admin_failed` (neo4j-admin exited non-zero), `seed_failed` (a group restore failed while
   seeding; `result.dropped` lists the members already seeded, which were dropped since no alias
-  pointed at them), `baseline_failed`, `neo4j_error` (the driver raised), `internal_error`
+  pointed at them), `baseline_failed`, `locked` (the group's lock was held by other work for
+  `NEO4J_BACKUP_LOCK_WAIT` seconds), `neo4j_error` (the driver raised), `internal_error`
   (anything else). The traceback goes to stderr only with `--debug` or `NEO4J_BACKUP_DEBUG=1`.
 
 ## For implementers

@@ -6,6 +6,8 @@ A backup chain lives in one `<physical>/` directory (one store = a valid chain);
 the newest artifact across them. This is the Phase 5 fix for chain-mixing.
 """
 
+import json
+import re
 import os
 import tempfile
 
@@ -330,6 +332,7 @@ class RestoreConfig(dg.Config):
     from_load: bool = False  # seed each member from its newest load artifact (#144)
     from_dump: dict[str, str] = {}  # member -> load key or external dump URI (#159)
     members: list[str] = []  # restore only these members (#121); empty: the whole group
+    dry_run: bool = False  # log the plan (point, seeds, privileges, drops) and stop (#249)
     check: bool = False  # run the group's load.checks on the new databases before the swap (#221)
     keep_failed: bool = False  # with check: keep the new databases when a check fails
     ticket: str | None = None  # the change ticket; recorded in the log and as run tags (#119)
@@ -353,6 +356,17 @@ def restore_group_op(
     if tags:
         context.instance.add_run_tags(context.run_id, tags)
     group = ops.only_members(load_policy(POLICY_PATH).group(config.group_id), config.members)
+    if config.dry_run:  # the CLI's --dry-run, in Dagster (#249)
+        try:
+            preview = ops.plan_restore(neo4j, store, group, _layout, replace=config.replace,
+                                       until=until, loads=config.from_dump or (
+                                           "latest" if config.from_load else None))
+        except ops.OpError as e:
+            raise dg.Failure(str(e))
+        context.log.info("restore plan (dry run, nothing changed):\n"
+                         + json.dumps(preview, indent=1, default=str))
+        return {"group_id": config.group_id, "dry_run": True, "plan": preview,
+                "baseline": False, "members": [], **rec}
     try:
         out = ops.restore_group(
             neo4j, store, group, _layout, restore_until=until,
@@ -572,6 +586,24 @@ def _sensor_status() -> dg.DefaultSensorStatus:
             else dg.DefaultSensorStatus.STOPPED)
 
 
+@dg.run_failure_sensor(
+    name="alert_on_failure", minimum_interval_seconds=60,
+    default_status=(dg.DefaultSensorStatus.RUNNING if os.environ.get("NEO4J_BACKUP_ALERT_WEBHOOK")
+                    else dg.DefaultSensorStatus.STOPPED))
+def alert_on_failure(context: dg.RunFailureSensorContext):
+    """A failed run of this code location (a backup, `status_check` finding a stale target, a
+    restore) posts to NEO4J_BACKUP_ALERT_WEBHOOK (#246). Runs when that variable is set."""
+    from neo4j_backup_core import alerts
+
+    err = context.failure_event.message if context.failure_event else ""
+    sent = alerts.send(alerts.message("Dagster job", context.dagster_run.job_name, err,
+                                      os.environ.get("DAGSTER_BASE_URL", "").rstrip("/")
+                                      + f"/runs/{context.dagster_run.run_id}"
+                                      if os.environ.get("DAGSTER_BASE_URL") else None))
+    if not sent:
+        context.log.warning("alert not sent (NEO4J_BACKUP_ALERT_WEBHOOK unset or unreachable)")
+
+
 @dg.sensor(job=backup_job, minimum_interval_seconds=300, default_status=_sensor_status())
 def reconcile_registry(context: dg.SensorEvaluationContext):
     # Force a fresh read — the sensor gates whether a new database gets a partition, so its
@@ -666,18 +698,24 @@ def _tier_keys(context, pol, tier_name: str) -> list[str]:
     return [k for k in wanted if k in existing]
 
 
+
+def _dname(name: str) -> str:
+    """A policy name (tier, cluster) in a Dagster definition name, which allows only letters,
+    digits and `_`: `prod-eu` becomes `prod_eu` (`prod_eu_dbms_metadata`)."""
+    return re.sub(r"[^A-Za-z0-9_]", "_", name)
+
 def _make_maintenance_schedule(tier_name: str, lane: str, cron: str, status):
     """`{tier}_verify`, `{tier}_aggregate` (one run per member of the tier), `{tier}_prune` (one
     run over the tier's groups) from the tier's crons (#104)."""
     if lane == "cleanup":
-        @dg.schedule(job=cleanup_job, cron_schedule=cron, name=f"{tier_name}_cleanup",
+        @dg.schedule(job=cleanup_job, cron_schedule=cron, name=f"{_dname(tier_name)}_cleanup",
                      default_status=status)
         def _cleanup(context):
             return dg.RunRequest(run_key=f"{tier_name}:cleanup:{_tick(context)}", run_config={
                 "ops": {"cleanup_op": {"config": {"tier": tier_name}}}})
         return _cleanup
     if lane == "prune":
-        @dg.schedule(job=prune_job, cron_schedule=cron, name=f"{tier_name}_prune",
+        @dg.schedule(job=prune_job, cron_schedule=cron, name=f"{_dname(tier_name)}_prune",
                      default_status=status)
         def _prune(context):
             return dg.RunRequest(run_key=f"{tier_name}:prune:{_tick(context)}", run_config={
@@ -685,7 +723,7 @@ def _make_maintenance_schedule(tier_name: str, lane: str, cron: str, status):
         return _prune
     job = verify_job if lane == "verify" else aggregate_job
 
-    @dg.schedule(job=job, cron_schedule=cron, name=f"{tier_name}_{lane}", default_status=status)
+    @dg.schedule(job=job, cron_schedule=cron, name=f"{_dname(tier_name)}_{lane}", default_status=status)
     def _members(context):
         # full-size scratch, and in place for aggregate: the full lane, and never with the
         # group's own backups (#223)
@@ -723,12 +761,12 @@ def _make_dbms_schedules(policy, status) -> list:
     """`{cluster}_dbms_metadata` and `{cluster}_dbms_system` for every cluster (#106), from the
     policy's `dbms:` crons (#104); each run is tagged with its cluster."""
     out = []
-    for cluster in policy.cluster_names():
+    for cluster in policy.dbms_cluster_names():  # no unused default (#251)
         for kind, job, cron, asset in (
                 ("metadata", dbms_metadata_job, policy.dbms.metadata_cron, "metadata_export"),
                 ("system", dbms_system_job, policy.dbms.system_backup_cron, "system_backup")):
             out.append(dg.ScheduleDefinition(
-                name=f"{cluster}_dbms_{kind}", job=job, cron_schedule=cron,
+                name=f"{_dname(cluster)}_dbms_{kind}", job=job, cron_schedule=cron,
                 default_status=status, tags={"neo4j_cluster": cluster},
                 run_config={"ops": {asset: {"config": {"cluster": cluster}}}}))
     return out
@@ -740,7 +778,7 @@ def _make_schedule(tier_name: str, lane: str, cron: str,
         return _tier_keys(context, pol, tier_name)
 
     if lane == "full":
-        @dg.schedule(job=backup_job, cron_schedule=cron, name=f"{tier_name}_{lane}",
+        @dg.schedule(job=backup_job, cron_schedule=cron, name=f"{_dname(tier_name)}_{lane}",
                      default_status=status)
         def _full(context):
             reqs = [_lane_request(k, "full", _tick(context))
@@ -748,7 +786,7 @@ def _make_schedule(tier_name: str, lane: str, cron: str,
             return reqs or dg.SkipReason(f"no partitions for tier {tier_name!r}")
         return _full
 
-    @dg.schedule(job=backup_job, cron_schedule=cron, name=f"{tier_name}_{lane}",
+    @dg.schedule(job=backup_job, cron_schedule=cron, name=f"{_dname(tier_name)}_{lane}",
                  default_status=status)
     def _diff(context, neo4j: Neo4jResource, store: ObjectStoreResource):
         reqs = diff_lane_requests(_keys(context, load_policy(POLICY_PATH)), neo4j, store,
@@ -760,7 +798,7 @@ def _make_schedule(tier_name: str, lane: str, cron: str,
 def _make_rebuild_schedule(tier_name: str, cron: str, status):
     """`{tier}_rebuild` (#108): one `load_job` run per `load.mode: rebuild` group of the tier,
     tagged with its group so it never overlaps the group's backups."""
-    @dg.schedule(job=load_job, cron_schedule=cron, name=f"{tier_name}_rebuild",
+    @dg.schedule(job=load_job, cron_schedule=cron, name=f"{_dname(tier_name)}_rebuild",
                  default_status=status)
     def _rebuild(context):
         pol = load_policy(POLICY_PATH)
@@ -805,7 +843,7 @@ defs = dg.Definitions(
           restore_group, metadata_restore, load_job, rollback_job, cleanup_job, move_job,
           status_job],
     schedules=_build_schedules(),
-    sensors=[reconcile_registry],
+    sensors=[reconcile_registry, alert_on_failure],
     resources={
         # Credential via a secret provider (#18): default SECRET_PROVIDER=env resolves
         # NEO4J_PASSWORD lazily at connect time (same as before, now rotation-friendly); set
@@ -833,6 +871,8 @@ defs = dg.Definitions(
             pagecache=os.environ.get("RUNNER_PAGECACHE", "512M"),
             heap_size=os.environ.get("RUNNER_HEAP_SIZE", "2G"),
             neo4j_admin=os.environ.get("RUNNER_NEO4J_ADMIN", "neo4j-admin"),
+            # e.g. ["docker", "exec", "-T", "runner"]: neo4j-admin in a container (#254)
+            exec_prefix=__import__("json").loads(os.environ.get("RUNNER_EXEC_PREFIX", "[]")),
             # Execution mode: "subprocess" (VM/EC2, validated) or "k8s".
             mode=os.environ.get("RUNNER_MODE", "subprocess"),
             image=os.environ.get("RUNNER_IMAGE", ""),

@@ -13,7 +13,7 @@ from datetime import datetime
 
 from airflow.sdk import dag, task
 
-from neo4j_backup_airflow import config, upload
+from neo4j_backup_airflow import alerts, config, upload
 from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import ops, paths
 from neo4j_backup_core.policy import load_policy, load_policy_at_startup
@@ -25,7 +25,8 @@ _layout = paths.get_layout()
 def make_system_dag(cluster: str, cron: str):
     """`neo4j_dbms_system_<cluster>` on the policy's `dbms.system_backup_cron` (#104); then the
     DBMS sweep keeps `dbms.keep_system` / `keep_metadata`."""
-    @dag(dag_id=f"neo4j_dbms_system_{cluster}", schedule=cron, start_date=datetime(2025, 1, 1),
+    @dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id=f"neo4j_dbms_system_{cluster}", schedule=cron, start_date=datetime(2025, 1, 1),
          catchup=False, max_active_runs=1, tags=["neo4j-backup", "system", cluster])
     def _system():
         @task
@@ -47,5 +48,5 @@ def make_system_dag(cluster: str, cron: str):
 
 _pol = load_policy_at_startup(config.policy_path(), configured="NEO4J_BACKUP_POLICY" in os.environ)
 if _pol is not None:
-    for _cl in _pol.cluster_names():  # one per cluster (#106)
+    for _cl in _pol.dbms_cluster_names():  # one per cluster in use (#106, #251)
         globals()[f"neo4j_dbms_system_{_cl}"] = make_system_dag(_cl, _pol.dbms.system_backup_cron)

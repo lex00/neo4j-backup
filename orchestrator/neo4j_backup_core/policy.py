@@ -395,6 +395,9 @@ class Tier(BaseModel):
     full_cron: str | None = None
     diff_cron: str | None = None
     rebuild_cron: str | None = None
+    # default rpo_minutes for the tier's groups (#253); a group or profile value wins. Set it
+    # to the diff interval plus the longest backup plus some slack, or `status` pages falsely.
+    rpo_minutes: int | None = None
     # Maintenance (#104). On a tier that takes backups (has full_cron) an unset verify_cron or
     # prune_cron gets a default; a rebuild-only tier gets none unless set. aggregate_cron has no
     # default (#219): aggregating collapses the chain in place, which removes point-in-time
@@ -520,6 +523,15 @@ class Policy(BaseModel):
     @classmethod
     def _apply_profiles(cls, data):
         return resolve_profiles(data)[0] if isinstance(data, dict) else data
+
+    @model_validator(mode="after")
+    def _tier_rpo(self) -> "Policy":
+        """A group without its own `rpo_minutes` (or a profile's) takes its tier's (#253)."""
+        for g in self.db_groups:
+            t = self.tiers.get(g.tier)
+            if t is not None and t.rpo_minutes and "rpo_minutes" not in g.model_fields_set:
+                g.rpo_minutes = t.rpo_minutes
+        return self
 
     @model_validator(mode="after")
     def _naming_resolves(self) -> "Policy":
@@ -705,8 +717,18 @@ class Policy(BaseModel):
         return self.group(group_id).cluster or "default"
 
     def cluster_names(self) -> list[str]:
+        """Every cluster a command may name, `default` (the environment's) included."""
         return sorted({"default", *self.clusters, *(g.cluster for g in self.db_groups
                                                      if g.cluster)})
+
+    def dbms_cluster_names(self) -> list[str]:
+        """The clusters that get DBMS jobs (metadata export, `system` backup, the DBMS sweep):
+        `default` only when a group uses it, the policy defines it, or there are no named
+        clusters (#251). A policy of named clusters only gets no jobs against localhost."""
+        named = {*self.clusters, *(g.cluster for g in self.db_groups if g.cluster)}
+        uses_default = (not named or "default" in self.clusters
+                        or any(not g.cluster for g in self.db_groups))
+        return sorted(named | ({"default"} if uses_default else set()))
 
     def tenants(self) -> list[str]:
         return sorted({g.tenant for g in self.db_groups if g.tenant})

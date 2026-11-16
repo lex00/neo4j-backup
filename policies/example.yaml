@@ -1,0 +1,48 @@
+# A starting point for your own policy. Copy it, replace the groups, and check it with
+#   neo4j-backup policy validate <file>
+# Every field is described in POLICY.md; anything not shown has a working default.
+
+# Named Neo4j clusters. Without this block there is one cluster, `default`, from the environment
+# (NEO4J_BOLT_URI, NEO4J_BACKUP_SOURCE, NEO4J_PASSWORD). Delete it if you have one cluster.
+clusters:
+  prod-eu:
+    bolt_uri: neo4j://neo4j-eu.internal:7687
+    password_ref: env:NEO4J_PASSWORD_EU          # a secret reference (POLICY.md, Storage)
+    backup_source: [neo4j-eu-2.internal:6362, neo4j-eu-3.internal:6362]   # secondaries
+    topology: { primaries: 1, secondaries: 2 }   # the shape a restore creates
+
+# Customer types: a group names one and sets only what differs.
+profiles:
+  app:       { tier: gold, retention_days: 14 }
+  app-small: { tier: silver, retention_days: 30 }
+
+db_groups:
+  # One group per customer, or per set of databases that must be restored to the same instant.
+  - id: orders
+    profile: app
+    cluster: prod-eu
+    tenant: shop-team
+    aliases: [orders, orders-audit]   # the names applications connect to
+  - id: catalog
+    profile: app-small
+    cluster: prod-eu
+    tenant: catalog-team
+    aliases: [catalog]
+
+# How often to back up, check and prune. The gap between diffs is how much a restore can lose;
+# rpo_minutes is when `status` calls a database stale (the diff gap plus the longest backup
+# plus some slack). Crons run in UTC in Dagster, in Airflow's default timezone in Airflow.
+tiers:
+  gold:
+    full_cron: "0 2 * * *"         # daily full at 02:00
+    diff_cron: "0 * * * *"         # hourly differential
+    rpo_minutes: 90
+    cleanup_cron: "0 4 * * *"      # drop superseded databases (keeps 1, after 7 days)
+  silver:
+    full_cron: "0 3 * * 0"         # weekly full, Sundays 03:00
+    diff_cron: "0 */6 * * *"       # every 6 hours
+    rpo_minutes: 420
+    cleanup_cron: "0 4 * * *"
+
+# Dagster: start the schedules and the sensor when the code location loads (default: stopped).
+# schedules: running

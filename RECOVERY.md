@@ -22,12 +22,12 @@ database, with the new name in its place. Afterwards take a full backup of the r
 ## The three recovery modes
 
 All three are the same `CREATE DATABASE … seedURI` command; they differ only in which
-artifact you point at and whether you add `seedRestoreUntil`. (No `seedConfig` — rejected;
-region + endpoint come from the server's `AWS_REGION` / `AWS_ENDPOINT_URL_S3` env.)
+artifact you point at and whether you add `seedRestoreUntil`. Region and endpoint come from the
+server's `AWS_REGION` and `AWS_ENDPOINT_URL_S3` environment; there is no `seedConfig` option.
 
 Cypher version. `existingData: 'use'` is required in Cypher 5 and deprecated in
-Cypher 25, so the orchestrator couples it to the pinned language: `SEED_CYPHER_VERSION`
-unset (Cypher-25 default) omits it — the examples below; `SEED_CYPHER_VERSION=5` emits
+Cypher 25, so the tool ties it to the language version: with `SEED_CYPHER_VERSION` unset
+(Cypher 25) it is left out, as in the examples below; `SEED_CYPHER_VERSION=5` emits
 `CYPHER 5 CREATE DATABASE … OPTIONS { seedURI: …, existingData: 'use' }`. Set it to match
 your cluster's Cypher version.
 
@@ -43,8 +43,8 @@ CREATE DATABASE `orders-20260629t120000`
 
 ### 2. Restore from a differential chain (HEAD)
 
-The latest artifact is a differential. Point `seedURI` at it; CloudSeedProvider resolves
-the chain (full + all diffs up to it) and recovers to the newest backed-up state.
+The latest artifact is a differential. Point `seedURI` at it; Neo4j finds the full and every
+differential up to it in the same folder and recovers to the newest backed-up state.
 
 ```cypher
 CREATE DATABASE `orders-20260629t120500`
@@ -54,7 +54,7 @@ CREATE DATABASE `orders-20260629t120500`
 ### 3. Point-in-time recovery (PITR)
 
 Add `seedRestoreUntil` to replay the chain up to a timestamp (or transaction id). Requires
-a differential chain — a lone full errors with *"can only be fully restored."*
+a differential chain; a lone full fails with *"can only be fully restored."*
 
 ```cypher
 CREATE DATABASE `orders-20260629t120900`
@@ -62,7 +62,7 @@ CREATE DATABASE `orders-20260629t120900`
             seedRestoreUntil: datetime('2026-06-29T11:00:00Z') } WAIT
 ```
 
-After any of these: bring the new database online, optionally verify it, then cut over —
+After any of these: bring the new database online, optionally verify it, then cut over:
 `ALTER ALIAS \`orders\` SET DATABASE TARGET \`orders-<ts>\``. Roll back by repointing the
 alias to the previous physical; drop the old one after a soak.
 
@@ -77,34 +77,32 @@ concern (repoint back to the old physical). Default `CUTOVER_STRATEGY=alias-swap
 Teams that don't use aliases set a group's `restore_mode: by-name` (POLICY.md) and list
 `databases:` (names, not aliases). Restore then targets each database by its own name:
 
-- Create-if-absent (default, non-destructive) — for DR / a fresh cluster / a dropped DB:
+- Create-if-absent (the default, changes nothing that exists), for a fresh cluster or a dropped database:
   `CREATE DATABASE <name> OPTIONS { seedURI: … }`. Nothing is dropped.
-- Replace (destructive, opt-in) — an existing database is replaced with `DROP DATABASE
+- Replace (opt-in, destroys the current database): an existing database is replaced with `DROP DATABASE
   <name>` then `CREATE … seedURI`. Requires `replace=true` on the restore (Dagster op config /
   Airflow `replace` param). There is a window where the database is gone; the Dagster op
   pre-validates every artifact + target across the group before any drop, and you should run
   `verify` first for restorability assurance.
 
-There is no non-destructive in-place restore for a named database — Neo4j has no
+There is no in-place restore that keeps a named database; Neo4j has no
 `RENAME DATABASE` ([Ops Manual](https://neo4j.com/docs/operations-manual/current/database-administration/standard-databases/alter-databases/)),
 so swapping a freshly-restored copy into an existing name isn't possible without an alias.
 If you need non-destructive restore, use `alias-swap` (that indirection is the whole point).
 
 ## Seed from a local file (`file://`)
 
-`seedURI` also accepts a local/mounted artifact — `CREATE DATABASE foo OPTIONS { seedURI:
-'file:/seed/foo.backup' }` (FileSeedProvider; enable it via
-`dbms.databases.seed_from_uri_providers`, absolute path). The `.backup` is byte-identical
-regardless of which cloud produced it, so this is both a DR path (restore from a mounted backup)
-and how the pipeline validates restore cloud-agnostically: download the artifact from any
-backend (S3/Azure/GCS) to the node's filesystem, then seed via `file://` — no cloud fetch, no
-per-cloud emulator needed (`just file-restore-smoke`). PITR (`seedRestoreUntil`) works on
-`file://` too.
+`seedURI` also accepts a file on the server: `CREATE DATABASE foo OPTIONS { seedURI:
+'file:/seed/foo.backup' }`, with an absolute path, once `FileSeedProvider` is in the server's
+`dbms.databases.seed_from_uri_providers`. A `.backup` file is the same whichever cloud it came
+from, so this restores from a mounted copy of a backup, and the tests use it to check restores
+from any store: download the file to the server, then seed from `file://`
+(`just file-restore-smoke`). `seedRestoreUntil` works on `file://` too.
 
 Cluster topology. When the group declares a `topology:` (POLICY.md), the orchestrator
-adds it to the seed so the restored physical comes up with the intended redundancy rather
-than the DBMS default — otherwise a restore after losing servers can silently reduce your
-primary count. The three commands above gain a clause before `OPTIONS`:
+adds it to the seed so the restored database comes up with the intended number of copies
+rather than the DBMS default, which after losing servers can be fewer primaries than you had.
+The three commands above gain a clause before `OPTIONS`:
 
 ```cypher
 CREATE DATABASE `orders-20260629t120000`
@@ -112,8 +110,8 @@ CREATE DATABASE `orders-20260629t120000`
   OPTIONS { seedURI: 's3://<bucket>/<group>/<slug>/<physical>/<full>.backup' } WAIT
 ```
 
-Omit `topology:` on standalone/single-instance — the clause is illegal there. Changing the
-value and restoring reshapes the store on cutover (e.g. `primaries: 3 → 5`).
+Leave `topology:` out on a single server, where the clause is an error. Changing the value
+and restoring gives the restored database the new shape (for example 3 primaries to 5).
 
 ## Recovery modes at a glance
 
@@ -145,64 +143,69 @@ just restore demo "2026-06-29T11:00:00Z"   # to a point in time
 just demo-pitr                             # builds a full, change, diff chain and restores into it
 ```
 
-## The metadata layer (users, roles, privileges, aliases)
+## Users, roles, privileges and aliases
 
-The three modes above recover database data. They do not recover the DBMS-wide metadata
-that lives in the `system` database — users, roles, privileges, and alias definitions —
-because seed-from-URI cannot target `system` (you cannot `CREATE DATABASE system`).
+The restores above bring back database data. Users, roles, privileges and alias definitions live
+in the `system` database, which a seed can't create, so they are backed up separately, in one of
+two ways. Both run on the policy's `dbms:` crons.
 
-There are two ways to recover it, with different trade-offs.
-
-### Option B — logical export (agentless, default)
-
-Capture the metadata as replayable Cypher and replay it against `system` over Bolt on a
-rebuilt cluster — no node access, the same agentless surface as data restore.
-
-- Backup — `metadata_export` (Dagster) / `neo4j_dbms_metadata_default` (Airflow) writes one
-  `_dbms/metadata-<ts>.cypher` artifact in the cluster's store (with `S3_SSE`, written with that header).
-- Restore — `metadata_restore` / `neo4j_metadata_restore` replays the latest (or a given
-  `key`): `CREATE ROLE/USER … IF NOT EXISTS`, `GRANT ROLE …`, the `SHOW PRIVILEGES AS
-  COMMANDS` statements, and `CREATE ALIAS … IF NOT EXISTS` — idempotent and additive.
-
-Limits (verified, by design): native passwords are not exported — Cypher redacts them
-(`SHOW USERS` → `*`) and raw system reads are rejected, so users come back with a random
-placeholder + `CHANGE REQUIRED` (reset them post-restore). SSO/LDAP users carry no local
-secret, so external-auth teams lose nothing here. Remote-alias driver credentials aren't
-returned either (`<<SUPPLY>>` placeholder, skipped on replay). Alias→physical targets are a
-point-in-time snapshot — in a full DR the data restore repoints user-database aliases itself.
-
-### Option A — binary `system` backup (exact, offline)
-
-For native-auth teams that need exact password/role/privilege recovery. Back up the
-binary `system` store and restore it offline.
-
-- Backup — `system_backup` (Dagster) / `neo4j_dbms_system_default` (Airflow) runs
-  `neo4j-admin database backup system` (FULL) to `_dbms/system/` (SSE-KMS, retained).
-- Restore — offline + node-local (path B): `system` cannot be seed-from-URI'd or
-  `STOP`ped, so the DBMS must be down. `bootstrap/restore_system.sh` (`just
-  restore-system`) reads the latest artifact straight from object storage
-  (`neo4j-admin database restore --from-path=s3://…`), restores with the DBMS offline,
-  restarts, and applies the `restore_metadata.cypher` neo4j-admin emits (database-access
-  privileges). On a cluster this is per-member / designated-seeder + reseed — adapt it.
-
-### Which to use
-
-| | Option B (logical) | Option A (binary `system`) |
+| | Metadata export (default) | Binary `system` backup |
 |---|---|---|
-| Surface | agentless, pure Cypher over Bolt | offline, node-local (DBMS down) |
-| Native passwords | reset (placeholder + CHANGE REQUIRED) | exact |
-| External auth (SSO/LDAP) | fully sufficient | unnecessary |
-| Runs as | a DAG / asset | a runbook, not a DAG |
+| What it is | the metadata as Cypher statements | `neo4j-admin` backup of the `system` database |
+| Restored with | Cypher over Bolt, cluster running | `neo4j-admin` on the servers, Neo4j stopped |
+| Native passwords | not kept: users get a placeholder and must change it | kept exactly |
+| SSO / LDAP users | fully restored (no local secret) | not needed |
+| Runs as | a job or DAG | a runbook (`bootstrap/restore_system.sh`) |
 
-Many teams run both: B for routine agentless metadata snapshots, A as the exact-restore
-escalation. Validated: `smoke_metadata` round-trips B through both adapters;
-`bootstrap/restore_system.sh` round-trips A end to end — a dropped native user returns and
-its exact password authenticates.
+If your users sign in with SSO or LDAP, the export is enough. If they have native passwords you
+must not reset, also take the binary backup.
 
-Full-cluster restore order: re-provision nodes → restore the metadata layer (replay B,
-or offline-restore A) → restore each user database (seed-from-URI, modes 1–3).
-With the replacement in the policy's `clusters:`, `restore --from-cluster <lost> --to-cluster
-<new>` does the replay of B and every group's restore in one plan (see
+### Metadata export
+
+Dagster's `metadata_export` job or Airflow's `neo4j_dbms_metadata_<cluster>` DAG writes
+`_dbms/metadata-<ts>.cypher` in the cluster's store. `metadata_restore` (Dagster),
+`neo4j_metadata_restore` (Airflow) or `neo4j-backup metadata restore [--key <k>]` replays the
+newest one (or the one named): `CREATE ROLE`/`CREATE USER … IF NOT EXISTS`, the role grants, the
+statements from `SHOW PRIVILEGES AS COMMANDS`, and `CREATE ALIAS … IF NOT EXISTS`. Replaying
+only adds what is missing, so it is safe to run twice.
+
+What it can't bring back, because Neo4j doesn't return it:
+
+- Native passwords. Users come back with a random password and `CHANGE REQUIRED`; reset them.
+- Remote alias credentials. Those aliases are written with a `<<SUPPLY>>` placeholder and
+  skipped on replay; recreate them.
+- The database each alias points at is as of the export. After a full recovery the data
+  restores move the user-database aliases themselves.
+
+### Binary `system` backup
+
+Dagster's `system_backup` job or Airflow's `neo4j_dbms_system_<cluster>` DAG runs
+`neo4j-admin database backup system` (always a full) into `_dbms/system/`, keeping the newest
+`dbms.keep_system` (default 14).
+
+Restoring it needs Neo4j stopped, because `system` can't be seeded or stopped on its own:
+
+1. Stop Neo4j on the server.
+2. Restore from the bucket: `neo4j-admin database restore system --from-path=s3://<bucket>/<prefix>/_dbms/system/<newest>.backup --overwrite-destination=true`.
+3. Start Neo4j.
+4. Run the `restore_metadata.cypher` that the restore wrote (the database access privileges)
+   against `system`.
+
+`bootstrap/restore_system.sh` (`just restore-system`) does these steps on the demo's single
+server. On a cluster, restore one server this way and let the others copy from it (or restore
+each); adapt the script to your hosts.
+
+Both are tested: `smoke_metadata` round-trips the export through both orchestrators, and
+`bootstrap/restore_system.sh` brings back a dropped native user whose old password then works.
+
+### Order for a full recovery
+
+1. Rebuild the cluster.
+2. Restore users, roles and privileges (replay the export, or restore the binary backup).
+3. Restore each group's databases.
+
+With the new cluster in the policy's `clusters:`, `neo4j-backup restore --from-cluster <lost>
+--to-cluster <new>` does steps 2 and 3 in one plan (see
 [OPERATOR.md](OPERATOR.md#recover-after-losing-a-cluster-or-move-a-group)).
 
 ## Caveats
@@ -211,5 +214,5 @@ With the replacement in the policy's `clusters:`, `restore --from-cluster <lost>
   it, so the tier's `diff_cron` decides how fine-grained restores can be.
 - Aggregation removes point-in-time restore inside the chain it collapses. `aggregate_cron`
   has no default for that reason.
-- Non-cloud seeds (http/ftp) or whole-store operations fall back to node-local
-  `neo4j-admin database restore --restore-until` (DESIGN §3, path B).
+- Seeds over http or ftp, and restores of a whole server, use `neo4j-admin database restore
+  --restore-until` on the server itself instead of a seed.

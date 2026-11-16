@@ -42,15 +42,9 @@ Such teams:
 Not for Neo4j Community (no online backup), Neo4j Aura (managed, with its own snapshots), or anyone
 wanting a turnkey GUI product. This is tooling to adapt to your environment.
 
-### Front-ends: pick by what you already run
-
-| Front-end | Pick when |
-|---|---|
-| [Dagster](orchestrator/README.md) / [Airflow](airflow/README.md) | you run an orchestrator and want concurrency lanes, the policy's groups as targets, retries with backoff, and run history |
-| [`neo4j-backup` CLI](OPERATOR.md#commands) + [CI](CI.md) / cron | a small fleet with no orchestrator; you accept CI's limits (scratch space, best-effort cron, no orchestration) for a much lighter setup |
-| [MCP server](MCP.md) | an operator drives status and restores through an agent; read-only by default, changes guarded; for exceptions, not schedules |
-
-The policy, the bucket layout and every setting are the same across them.
+Which front-end to use (Dagster, Airflow, the CLI from CI or cron, or the MCP server) is in
+[Getting started](GETTING-STARTED.md#choose-how-it-runs); they share the policy, the bucket
+layout and every setting.
 
 ## Without the tool
 
@@ -73,6 +67,7 @@ shows them, so you can restore without this package.
 | [MCP.md](MCP.md) | The operator MCP server. |
 | [AGENTS.md](AGENTS.md) | Driving the CLI from a coding or ops agent. |
 | [ENVIRONMENT.md](ENVIRONMENT.md) | Every environment variable, with its default. |
+| [GLOSSARY.md](GLOSSARY.md) | The terms these pages use, one sentence each. |
 | [orchestrator/](orchestrator/README.md) | The Dagster code location: what it defines and its configuration. |
 | [airflow/](airflow/README.md) | The Airflow DAGs, and deploying them in production. |
 | [DEPLOY.md](orchestrator/deploy/DEPLOY.md) | Deploying the Dagster code location in production. |
@@ -90,7 +85,7 @@ floci. What that covers, and what it doesn't:
 |---|---|---|
 | Neo4j topology | single server; a three-server cluster in Docker (backup from the cluster's backup ports, restore with `TOPOLOGY 1 PRIMARY 2 SECONDARIES`, the alias seen by every server); two independent servers for restore into another cluster | a production cluster across hosts or zones |
 | Object store | S3 API on floci; Azure on Azurite (store operations; Neo4j can't seed from an emulator); GCS against fakes | real AWS S3, Azure Blob and GCS; SSE-KMS with a real KMS key (checked on MinIO before 2026-11) |
-| Orchestrators | Dagster 1.13 in-process (`execute_in_process`, `materialize`); Airflow 3.2 with `dag.test` | a deployed Dagster instance or Airflow scheduler with real run launchers |
+| Orchestrators | Dagster 1.13 in-process (`execute_in_process`, `materialize`); Airflow 3.2 with `dag.test`; the deploy images build and load (Dagster `definitions validate`, Airflow DagBag); `helm template` of the Dagster values | a deployed Dagster instance or Airflow scheduler with real run launchers |
 | Runner | subprocess (in a container); `RUNNER_MODE=k8s` on k3d for both orchestrators (backups, an import build, an image build) | k8s on a managed cluster with IRSA or workload identity |
 | CLI and MCP | every command's smoke (`just cli-smoke`, `ops-smoke`, `move-smoke`, `load-smoke`, `mcp-smoke`, ...) | |
 

@@ -48,7 +48,8 @@ db_groups:
 
     tenant: acme-corp               # label for selecting a customer's groups (--tenant)
     storage: finance                # the named store for this group's backups
-    rpo_minutes: 60                 # `status` reports a member stale when its newest backup is older
+    rpo_minutes: 90                 # `status` reports a member stale when its newest backup is older
+                                    # (default: the tier's rpo_minutes, else 60)
     rto_minutes: 120                # how long a restore waits for a seed before failing
     encryption:                     # [not read] use a named store's sse_kms_key_id instead
       mode: sse-kms
@@ -87,13 +88,16 @@ db_groups:
 # ----- named schedules referenced by db_group.tier -----
 tiers:
   gold:
-    full_cron: "0 2 * * *"          #   daily full at 02:00
+    full_cron: "0 2 * * *"          #   daily full at 02:00 (UTC in Dagster)
     diff_cron: "0 * * * *"          #   hourly differential
+    rpo_minutes: 90                 #   the default for the tier's groups
   bronze:
     full_cron: "0 4 * * 0"          #   weekly full (Sundays 04:00)
     diff_cron: "0 0 * * *"          #   daily differential
+    rpo_minutes: 1500
   rebuild_nightly:                  # a tier for load-only groups may have only rebuild_cron
     rebuild_cron: "0 1 * * *"       # when rebuilds run; no backups, so no point-in-time restore
+    rpo_minutes: 1500
 ```
 
 The smallest valid group needs only `id`, `aliases` and `tier`.
@@ -265,6 +269,9 @@ readable folders; pinned ones keep their history. The shell scripts use the lega
 
 ## Field reference
 
+The Status column: `used` fields change what the tool does; `not read` fields are accepted so
+older policies still load, and change nothing.
+
 **`db_groups[]`**
 
 | Field | Type | Required / default | Status | Meaning |
@@ -280,12 +287,12 @@ readable folders; pinned ones keep their history. The shell scripts use the lega
 | `s3_prefix` | string | `null` | deprecated | never read; logs a warning. Use `storage` |
 | `tenant` | string | `null` | used | a label for selecting a customer's groups: `backup`, `verify`, `aggregate` and `targets` take `--tenant <t>` instead of a group, and MCP read and backup tools take `tenant`. **It is a label, not an access control**: the deployment can reach every database in its clusters whatever the tenant. Settable in a profile. `restore` stays per group |
 | `owner` | string | `null` | deprecated | the old name for `tenant`; still read as the tenant, with a warning |
-| `overrides[alias].prefix`, `overrides[alias].physical_base` | string | none | wired | a member's storage folder, used as is, and the base of its database names; see [Database names](#database-names) |
-| `naming` | map | `null` | wired | `physical_template`, `ts_format` for new database names, `slug_style: legacy \| readable`; see [Database names](#database-names). Also settable at the top level and in a profile |
-| `state` | `active` \| `retired` | `active` | wired | offboarding: a retired group has no schedules; its artifacts stay restorable until `retired_on` + `retire_after_days`, then prune deletes them |
-| `retired_on` | date | `null` | wired | required with `state: retired`: the day the retention period starts |
-| `retire_after_days` | int | `retention_days` | wired | how long a retired group's artifacts are kept |
-| `rpo_minutes` | int | `60` | wired | how old a member's newest backup or load may be before `status` (CLI) and `backup_status` (MCP) report it `stale`; policy load warns when the tier's `diff_cron` (or `rebuild_cron`, for a group not backed up by design) runs further apart. A profile can set it |
+| `overrides[alias].prefix`, `overrides[alias].physical_base` | string | none | used | a member's storage folder, used as is, and the base of its database names; see [Database names](#database-names) |
+| `naming` | map | `null` | used | `physical_template`, `ts_format` for new database names, `slug_style: legacy \| readable`; see [Database names](#database-names). Also settable at the top level and in a profile |
+| `state` | `active` \| `retired` | `active` | used | offboarding: a retired group has no schedules; its artifacts stay restorable until `retired_on` + `retire_after_days`, then prune deletes them |
+| `retired_on` | date | `null` | used | required with `state: retired`: the day the retention period starts |
+| `retire_after_days` | int | `retention_days` | used | how long a retired group's artifacts are kept |
+| `rpo_minutes` | int | the tier's `rpo_minutes`, else `60` | used | how old a member's newest backup or load may be before it is `stale` in `status` (CLI), `backup_status` (MCP) and the scheduled freshness check (Dagster `status_check`, Airflow `neo4j_status`), which fails its run; policy load warns when the tier's `diff_cron` (or `rebuild_cron`, for a group not backed up by design) runs further apart. A profile can set it |
 | `rto_minutes` | int | `120` | used | how long a restore or load waits for a new database to come online (`CREATE DATABASE … WAIT`) before failing, with no alias moved |
 | `encryption` | object | `{mode: sse-kms}` | not read | for a group's own key or bucket, use a named store (`storage:` with `sse_kms_key_id`) |
 | `topology` | object | `null` | used | cluster shape seeded on restore/import; omit for standalone |
@@ -355,6 +362,7 @@ instead of the DBMS default (see [RECOVERY.md](RECOVERY.md), DESIGN.md §3).
 | `aggregate_cron` | cron string | none | used | when `aggregate` runs (`<tier>_aggregate`, `neo4j_aggregate_<tier>`). Aggregating collapses each chain into one full in place: point-in-time restore between that full and the chain's last diff is gone afterwards, so set it only if you accept that (for example to shorten restore time on very long chains) |
 | `prune_cron` | cron string | `0 7 * * 0` on tiers with `full_cron` | used | when the tier's groups are pruned (`<tier>_prune`, `neo4j_prune_<tier>`) |
 | `cleanup_cron` | cron string | none | used | when superseded databases are dropped (`<tier>_cleanup`, `neo4j_cleanup_<tier>`) |
+| `rpo_minutes` | int | none | used | the default `rpo_minutes` of the tier's groups; a group's or profile's own value wins. Set it to the `diff_cron` interval plus your longest backup plus some slack |
 | `cleanup_keep` | int | `1` | used | databases kept before the current one (for `rollback`) |
 | `cleanup_older_than_days` | number | `7` | used | the soak period: databases younger than this are kept |
 
@@ -377,9 +385,27 @@ Dagster schedules and of the `reconcile_registry` sensor. Airflow DAGs follow Ai
 pause setting. A tier for load-only groups (read-only, or
 `protect_writes: false`) may have only `rebuild_cron`; it gets no backup schedules.
 
+Crons are read in UTC by Dagster's schedules and in Airflow's `default_timezone` (UTC unless
+you changed it) by the Airflow DAGs.
+
+## Choosing tiers, retention and rpo
+
+- The `diff_cron` interval is the most a restore can lose. Choose it per customer: hourly for
+  an application whose writes can't be redone, daily for data that can be reloaded.
+- `full_cron` sets how long a chain grows. A restore replays the full and every differential
+  after it, so weekly fulls with hourly diffs mean up to 168 diffs to replay. Daily fulls keep
+  restores quick; weekly fulls save storage.
+- `retention_days` is how far back a customer can restore. Prune keeps whole chains, so
+  storage is roughly `retention_days` plus one full interval of backups.
+- `rpo_minutes` is when the freshness check pages you. Set it on the tier to the diff interval
+  plus the longest backup plus some slack (gold, hourly diffs: 90; daily diffs: 1500). Too
+  small and it pages on every schedule; policy load warns when it is smaller than the diff
+  interval.
+- Start new customers on an existing tier; add a tier only for a schedule nobody has.
+
 ## What you usually set
 
-Per group: `id`, `aliases`, `tier` (or a `profile`), `retention_days`, `rpo_minutes`, and on a
-cluster `topology`. Per tier: `full_cron` and `diff_cron` (their gap is how much a restore can
-lose), and `cleanup_cron` once restores are routine. A group that is loaded rather than written
+Per group: `id`, `aliases`, `tier` (or a `profile`), `retention_days`, and on a cluster
+`topology`. Per tier: `full_cron`, `diff_cron` (their gap is how much a restore can lose),
+`rpo_minutes`, and `cleanup_cron` once restores are routine. A group that is loaded rather than written
 also needs `load:`. Everything else has a working default.

@@ -8,11 +8,11 @@ from datetime import datetime
 
 from airflow.sdk import dag, task
 
-from neo4j_backup_airflow import config
+from neo4j_backup_airflow import alerts, config
 from neo4j_backup_core.policy import load_policy
 
 
-@dag(
+@dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
     schedule=None,                       # manual trigger only (3.x: `schedule`, not `schedule_interval`)
     start_date=datetime(2025, 1, 1),
     catchup=False,                       # default in 3.x, set explicitly

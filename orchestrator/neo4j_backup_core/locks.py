@@ -1,10 +1,9 @@
-"""A per-group lock for Airflow (#108): a group's rebuild never runs at the same time as its own
-backups or another rebuild. Airflow pools can't express per-group exclusion, so the lock is an
-object, `_locks/<group>.lock`, created with the store's conditional write (atomic on S3, GCS and
-Azure). It expires after `ttl` seconds, so a crashed task doesn't hold it forever.
-
-Dagster uses its own run-queue limit on a `neo4j_group` tag instead. This is not the
-cross-front-end lock of the records layer (#100, not filed).
+"""A per-group lock, `_locks/<group>.lock` in the default store, created with the store's
+conditional write (atomic on S3, GCS and Azure). Every front-end takes it around a member's
+backup, verify, aggregate and the group's load: the CLI, the Airflow tasks and the Dagster ops,
+so their work on one group never overlaps whatever started it. It expires after `ttl` seconds
+(6 hours), so a crashed run doesn't hold it forever; a waiting run gives up after
+NEO4J_BACKUP_LOCK_WAIT seconds. To clear a lock left by a crash sooner, delete the object.
 """
 
 from __future__ import annotations

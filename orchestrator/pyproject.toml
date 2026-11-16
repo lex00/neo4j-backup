@@ -22,6 +22,8 @@ dev = ["pytest", "dagster-webserver", "pyarrow"]  # pyarrow: Parquet input for j
 # Only needed for RUNNER_MODE=k8s. Subprocess (EC2/VM) deployments don't need it — the
 # import is lazy, so the code location loads without dagster-k8s installed.
 k8s = ["dagster-k8s>=0.24"]
+# Dagster on Helm or any Postgres-backed instance: run pods load the instance's storage.
+postgres = ["dagster-postgres>=0.24"]
 # Cloud backends (#52) — install only the one you use; each SDK is lazy-imported.
 azure = ["azure-storage-blob>=12"]
 gcp = ["google-cloud-storage>=2"]

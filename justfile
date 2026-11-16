@@ -85,6 +85,15 @@ airflow-install:
 airflow-standalone:
     ./airflow/standalone.sh
 
+# Dagster UI on :3000 against the local stack (neo4j-admin runs in the runner container)
+dagster-dev:
+    cd orchestrator && \
+      NEO4J_BACKUP_POLICY={{justfile_directory()}}/policies/demo.yaml \
+      NEO4J_BOLT_URI=neo4j://localhost:7687 NEO4J_PASSWORD=$NEO4J_PASSWORD \
+      AWS_ENDPOINT_URL_S3=http://localhost:9000 \
+      RUNNER_EXEC_PREFIX='["docker","compose","--env-file","{{justfile_directory()}}/.env","-f","{{justfile_directory()}}/docker/compose.yaml","exec","-T","runner"]' \
+      .venv/bin/dagster dev -m neo4j_backup_dagster.definitions
+
 # CLI: full loop (targets/backup/verify/aggregate/restore/metadata/system/prune) via neo4j-backup
 cli-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_cli.py
@@ -121,6 +130,10 @@ cluster-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_cluster.py
 
 # Guards from the v0.6.0 audit (#216): fence in Dagster, store-id change, seed wait, driver reuse, status
+# #244: restore previews (Airflow, Dagster), a one-group Airflow backup, the CLI lock
+adoption-smoke:
+    airflow/.venv/bin/python airflow/smoke_adoption.py
+
 guards-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_guards.py
 

@@ -113,3 +113,43 @@ def test_targets_and_status_show_the_cluster(monkeypatch):
     monkeypatch.setattr(tools, "load_policy", lambda _p: p)
     assert tools.list_targets()["clusters"] == {"orders": "us-east", "shop": "eu",
                                                 "local": "default"}
+
+
+def test_dbms_jobs_only_for_clusters_in_use():
+    """#251: a policy of named clusters only gets no DBMS jobs for `default` (localhost)."""
+    from neo4j_backup_core import policy as P
+    tiers = {"gold": {"full_cron": "0 2 * * *", "diff_cron": "0 * * * *"}}
+    named = P.Policy.model_validate({
+        "clusters": {"a": {"bolt_uri": "neo4j://a:7687"}, "b": {"bolt_uri": "neo4j://b:7687"}},
+        "db_groups": [{"id": "g1", "tier": "gold", "cluster": "a", "aliases": ["x1"]},
+                      {"id": "g2", "tier": "gold", "cluster": "b", "aliases": ["x2"]}],
+        "tiers": tiers})
+    assert named.dbms_cluster_names() == ["a", "b"]
+    assert "default" in named.cluster_names()  # still a valid target for a move
+    mixed = P.Policy.model_validate({
+        "clusters": {"a": {"bolt_uri": "neo4j://a:7687"}},
+        "db_groups": [{"id": "g1", "tier": "gold", "cluster": "a", "aliases": ["x1"]},
+                      {"id": "g2", "tier": "gold", "aliases": ["x2"]}], "tiers": tiers})
+    assert mixed.dbms_cluster_names() == ["a", "default"]
+    plain = P.Policy.model_validate({"db_groups": [{"id": "g", "tier": "gold", "aliases": ["x"]}],
+                                     "tiers": tiers})
+    assert plain.dbms_cluster_names() == ["default"]
+
+
+def test_dagster_names_from_hyphenated_tiers_and_clusters(tmp_path):
+    """#244: `prod-eu` (a valid cluster name) must not make the code location fail to load."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[2]
+    f = tmp_path / "p.yaml"
+    f.write_text((repo / "policies" / "example.yaml").read_text().replace("gold", "gold-eu"))
+    out = subprocess.run(
+        [sys.executable, "-c", "import neo4j_backup_dagster.definitions as D; "
+                               "print(sorted(s.name for s in D.defs.schedules))"],
+        env={**os.environ, "NEO4J_BACKUP_POLICY": str(f), "NEO4J_PASSWORD": "x"},
+        capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr[-2000:]
+    for name in ("prod_eu_dbms_metadata", "gold_eu_full", "gold_eu_cleanup"):
+        assert f"'{name}'" in out.stdout, out.stdout

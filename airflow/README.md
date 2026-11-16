@@ -14,7 +14,7 @@ DAG file is parsed.
 
 | DAG | Schedule | What it does |
 |---|---|---|
-| `neo4j_backup_<tier>_full`, `neo4j_backup_<tier>_diff` | the tier's `full_cron`, `diff_cron` | Back up every member of the tier. The diff DAG takes a full of members that need one. A skipped backup (no full to build on) shows as a skipped task. |
+| `neo4j_backup_<tier>_full`, `neo4j_backup_<tier>_diff` | the tier's `full_cron`, `diff_cron` | Back up every member of the tier, or one group with Param `group_id`. The diff DAG takes a full instead for members with no full to build on yet (just restored or new). |
 | `neo4j_verify_<tier>` | `verify_cron` (default daily 06:00) | Copy each member's newest chain aside in the bucket, aggregate the copy, `neo4j-admin database check`, delete the copy. |
 | `neo4j_aggregate_<tier>` | `aggregate_cron` (no default) | Collapse each chain into one full, in place; removes point-in-time restore inside the chain. |
 | `neo4j_prune_<tier>` | `prune_cron` (default Sundays 07:00) | Delete backups past `retention_days`, whole chains only. |
@@ -31,7 +31,9 @@ DAG file is parsed.
 
 A tier that has no groups still gets its DAGs. Members of a named cluster run in the pools
 `neo4j_<cluster>_full` / `neo4j_<cluster>_diff` (the default cluster: `neo4j_full` /
-`neo4j_diff`), and the rebuild DAGs use the cluster's full pool. The manual restore and load
+`neo4j_diff`); verifies, aggregates and rebuilds use the cluster's full pool, since each needs
+scratch the size of a full. The DBMS DAGs exist for each cluster a group uses (`default` only
+when a group uses it or the policy has no `clusters:`). The manual restore and load
 DAGs always use `neo4j_full` for their baseline and load tasks: the group is a run parameter
 and Airflow fixes a task's pool when it parses the DAG.
 
@@ -40,6 +42,7 @@ and Airflow fixes a task's pool when it parses the DAG.
 | Param | Default | |
 |---|---|---|
 | `group_id` | required | the group |
+| `dry_run` | `false` | log the plan (restore point, seeds, privileges to copy, anything dropped) and stop; nothing changes |
 | `restore_until` | none | ISO-8601 time (UTC if no offset); without it the group goes back to the newest instant every member covers |
 | `members` | `[]` | only these members |
 | `check` | `false` | run the group's `load.checks` on the new databases before the swap |
@@ -50,33 +53,46 @@ and Airflow fixes a task's pool when it parses the DAG.
 | `baseline` | `true` | take a full backup of each new database afterwards |
 | `ticket`, `reason` | none | recorded in the log and the result |
 
-Triggering it applies the restore: there's no preview in Airflow. Preview with the CLI
-(`neo4j-backup restore <group> --dry-run`, `neo4j-backup restore-points <group>`; see below).
+Trigger it with `dry_run: true` first and read the `plan` task's log; then trigger it again
+without. The Param is `restore_until` here and `until` on `neo4j_restore_to_cluster` (and
+`--until` in the CLI); they take the same values.
 
 ## Deploying in production
 
-### Install into your Airflow image
+### The deploy kit
 
-The Python package (`neo4j-backup-dagster`) lists Dagster as a dependency; install it without
-dependencies and add the core's own:
+[`airflow/deploy/`](deploy/) has what a KubernetesExecutor deployment (the official Helm chart)
+needs:
 
-```bash
-pip install --no-deps \
-  "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0.6.0#subdirectory=orchestrator"
-pip install "neo4j>=5" "boto3>=1.34" "pydantic>=2" "pyyaml>=6" \
-  --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.2.2/constraints-3.12.txt"
-# providers: cncf.kubernetes for RUNNER_MODE=k8s; azure-storage-blob / google-cloud-storage
-# for CLOUD=azure / gcp
-```
+- [`Dockerfile`](deploy/Dockerfile): your Airflow image plus the package and the DAGs. Build it
+  with your Airflow and Python versions (the constraints follow them). Target `k8s` for
+  `RUNNER_MODE=k8s`; target `subprocess` adds the JDK and `neo4j-admin` from the Neo4j image.
 
-Copy `airflow/dags/*.py` into the deployment's DAGs folder (they import only
-`neo4j_backup_airflow` and `neo4j_backup_core` from the package).
+  ```bash
+  docker build -f airflow/deploy/Dockerfile --target k8s \
+    --build-arg AIRFLOW_VERSION=3.2.2 --build-arg PYTHON_VERSION=3.12 \
+    -t <registry>/airflow-neo4j-backup:0.7.0 .
+  ```
+
+  For CLOUD=azure or gcp add `azure-storage-blob` and `azure-identity`, or
+  `google-cloud-storage`, to the second `pip install`.
+- [`pod-template.yaml`](deploy/pod-template.yaml): the task pods' environment, with the
+  secrets as `envFrom` and the `kubectl create secret` commands. Every task pod parses its DAG
+  file, so it needs the same environment as the scheduler and DAG processor.
+- [`rbac.yaml`](deploy/rbac.yaml): the Role and RoleBinding the task pods need to start
+  `neo4j-admin` pods in `RUNNER_MODE=k8s`.
+
+On another executor, install the same way as the Dockerfile and copy `airflow/dags/*.py` into
+the DAGs folder (they import only `neo4j_backup_airflow` and `neo4j_backup_core`).
 
 ### Environment and policy
 
 Everything is environment variables ([ENVIRONMENT.md](../ENVIRONMENT.md)); Airflow
 Connections and Variables aren't used. Set them on the scheduler, the DAG processor and every
-worker. The DAG processor builds the DAGs from the policy, so it must read
+worker or task pod (with the Helm chart: `env` and `extraEnvFrom` for the scheduler and DAG
+processor, the pod template for task pods). With several clusters, each cluster's password goes
+in its own variable named by `password_ref: env:NEO4J_PASSWORD_<CLUSTER>`; `NEO4J_PASSWORD` is
+used for clusters without one. The DAG processor builds the DAGs from the policy, so it must read
 `NEO4J_BACKUP_POLICY`: use an `s3://` path (the DAG processor then needs read access to it) or
 a file mounted at the same path everywhere. Always set it: the default `policies/demo.yaml` is
 relative to the process's working directory. A policy that doesn't load makes every
@@ -90,9 +106,9 @@ airflow pools set neo4j_diff 6 "differential backups"
 # per named cluster: neo4j_<cluster>_full and neo4j_<cluster>_diff
 ```
 
-Each DAG run also takes a per-group lock in the bucket (`_locks/<group>.lock`), so a member's
-backup, verify, aggregate and its group's rebuild never overlap; a task waits up to
-`NEO4J_BACKUP_LOCK_WAIT` seconds for it.
+Each task also takes a per-group lock in the bucket (`_locks/<group>.lock`, shared with the
+CLI and Dagster), so a member's backup, verify, aggregate and its group's rebuild never overlap;
+a task waits up to `NEO4J_BACKUP_LOCK_WAIT` seconds for it.
 
 ### Running neo4j-admin
 
@@ -104,33 +120,58 @@ backup, verify, aggregate and its group's rebuild never overlap; a task waits up
   inside the task). Set `RUNNER_IMAGE` (the Neo4j Enterprise image), `RUNNER_NAMESPACE`
   (default `default`), and the sizes: `RUNNER_SCRATCH_STORAGE` (default `6Ti` per pod),
   `RUNNER_MEMORY_LIMIT` (default `4Gi`), `RUNNER_CPU_REQUEST`, `RUNNER_MEMORY_REQUEST`,
-  `RUNNER_TOLERATIONS`, `RUNNER_NODE_SELECTOR`. The worker's service account needs to create,
-  watch and delete pods, read pod logs and create PVCs in that namespace (a Role with `pods`,
-  `pods/log`, `pods/exec` and `persistentvolumeclaims`, bound to the worker's service account).
+  `RUNNER_TOLERATIONS`, `RUNNER_NODE_SELECTOR`. The worker's service account needs the Role in
+  [`deploy/rbac.yaml`](deploy/rbac.yaml) in that namespace.
   The pod image needs `sh`, `mkdir`, `printf` and `base64` (the Neo4j image has them). Give
   the pods cloud credentials through IRSA or workload identity (`RUNNER_SERVICE_ACCOUNT`), or
   map secrets with `RUNNER_SECRET_ENV`; credentials are never written into a pod spec as plain
   text. `BACKUP_UPLOAD=pipeline` is refused in this mode.
 
-Restores, aliases and privileges are Cypher over Bolt from the worker.
+Restores, aliases and privileges are Cypher over Bolt from the worker. Which mode to choose,
+and what each component needs: [Choosing a runner mode](../ENVIRONMENT.md#choosing-a-runner-mode)
+and [Permissions](../ENVIRONMENT.md#permissions).
 
 ### Turn it on
 
 1. Check the deployment: trigger `neo4j_backup_scaffold`; it prints the policy's targets.
-2. Unpause `neo4j_backup_<tier>_full` for one tier and trigger it; then `neo4j_verify_<tier>`.
-3. Unpause the remaining scheduled DAGs you use, and `neo4j_status`. Set an
-   `on_failure_callback` or email on failures (for example in a cluster policy), so a failed
-   backup and a stale target reach someone.
-4. Unpause the manual DAGs too (`neo4j_restore`, `neo4j_rollback`, `neo4j_load`, ...): a
+2. Set `NEO4J_BACKUP_ALERT_WEBHOOK`. Every DAG here has a failure callback that posts a failed
+   task to it (a backup, `neo4j_status` finding a stale database, a restore). `neo4j_status`
+   runs every 15 minutes, so a database that stays stale alerts every 15 minutes until fixed.
+   To use Airflow's own notifiers instead, attach them to the tasks of the `neo4j-backup`-tagged
+   DAGs with a task policy in `airflow_local_settings.py` (it replaces the webhook callback):
+
+   ```python
+   from airflow.providers.slack.notifications.slack import send_slack_notification
+
+   def task_policy(task):
+       if "neo4j-backup" in (task.dag.tags if task.dag else []):
+           task.on_failure_callback = send_slack_notification(
+               slack_conn_id="slack", text="{{ dag.dag_id }}.{{ ti.task_id }} failed")
+   ```
+3. Try one group: trigger `neo4j_backup_<tier>_full` with `{"group_id": "<group>"}`, then
+   `neo4j_verify_<tier>`, then `neo4j_restore` with `dry_run` (see
+   [Try a test group](../OPERATOR.md#try-a-test-group)).
+4. Unpause the scheduled DAGs you use and `neo4j_status`.
+5. Unpause the manual DAGs too (`neo4j_restore`, `neo4j_rollback`, `neo4j_load`, ...): a
    triggered run of a paused DAG waits until it's unpaused.
+6. Add the independent check from [Alerts](../OPERATOR.md#alerts), which alerts when Airflow
+   itself is down.
 
-### The operator CLI host
+### The CLI on Kubernetes
 
-Previews and read-only checks are CLI commands: `restore --dry-run`, `restore-points`,
-`status`, `targets`, and backing up a single group (the Airflow backup DAGs run per tier). Run
-them from a host or pod with the package, the same environment, and for `backup`/`verify`,
-`neo4j-admin` and scratch (the worker image works: `kubectl exec` into a worker, or run a pod
-from it). See [OPERATOR.md](../OPERATOR.md).
+`restore-points`, `status`, `targets` and `policy show` have no DAG; run them with the CLI,
+which is in the worker image. Under KubernetesExecutor there is no long-lived worker, so start
+a pod from the image with the task pods' environment:
+
+```bash
+kubectl -n airflow run neo4j-backup-ops --rm -it --image=<registry>/airflow-neo4j-backup:0.7.0 \
+  --overrides='{"spec":{"serviceAccountName":"airflow-worker","containers":[{"name":"neo4j-backup-ops","image":"<registry>/airflow-neo4j-backup:0.7.0","stdin":true,"tty":true,"command":["bash"],"envFrom":[{"secretRef":{"name":"neo4j-backup-env"}}],"env":[{"name":"NEO4J_BACKUP_POLICY","value":"s3://ops-config/neo4j-backup/policy.yaml"},{"name":"AWS_REGION","value":"eu-west-1"}]}]}}'
+neo4j-backup --json restore-points shop
+```
+
+Commands that run `neo4j-admin` (`backup`, `verify`, `aggregate`, `system-backup`, `export`)
+need the `subprocess` image target or `RUNNER_MODE=k8s` with its variables; the others only
+need Bolt and the bucket. See [OPERATOR.md](../OPERATOR.md).
 
 ## Run it locally
 

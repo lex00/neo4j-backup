@@ -60,3 +60,24 @@ def test_dagster_ops_take_the_group_lock(monkeypatch):
     locks.release(s, "demo", held)
     with D._group_lock(s, "demo", "backup acme-orders"):
         pass
+
+
+def test_restore_dry_run_logs_the_plan_and_changes_nothing(monkeypatch):
+    """#249: Dagster's restore_group takes dry_run, like the CLI."""
+    from neo4j_backup_core import ops
+    from neo4j_backup_dagster.resources import Neo4jResource, ObjectStoreResource, RunnerResource
+    monkeypatch.setattr(ops, "plan_restore", lambda *a, **k: {"point": {"aligned": True}})
+
+    def boom(*a, **k):
+        raise AssertionError("restore ran during a dry run")
+    monkeypatch.setattr(ops, "restore_group", boom)
+    monkeypatch.setattr(ops, "baseline_after_restore", boom)
+    res = D.restore_group.execute_in_process(
+        run_config={"ops": {"restore_group_op": {"config": {"group_id": "demo",
+                                                            "dry_run": True}}}},
+        resources={"neo4j": Neo4jResource(uri="neo4j://x:7687", password="p"),
+                   "store": ObjectStoreResource(bucket="b"), "runner": RunnerResource(),
+                   "pipes_subprocess_client": dg.PipesSubprocessClient()})
+    assert res.success
+    out = res.output_for_node("restore_group_op")
+    assert out["dry_run"] and out["plan"] == {"point": {"aligned": True}}

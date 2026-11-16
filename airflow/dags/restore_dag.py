@@ -16,7 +16,7 @@ from datetime import datetime
 
 from airflow.sdk import Param, dag, get_current_context, task
 
-from neo4j_backup_airflow import config, upload
+from neo4j_backup_airflow import alerts, config, upload
 from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import naming, ops, paths, record
 from neo4j_backup_core.policy import load_policy
@@ -28,13 +28,14 @@ _layout = paths.get_layout()
 _SEED_CYPHER_VERSION = os.environ.get("SEED_CYPHER_VERSION") or None
 
 
-@dag(
+@dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
     dag_id="neo4j_restore",
     schedule=None,  # manual: airflow dags trigger neo4j_restore -c '{"group_id":"demo"}'
     start_date=datetime(2025, 1, 1),
     catchup=False,
     params={
         "group_id": Param(type="string"),  # required: no default group (#235)
+        "dry_run": Param(False, type="boolean"),  # log the plan and stop; nothing changes (#249)
         "restore_until": Param(None, type=["null", "string"]),  # ISO-8601, needs a chain
         "check": Param(False, type="boolean"),  # the group's load.checks before the swap (#221)
         "keep_failed": Param(False, type="boolean"),  # with check: keep new dbs on a failure
@@ -68,6 +69,17 @@ def neo4j_restore():
         point = next((sd.get("point") for sd in seeds.values() if sd.get("point")), None)
         if point:
             print(f"restore point: {point}")
+        if ctx["params"].get("dry_run"):  # the CLI's --dry-run, in Airflow (#249)
+            import json
+            from airflow.exceptions import AirflowSkipException
+            group = ops.only_members(load_policy(config.policy_path()).group(gid),
+                                     ctx["params"].get("members"))
+            preview = ops.plan_restore(config.neo4j(), config.store(), group, _layout,
+                                       replace=bool(ctx["params"].get("replace")),
+                                       until=until, loads=loads)
+            print("restore plan (dry run, nothing changed):")
+            print(json.dumps(preview, indent=1, default=str))
+            raise AirflowSkipException("dry run: plan logged above; nothing changed")
         return {
             "group_id": gid,
             # ISO-8601, UTC if no offset; a bad value fails here, before any Neo4j call (#77)
@@ -143,7 +155,8 @@ def neo4j_restore():
 neo4j_restore_dag = neo4j_restore()  # the DAG object (Airflow discovers it in globals)
 
 
-@dag(dag_id="neo4j_rollback", schedule=None, start_date=datetime(2025, 1, 1), catchup=False,
+@dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id="neo4j_rollback", schedule=None, start_date=datetime(2025, 1, 1), catchup=False,
      params={"group_id": Param(type="string"), "members": Param([], type="array"),
              "ticket": Param(None, type=["null", "string"]),
              "reason": Param(None, type=["null", "string"])},
@@ -168,7 +181,8 @@ def neo4j_rollback():
 neo4j_rollback_dag = neo4j_rollback()
 
 
-@dag(dag_id="neo4j_restore_to_cluster", schedule=None, start_date=datetime(2025, 1, 1),
+@dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id="neo4j_restore_to_cluster", schedule=None, start_date=datetime(2025, 1, 1),
      catchup=False,
      params={"to_cluster": Param("default", type="string"),
              "group_id": Param(None, type=["null", "string"]),

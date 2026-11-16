@@ -116,10 +116,9 @@ cutover acme-audit: acme-audit-20261115t204341 -> acme-audit-20261115t204747
 Each alias now points at a new database seeded from the backup. The old databases are still there,
 so undoing a restore is pointing the alias back (see the [Operator guide](OPERATOR.md#undo-a-restore)).
 
-> **Customer privileges.** Neo4j stores privileges against the database, not the alias, so the
-> restore re-grants every privilege on each old database onto the new one before the switch
->. The demo uses the admin user, whose
-> grants are on `*`, so the restore output lists none.
+Neo4j stores privileges against the database, not the alias, so the restore re-grants every
+privilege on each old database onto the new one before the switch. The demo uses the admin user,
+whose grants are on `*`, so the restore output lists none.
 
 ### 4. Restore to a point in time
 
@@ -157,6 +156,9 @@ neo4j-backup runs next to your clusters, not on them. One policy file says what 
 when; a scheduler runs it; a runner with `neo4j-admin` does the backups; restores are Cypher over
 Bolt.
 
+Words used below (group, member, seed, tier and so on) are defined in the
+[glossary](GLOSSARY.md).
+
 ### Choose how it runs
 
 | Front-end | Use it when |
@@ -167,37 +169,71 @@ Bolt.
 | [MCP server](MCP.md) | an operator drives status and restores through an agent; not for schedules |
 
 All of them read the same policy and produce the same backups, so you can change your mind later.
+On Kubernetes, the deploy kits are [Deploying on Dagster](orchestrator/deploy/DEPLOY.md) (image
+and Helm values) and the Airflow page's [Deploying in
+production](airflow/README.md#deploying-in-production) (worker image, RBAC, pod template).
+
+### Prepare your Neo4j servers
+
+Each Neo4j server needs three settings beyond a default install. The demo's
+[`docker/compose.yaml`](docker/compose.yaml) sets the same ones.
+
+1. Open the backup port to the runner. Neo4j listens for backups on localhost only by default:
+
+   ```
+   server.backup.enabled=true
+   server.backup.listen_address=0.0.0.0:6362
+   ```
+
+   Allow the runner (the worker or pod that runs `neo4j-admin`) to reach port 6362 on the servers
+   you back up from, usually the secondaries. The scheduler's workers need port 7687 (Bolt) on
+   every server.
+2. Let the servers read the bucket. A restore tells each server to fetch the backup itself
+   (`CREATE DATABASE … OPTIONS {seedURI: …}`), using the server's own cloud access, not the
+   runner's. On AWS give the servers an instance role or IRSA with `s3:GetObject` and
+   `s3:ListBucket` on the bucket (and `kms:Decrypt` if it is encrypted), and set `AWS_REGION` in
+   the server's environment. On S3-compatible storage also set `AWS_ENDPOINT_URL_S3`. On Azure
+   (`azb://` seeds) set `AZURE_STORAGE_ACCOUNT` and give the servers a managed identity with
+   Storage Blob Data Reader; on GCS (`gs://` seeds) set `GOOGLE_APPLICATION_CREDENTIALS` and
+   `GOOGLE_CLOUD_PROJECT` or use workload identity with Storage Object Viewer.
+3. Give the tool an admin user. It creates and drops databases, moves aliases and copies
+   privileges, so it needs a user with the `admin` role (or the equivalent privileges on
+   databases, aliases and privilege management). Put its password in `NEO4J_PASSWORD` or a
+   secret reference.
 
 ### Checklist
 
 1. Applications connect through aliases. Restore moves the alias to a new database. Existing
-   databases can be put behind an alias without disruption
-   with `neo4j-backup adopt`; see "Adopt existing databases" in [OPERATOR.md](OPERATOR.md).
-2. Write the policy. Copy `policies/demo.yaml`: one group per customer (or per set of
-   databases that must restore to the same instant), a tier for the schedule, and
-   `retention_days`. [POLICY.md](POLICY.md) has every field.
-3. Set the environment. At minimum `NEO4J_PASSWORD` (or a secret reference), `NEO4J_BOLT_URI`,
-   `NEO4J_BACKUP_SOURCE` (a member's backup port, ideally a secondary), `BACKUP_BUCKET`,
-   `AWS_REGION` and `NEO4J_BACKUP_POLICY`. On real AWS leave `AWS_ENDPOINT_URL_S3` unset. The full
-   table is in [ENVIRONMENT.md](ENVIRONMENT.md).
+   databases can be put behind an alias without disruption with `neo4j-backup adopt`; see
+   [Adopt existing databases](OPERATOR.md#adopt-existing-databases).
+2. Write the policy. Copy [`policies/example.yaml`](policies/example.yaml): one group per
+   customer (or per set of databases that must restore to the same instant), a tier for the
+   schedule with its `rpo_minutes`, and `retention_days`. [POLICY.md](POLICY.md) has every field
+   and how to choose them. Check it with `neo4j-backup policy validate <file>`.
+3. Set the environment. With one cluster: `NEO4J_BOLT_URI`, `NEO4J_BACKUP_SOURCE` (a server's
+   backup port, ideally a secondary), `NEO4J_PASSWORD` (or a secret reference),
+   `BACKUP_BUCKET`, `AWS_REGION` and `NEO4J_BACKUP_POLICY`. With several clusters, the policy's
+   `clusters:` block replaces the first two, and `NEO4J_PASSWORD` is used for any cluster
+   without its own `password_ref`. On real AWS leave `AWS_ENDPOINT_URL_S3` unset. The full table
+   is in [ENVIRONMENT.md](ENVIRONMENT.md).
 4. Place the runner. It needs `neo4j-admin` (same version as the cluster), network access to
    the backup port (6362) and the bucket, and a scratch volume as large as your largest full
-   backup. As a subprocess on a worker or as a Kubernetes pod (`RUNNER_MODE=k8s`); see
-   [Deploying on Dagster](orchestrator/deploy/DEPLOY.md) or the Airflow page's
-   [Deploying in production](airflow/README.md#deploying-in-production).
-5. Let the cluster read the bucket. Restores are pulled by the Neo4j servers themselves, so
-   every server needs read access to the bucket (and `kms:Decrypt` if it is encrypted).
-6. Set concurrency. Dagster: merge the lanes from
-   [`deploy/dagster.yaml`](orchestrator/deploy/dagster.yaml) and set the `neo4j` pool limit.
+   backup. It runs as a subprocess on a worker or as a Kubernetes pod (`RUNNER_MODE=k8s`);
+   [Choosing a runner mode](ENVIRONMENT.md#choosing-a-runner-mode) compares them.
+5. Set concurrency. Dagster: the run limits in
+   [`deploy/helm-values.yaml`](orchestrator/deploy/helm-values.yaml) (or
+   [`deploy/dagster.yaml`](orchestrator/deploy/dagster.yaml) without Helm) and the `neo4j` pool.
    Airflow: create the pools listed on the [Airflow page](airflow/README.md#pools).
-7. Try one group by hand. Back up one group, verify it, then restore it into a throwaway
-   group before trusting it with a customer. Check the scratch size and the runner's memory.
-8. Turn on the schedules. In Dagster the `reconcile_registry` sensor and the schedules start
+6. Try one group first; see [Try a test group](OPERATOR.md#try-a-test-group). Check the scratch
+   size and the runner's memory while you do.
+7. Turn on the schedules. In Dagster the `reconcile_registry` sensor and the schedules start
    stopped; switch them on together (or set `schedules: running` in the policy, which starts
    both). In Airflow, unpause the DAGs, the manual ones included. Every schedule comes from the
    policy: the tier crons and the `dbms:` block.
-9. Alert on failures, including the freshness check (`status_check` in Dagster, `neo4j_status`
-   in Airflow), which fails when a database's newest backup is older than its `rpo_minutes`.
+8. Turn on alerts. Set `NEO4J_BACKUP_ALERT_WEBHOOK` and failed runs post to it, including the
+   freshness check that fails when a database's newest backup is older than its `rpo_minutes`.
+   Add an independent check that works when the scheduler is down; see
+   [Alerts](OPERATOR.md#alerts).
 
 ### What's planned
 

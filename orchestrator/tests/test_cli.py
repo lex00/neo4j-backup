@@ -21,10 +21,35 @@ class _Group:
     tenant = "acme"
 
 
+class _LockStore:
+    """Just enough store for the group lock (#252)."""
+
+    def __init__(self):
+        self.objects = {}
+
+    def create_exclusive(self, key, text):
+        if key in self.objects:
+            return False
+        self.objects[key] = text
+        return True
+
+    def get_text(self, key):
+        return self.objects[key]
+
+    def delete_keys(self, keys):
+        for k in keys:
+            self.objects.pop(k, None)
+        return len(keys)
+
+
+_LOCKS = _LockStore()
+
+
 @pytest.fixture(autouse=True)
 def stub_env(monkeypatch):
+    _LOCKS.objects.clear()
     """No live Neo4j / S3 / policy: env builders and load_policy return inert stand-ins."""
-    monkeypatch.setattr(cli.env, "store", lambda: object())
+    monkeypatch.setattr(cli.env, "store", lambda: _LOCKS)
     monkeypatch.setattr(cli.env, "neo4j", lambda: object())
     monkeypatch.setattr(cli.env, "runner", lambda: types.SimpleNamespace(env=lambda: {}))
     monkeypatch.setattr(cli.env, "policy_path", lambda: "x.yaml")
@@ -240,3 +265,17 @@ def test_status_stale_exits_non_zero(monkeypatch):
     monkeypatch.setattr(freshness, "status", lambda *a, **k: {"targets": [], "stale": []})
     env, code = run(["status", "--stale"])
     assert_exit(code, Exit.OK)
+
+
+def test_cli_backup_takes_the_group_lock(monkeypatch, capsys):
+    """#252: a backup waits for (here: refuses, wait 0) the group's other running work."""
+    from neo4j_backup_core import locks
+    monkeypatch.setenv("NEO4J_BACKUP_LOCK_WAIT", "0")
+    monkeypatch.setattr(cli.ops, "backup_target", lambda *a, **k: {"artifact": "x"})
+    held = locks.acquire(_LOCKS, "demo", "a rebuild")
+    code = cli.main(["--json", "backup", "demo", "--kind", "FULL"])
+    env = json.loads(capsys.readouterr().out)
+    assert code == 1 and env["error"]["kind"] == "locked" and "a rebuild" in env["error"]["msg"]
+    locks.release(_LOCKS, "demo", held)
+    code = cli.main(["--json", "backup", "demo", "--kind", "FULL"])
+    assert code == 0

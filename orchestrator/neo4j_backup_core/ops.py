@@ -696,7 +696,8 @@ def prune(store, policy, layout, *, keep_system: int | None = None,
             swept.append((store, prefix))
     # DBMS objects: each cluster's, in that cluster's store (#106); exact-prefix listings
     clusters = ([] if not dbms else [cluster] if cluster
-                else (policy.cluster_names() if hasattr(policy, "cluster_names") else ["default"]))
+                else (policy.dbms_cluster_names() if hasattr(policy, "dbms_cluster_names")
+                 else ["default"]))
     for cl in clusters:
         store = _cluster(base, cl)
         tag = "_dbms" if cl == "default" else f"_dbms/{cl}"
