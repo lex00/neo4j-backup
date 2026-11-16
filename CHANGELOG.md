@@ -7,6 +7,8 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-16
+
 **Upgrading (Airflow).** The fixed `neo4j_verify`, `neo4j_aggregate`, `neo4j_prune`,
 `neo4j_metadata_backup` and `neo4j_system_backup` DAGs are replaced by policy-generated ones
 (`neo4j_verify_<tier>`, `neo4j_aggregate_<tier>`, `neo4j_prune_<tier>`,
@@ -448,7 +450,8 @@ First tagged release. Validated end to end against a real Neo4j Enterprise + obj
 - Dagster `prune` `list_text_keys` delegation; `RUNNER_NEO4J_ADMIN` wiring.
 - Pinned `grpcio-health-checking<1.82` (protobuf gencode/runtime drift).
 
-[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/lex00/neo4j-backup/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/lex00/neo4j-backup/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lex00/neo4j-backup/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/lex00/neo4j-backup/compare/v0.2.0...v0.3.0
