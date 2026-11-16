@@ -47,6 +47,19 @@ def _recorded(fn):
     return wrapper
 
 
+def _selectable(fn):
+    """`group` or `tenant` (#102): with a tenant, run `fn` for every group carrying that label and
+    return {"tenant", "groups": [...]}. Both, neither or an unknown name raises SelectionError."""
+    @functools.wraps(fn)
+    def wrapper(*args, group: str | None = None, tenant: str | None = None, **kw):
+        groups = load_policy(env.policy_path()).select(group, tenant)
+        if not tenant:
+            return fn(*args, group=group, tenant=None, **kw)
+        return {"tenant": tenant,
+                "groups": [fn(*args, group=g.id, tenant=None, **kw) for g in groups]}
+    return wrapper
+
+
 def _run_admin(runner):
     # neo4j-admin output to stderr so it never corrupts the MCP stdio protocol on stdout
     return env.subprocess_admin(runner, stdout=sys.stderr)
@@ -65,9 +78,13 @@ def _needs_confirmation(op, blast):
 
 # --- read-only -------------------------------------------------------------------------------
 
-def list_targets() -> dict:
-    """List every backup target (group/member) the policy covers."""
-    return {"targets": load_policy(env.policy_path()).partition_keys()}
+def list_targets(group: str | None = None, tenant: str | None = None) -> dict:
+    """List the backup targets (group/member) the policy covers, optionally only one group's or
+    one tenant's (#102), with each group's tenant label."""
+    policy = load_policy(env.policy_path())
+    groups = policy.select(group, tenant) if (group or tenant) else policy.db_groups
+    return {"targets": [f"{g.id}/{n}" for g in groups for n in g.names],
+            "tenants": {g.id: g.tenant for g in groups}}
 
 
 def latest_artifact(group: str, member: str) -> dict:
@@ -91,21 +108,24 @@ def show_chain(group: str, member: str) -> dict:
             "chains": read["chains"], "unknown": read["unknown"]}
 
 
-def backup_status() -> dict:
-    """Freshness of every target: its latest artifact and how many hours old it is (null if never
-    backed up). The 'are my backups current?' view."""
+def backup_status(tenant: str | None = None) -> dict:
+    """Freshness of every target (or one tenant's, #102): its latest artifact and how many hours
+    old it is (null if never backed up), with the group's tenant. The 'are my backups current?'
+    view."""
     store, policy, layout = env.store(), load_policy(env.policy_path()), _layout()
     now = time.time()
     rows = []
-    for g in policy.db_groups:
+    for g in (policy.select(tenant=tenant) if tenant else policy.db_groups):
         for a in g.names:
             arts = store.list_artifacts(layout.alias_prefix(g.id, a))
             if not arts:
-                rows.append({"target": f"{g.id}/{a}", "latest": None, "age_hours": None})
+                rows.append({"target": f"{g.id}/{a}", "tenant": g.tenant, "latest": None,
+                             "age_hours": None})
                 continue
             k, _s, m = max(arts, key=lambda t: t[2])
             age = round((now - m.timestamp()) / 3600, 1) if hasattr(m, "timestamp") else None
-            rows.append({"target": f"{g.id}/{a}", "latest": k, "age_hours": age})
+            rows.append({"target": f"{g.id}/{a}", "tenant": g.tenant, "latest": k,
+                         "age_hours": age})
     return {"targets": rows}
 
 
@@ -129,7 +149,8 @@ def preview_prune() -> dict:
 
 # --- mutating (read-write scope only; each guarded by confirm) --------------------------------
 
-def run_backup(group: str, kind: str = "AUTO") -> dict:
+@_selectable
+def run_backup(group: str | None = None, kind: str = "AUTO", tenant: str | None = None) -> dict:
     """Back up every database in a group (additive — writes new artifacts). `kind` AUTO|FULL|DIFF."""
     g = load_policy(env.policy_path()).group(group)
     store, runner, neo, layout = env.store(), env.runner(), env.neo4j(), _layout()
@@ -139,7 +160,8 @@ def run_backup(group: str, kind: str = "AUTO") -> dict:
     return {"group": group, "kind": kind, "backups": done}
 
 
-def run_verify(group: str) -> dict:
+@_selectable
+def run_verify(group: str | None = None, tenant: str | None = None) -> dict:
     """Non-destructively check that the latest backups of a group are restorable and consistent."""
     g = load_policy(env.policy_path()).group(group)
     store, runner, layout = env.store(), env.runner(), _layout()
@@ -150,8 +172,10 @@ def run_verify(group: str) -> dict:
 
 
 @_recorded
-def run_aggregate(group: str, confirm: bool = False, dry_run: bool = False,
-                  ticket: str | None = None, reason: str | None = None) -> dict:
+@_selectable
+def run_aggregate(group: str | None = None, confirm: bool = False, dry_run: bool = False,
+                  ticket: str | None = None, reason: str | None = None,
+                  tenant: str | None = None) -> dict:
     """Collapse each of a group's chains into one recovered full, in place (destructive to the
     chain: trades intra-chain PITR). Needs confirm=true; dry_run previews the physicals affected."""
     g = load_policy(env.policy_path()).group(group)

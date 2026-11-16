@@ -8,6 +8,12 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 ## [Unreleased]
 
 ### Added
+- **`tenant` label** (#102). Groups (and profiles) take `tenant:`; `owner` is still read as the
+  tenant, with a deprecation warning. `backup`, `verify`, `aggregate` and `targets` take
+  `--tenant <t>` instead of a group (group and `--tenant` together, or an unknown name, is exit 2);
+  `targets` and the MCP status show each group's tenant; MCP `list_targets`, `backup_status`,
+  `run_backup`, `run_verify` and `run_aggregate` take `tenant`. A label for selecting groups, not
+  access control; `restore` stays per group.
 - **Profiles** (#101). `profiles:` names a customer type's settings once; a group sets
   `profile:` and overrides what differs (`load:` merges per key). Applied before validation, in
   one place, so every front-end sees the resolved groups. `neo4j-backup policy show <group>`

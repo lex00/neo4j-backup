@@ -53,8 +53,45 @@ def _group(args):
 
 def cmd_targets(args):
     policy = load_policy(env.policy_path())
-    return envelope("targets", ok=True, result={"targets": policy.partition_keys(),
-                                                "warnings": policy.warnings()}), Exit.OK
+    groups = policy.db_groups
+    if args.group or args.tenant:  # optional filters (#102)
+        try:
+            groups = policy.select(args.group, args.tenant)
+        except policy_mod.SelectionError as e:
+            return envelope("targets", ok=False, error=make_error("usage", str(e))), Exit.USAGE
+    keys = [f"{g.id}/{n}" for g in groups for n in g.names]
+    return envelope("targets", ok=True, result={
+        "targets": keys, "tenants": {g.id: g.tenant for g in groups},
+        "warnings": policy.warnings()}), Exit.OK
+
+
+def _by_tenant(cmd, op):
+    """Let a per-group command take `--tenant` instead of a group (#102): run it for every group
+    with that tenant label and collect the per-group envelopes under `result.groups`. A group
+    keeps today's single-group result. Both, neither, or an unknown name is a usage error."""
+    def run(args):
+        try:
+            groups = load_policy(env.policy_path()).select(args.group, args.tenant)
+        except policy_mod.SelectionError as e:
+            return envelope(op, ok=False, group=args.group,
+                            error=make_error("usage", str(e))), Exit.USAGE
+        if not args.tenant:
+            return cmd(args)
+        envs, code = [], Exit.OK
+        for g in groups:
+            args.group = g.id
+            e, c = cmd(args)
+            envs.append({"group": g.id, "ok": e["ok"], "result": e.get("result"),
+                         "error": e.get("error")})
+            code = max(code, c)
+        args.group = None
+        ok = all(e["ok"] for e in envs)
+        err = None if ok else make_error(
+            next(e["error"]["kind"] for e in envs if not e["ok"]),
+            "; ".join(f"{e['group']}: {e['error']['msg']}" for e in envs if not e["ok"]))
+        return envelope(op, ok=ok, result={"tenant": args.tenant, "groups": envs},
+                        error=err), code
+    return run
 
 
 def cmd_backup(args):
@@ -251,18 +288,21 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--reason", help="why it runs; recorded with the result")
         return sp
 
-    b = sub.add_parser("backup", help="back up every database in a policy group")
-    b.add_argument("group")
+    def selectable(sp):  # a group, or --tenant for all of a tenant's groups (#102)
+        sp.add_argument("group", nargs="?", help="the policy group (or use --tenant)")
+        sp.add_argument("--tenant", help="every group with this tenant label, instead of a group")
+        return sp
+
+    b = selectable(sub.add_parser("backup", help="back up every database in a policy group"))
     b.add_argument("--kind", default="AUTO", choices=["AUTO", "FULL", "DIFF"])
-    b.set_defaults(func=cmd_backup)
+    b.set_defaults(func=_by_tenant(cmd_backup, "backup"))
 
-    v = sub.add_parser("verify", help="non-destructively check the latest backups of a group")
-    v.add_argument("group")
-    v.set_defaults(func=cmd_verify)
+    v = selectable(sub.add_parser("verify", help="non-destructively check the latest backups of a group"))
+    v.set_defaults(func=_by_tenant(cmd_verify, "verify"))
 
-    a = guarded(sub.add_parser("aggregate", help="collapse each chain into a recovered full (in place)"))
-    a.add_argument("group")
-    a.set_defaults(func=_recorded(cmd_aggregate))
+    a = guarded(selectable(sub.add_parser(
+        "aggregate", help="collapse each chain into a recovered full (in place)")))
+    a.set_defaults(func=_recorded(_by_tenant(cmd_aggregate, "aggregate")))
 
     r = guarded(sub.add_parser("restore", help="restore a group (alias-swap or by-name)"))
     r.add_argument("group")
@@ -279,7 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
     sb = sub.add_parser("system-backup", help="binary FULL backup of the system database")
     sb.set_defaults(func=cmd_system_backup)
 
-    t = sub.add_parser("targets", help="list the policy's group/member targets")
+    t = selectable(sub.add_parser("targets", help="list the policy's group/member targets"))
     t.set_defaults(func=cmd_targets)
 
     im = sub.add_parser("import", help="bulk-import raw data into an offline store on the loader (#16)")

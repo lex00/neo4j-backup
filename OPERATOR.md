@@ -65,8 +65,11 @@ at every restore, because the name changes.
 7. Tell the customer their tier, how far back they can restore (`retention_days`), and how to
    ask for a restore. The [Customer guide](CUSTOMERS.md) is written for them.
 
-**Planned:** a `tenant` label to select all of a
-customer's groups ([#102](https://github.com/lex00/neo4j-backup/issues/102)), an `adopt` command ([#92](https://github.com/lex00/neo4j-backup/issues/92)), and an option for
+Give a customer's groups a `tenant:` label (or put it in their profile) to act on all of them at
+once: `neo4j-backup backup --tenant acme`, `verify --tenant acme`, `targets --tenant acme`. It's a
+label for selecting groups, not access control.
+
+**Planned:** an `adopt` command ([#92](https://github.com/lex00/neo4j-backup/issues/92)), and an option for
 new schedules to start running ([#104](https://github.com/lex00/neo4j-backup/issues/104)).
 
 ## Check that customers are covered

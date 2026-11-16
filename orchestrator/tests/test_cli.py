@@ -18,6 +18,7 @@ class _Group:
     id = "demo"
     names = ["orders", "customers"]
     restore_mode = "alias-swap"
+    tenant = "acme"
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +32,8 @@ def stub_env(monkeypatch):
         group=lambda gid: _Group(),
         partition_keys=lambda: ["demo/orders", "demo/customers"],
         warnings=lambda: [],
+        db_groups=[_Group()],
+        select=lambda group=None, tenant=None: [_Group()],
     )
     monkeypatch.setattr(cli, "load_policy", lambda p: pol)
     return monkeypatch

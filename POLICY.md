@@ -28,7 +28,7 @@ db_groups:
     tier: gold                      # [used] must match a key under `tiers:` below
     retention_days: 30              # [used] prune deletes whole chains older than this (see below)
 
-    owner: acme-corp                # [decl] reporting / ownership tag only
+    tenant: acme-corp               # [used] label for selecting a customer's groups (--tenant)
     s3_prefix: s3://backups/acme/   # [decl] not read yet; bucket comes from BACKUP_BUCKET env
     rpo_minutes: 60                 # [decl] target, not enforced
     rto_minutes: 120                # [decl] target, not enforced
@@ -133,7 +133,8 @@ live and backed up). A group on `data-interval` or `data-scratch` adds its own `
 | `tier` | string | **required** | used | which `tiers` entry sets the schedule (must exist) |
 | `retention_days` | int | `7` | used | `prune` deletes backups older than this, whole chains only: per member it keeps the newest chain, any chain with a backup inside the window, and the chain that covers the start of the window (the newest full before it), so a point in time inside the window stays reachable. If the group's tier takes fulls further apart than this, policy load logs a warning and `neo4j-backup targets` lists it under `warnings`: backups are then kept up to the full interval plus `retention_days` |
 | `s3_prefix` | string | **required** | decl | not read; the bucket comes from `BACKUP_BUCKET` |
-| `owner` | string | `null` | decl | reporting / ownership tag |
+| `tenant` | string | `null` | used | a label for selecting a customer's groups: `backup`, `verify`, `aggregate` and `targets` take `--tenant <t>` instead of a group, and MCP read and backup tools take `tenant` (#102). **It is a label, not an access control**: the deployment can reach every database in its clusters whatever the tenant. Settable in a profile. `restore` stays per group |
+| `owner` | string | `null` | deprecated | the old name for `tenant`; still read as the tenant, with a warning |
 | `rpo_minutes` | int | `60` | decl | target, not enforced |
 | `rto_minutes` | int | `120` | decl | target, not enforced |
 | `encryption` | object | `{mode: sse-kms}` | decl | recorded intent; SSE-KMS applied by your bucket |

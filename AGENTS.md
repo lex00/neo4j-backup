@@ -45,12 +45,12 @@ Configuration is environment + policy (`NEO4J_PASSWORD`, `NEO4J_BOLT_URI`, `BACK
 
 | Command | What it does | Mutates? | Key flags |
 |---|---|---|---|
-| `targets` | List the policy's group/member targets | no | |
+| `targets [<group>]` | List the policy's group/member targets and each group's tenant | no | `--tenant <t>` |
 | `policy show <group>` | A group's effective settings after profiles, and where each came from | no | |
 | `policy validate <file>` | Validate a policy file (no cluster or store); exit `2` if invalid | no | |
-| `backup <group>` | Back up every database in a group | writes artifacts | `--kind AUTO\|FULL\|DIFF` |
-| `verify <group>` | Consistency-check the latest backups (non-destructive) | no | |
-| `aggregate <group>` | Collapse each chain into one recovered full, in place | **yes** | `--dry-run`, `--confirm`, `--ticket`, `--reason` |
+| `backup <group>` | Back up every database in a group | writes artifacts | `--kind AUTO\|FULL\|DIFF`, `--tenant <t>` instead of a group |
+| `verify <group>` | Consistency-check the latest backups (non-destructive) | no | `--tenant <t>` instead of a group |
+| `aggregate <group>` | Collapse each chain into one recovered full, in place | **yes** | `--dry-run`, `--confirm`, `--ticket`, `--reason`, `--tenant <t>` instead of a group |
 | `restore <group>` | Restore a group (alias-swap or by-name) | **yes** | `--until <iso>`, `--replace`, `--no-baseline`, `--dry-run`, `--confirm`, `--ticket`, `--reason` |
 | `prune` | Delete backups past each group's retention | **yes** | `--dry-run`, `--confirm`, `--ticket`, `--reason` |
 | `metadata export` | Export users/roles/privileges/aliases as replayable Cypher | writes artifact | |
