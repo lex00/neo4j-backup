@@ -124,3 +124,10 @@ verified current-version config below (3 primaries + 1 secondary). Key points:
 
 Source: Neo4j "Deploying a Neo4j cluster in a Docker container" tutorial and the
 clustering discovery / ports references (current docs).
+
+## A second cluster (#115)
+
+`docker compose --env-file .env -f docker/compose.yaml --profile multi up -d --wait neo4j-b`
+starts a second, independent Neo4j (Bolt on host port 7688, backup port `neo4j-b:6362` on the
+stack network) that reads the same bucket. `just move-smoke` uses it as cluster `west` to test
+`restore --to-cluster` and `--from-cluster`.
