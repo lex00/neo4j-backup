@@ -160,6 +160,12 @@ The same restore from the orchestrators:
 The result lists, per member, the old database (`old`), the new one (`newdb`) and the privileges
 granted on the new one (`privileges`). Keep it for the report.
 
+To seed from a load artifact instead of the backups (#144, #159): `--from-load` (every member's
+newest dump in its `_seed/` folder), or `--from-dump <member>=<key-or-uri>` per member (a key under
+`_seed/`, or the URI of a dump a customer exported, in a bucket the servers can read). A dump
+restores whole, so neither goes with `--until`; `--until` itself never picks a dump. A member with
+no backups but a load is seeded from its newest load automatically.
+
 Neo4j stores privileges against the database, not the alias, so the restore re-grants every
 privilege on the old database onto the new one before it moves any alias. Grants on `*` and on
 `HOME` don't name a database and are left as they are. If a grant fails, the restore stops before

@@ -154,3 +154,67 @@ def test_until_after_the_last_real_diff_seeds_it_whole():
                json.dumps({**artifacts._normalise(empty), "key": NEW + "3-diff.backup"}))
     seed = ops.choose_seed(s, LAYOUT, "g", "orders", "2026-11-15T11:30:00Z")
     assert seed["key"] == d and seed["until"] is None
+
+
+# --- load artifacts (#144, #159) -----------------------------------------------------------------
+
+def with_loads():
+    s, old_head, new_head = two_physicals()
+    s.add("g/orders/_seed/20261115t000000/orders.dump")
+    s.add("g/orders/_seed/20261116t000000/orders.dump")
+    return s, new_head
+
+
+def test_until_never_picks_a_load():
+    s, new_head = with_loads()
+    seed = ops.choose_seed(s, LAYOUT, "g", "orders", "2026-11-15T13:00:00Z")
+    assert seed["key"] == new_head and not seed.get("load")
+
+
+def test_from_load_latest_and_explicit():
+    s, _ = with_loads()
+    latest = ops.choose_seed(s, LAYOUT, "g", "orders", load="latest")
+    assert latest["key"].endswith("20261116t000000/orders.dump") and latest["load"]
+    assert latest["uri"] == "s3://bucket/" + latest["key"]
+    one = ops.choose_seed(s, LAYOUT, "g", "orders", load="g/orders/_seed/20261115t000000/orders.dump")
+    assert one["key"].endswith("20261115t000000/orders.dump")
+    with pytest.raises(ops.OpError, match="not a load artifact"):
+        ops.choose_seed(s, LAYOUT, "g", "orders", load="g/orders/orders-2/5-diff.backup")
+
+
+def test_a_load_restores_whole():
+    s, _ = with_loads()
+    with pytest.raises(ops.OpError, match="restores whole"):
+        ops.choose_seed(s, LAYOUT, "g", "orders", "2026-11-15T13:00:00Z", load="latest")
+
+
+def test_external_dump_uri():
+    seed = ops.choose_seed(MemStore(), LAYOUT, "g", "orders", load="s3://partner/exports/x.dump")
+    assert seed["uri"] == "s3://partner/exports/x.dump" and seed["external"]
+
+
+def test_load_only_member_falls_back_to_its_newest_load():
+    s = MemStore()
+    s.add("g/orders/_seed/20261116t000000/orders.dump")
+    seed = ops.choose_seed(s, LAYOUT, "g", "orders")
+    assert seed["load"] and seed["key"].endswith("orders.dump")
+    with pytest.raises(ops.OpError):  # no chain covers a time; loads don't count
+        ops.choose_seed(s, LAYOUT, "g", "orders", "2026-11-15T13:00:00Z")
+
+
+def test_from_dump_names_only_members():
+    s, _ = with_loads()
+
+    class One(Group):
+        names = ["orders"]
+    with pytest.raises(ops.OpError, match="not members"):
+        ops.choose_seeds(s, LAYOUT, One(), loads={"nope": "x"})
+
+
+def test_restore_from_an_external_dump_skips_the_store_check():
+    neo = Neo()
+
+    class One(Group):
+        names = ["orders"]
+    ops.restore_group(neo, MemStore(), One(), LAYOUT, loads={"orders": "s3://partner/x.dump"})
+    assert neo.seeded[0][1] == "s3://partner/x.dump"

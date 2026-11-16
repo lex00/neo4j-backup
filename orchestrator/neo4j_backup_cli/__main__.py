@@ -208,17 +208,31 @@ def _guard(op, group, blast, confirmed, dry_run):
     return None
 
 
+def _loads_arg(args):
+    """--from-load (every member's newest load) or --from-dump MEMBER=KEY_OR_URI (#144, #159)."""
+    if args.from_dump:
+        out = {}
+        for item in args.from_dump:
+            member, sep, key = item.partition("=")
+            if not sep or not key:
+                raise ops.OpError(f"--from-dump {item!r}: expected MEMBER=KEY_OR_URI")
+            out[member] = key
+        return out
+    return "latest" if args.from_load else None
+
+
 def cmd_restore(args):
     group = _group(args)
     store, neo, layout = env.store(), env.neo4j(), paths.get_layout()
-    plan = ops.plan_restore(neo, store, group, layout, replace=args.replace,
-                            until=args.until)  # preconditions first, incl. the chain for --until
+    loads = _loads_arg(args)
+    plan = ops.plan_restore(neo, store, group, layout, replace=args.replace, until=args.until,
+                            loads=loads)  # preconditions first, incl. the chain for --until
     plan["baseline"] = not args.no_baseline  # a FULL of each new database afterwards (#97)
     short = _guard("restore", group.id, {"plan": plan}, args.confirm, args.dry_run)
     if short:
         return short
     out = ops.restore_group(neo, store, group, layout, restore_until=args.until,
-                            replace=args.replace, cypher_version=_CYPHER, log=_log)
+                            replace=args.replace, cypher_version=_CYPHER, log=_log, loads=loads)
     if args.no_baseline:
         return envelope("restore", ok=True, group=group.id,
                         result={**out, "baseline": None}), Exit.OK
@@ -338,6 +352,12 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--until", type=_until_arg,
                    help="ISO-8601 point-in-time, UTC if no offset (needs a differential chain)")
     r.add_argument("--replace", action="store_true", help="by-name: DROP+recreate an existing target")
+    src = r.add_mutually_exclusive_group()
+    src.add_argument("--from-load", action="store_true",
+                     help="seed every member from its newest load artifact (_seed/, #144)")
+    src.add_argument("--from-dump", action="append", metavar="MEMBER=KEY_OR_URI",
+                     help="seed a member from a dump: a key in its _seed/ folder, or a URI the "
+                          "servers can read (an external dump, #159); repeat per member")
     r.add_argument("--no-baseline", action="store_true",
                    help="skip the full backup of each restored database (taken by default, #97)")
     r.set_defaults(func=_recorded(cmd_restore))

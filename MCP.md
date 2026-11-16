@@ -47,7 +47,7 @@ Mutating (only with `NEO4J_BACKUP_MCP_MODE=read-write`; each needs `confirm=true
 | `run_backup(group, kind, tenant)` | back up a group, or every group with a tenant label (additive) |
 | `run_verify(group, tenant)` | consistency-check the latest backups (non-destructive) |
 | `run_aggregate(group, confirm, dry_run, ticket, reason, tenant)` | collapse chains to a recovered full, in place |
-| `run_restore(group, until, replace, confirm, dry_run, verify_first, baseline, ticket, reason)` | restore (alias-swap / by-name, PITR), then a full backup of each restored database unless `baseline=false` |
+| `run_restore(group, until, replace, confirm, dry_run, verify_first, baseline, ticket, reason, from_load, from_dump)` | restore (alias-swap / by-name, PITR), then a full backup of each restored database unless `baseline=false` |
 | `run_prune(confirm, dry_run, ticket, reason)` | delete backups past retention |
 
 ## Run it
