@@ -52,7 +52,8 @@ def test_dagster_lists_every_policy_schedule():
     assert s["gold_verify"] == ["0 6 * * *", "STOPPED"]
     assert s["default_dbms_metadata"][0] == "0 2 * * *"
     assert s["default_dbms_system"][0] == "0 1 * * *"
-    assert not any(k.startswith("nightly") for k in s)
+    # the rebuild-only tier gets only its rebuild schedule (#108), no backups or maintenance
+    assert [k for k in s if k.startswith("nightly")] == ["nightly_rebuild"]
 
 
 def test_schedules_running_setting(tmp_path):

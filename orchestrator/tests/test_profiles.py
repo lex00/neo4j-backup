@@ -140,4 +140,4 @@ def test_dagster_sees_resolved_groups(profiled):
         [sys.executable, "-c", "from neo4j_backup_dagster.definitions import defs; "
          "print(sorted(s.name for s in defs.schedules))"],
         env={**os.environ, "NEO4J_PASSWORD": "x"}, capture_output=True, text=True)
-    assert "gold_full" in proc.stdout and "nightly" not in proc.stdout, proc.stderr
+    assert "gold_full" in proc.stdout and "nightly_full" not in proc.stdout, proc.stderr

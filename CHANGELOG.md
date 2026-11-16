@@ -14,6 +14,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Scheduled rebuilds and orchestrated loads** (#107, #108): Dagster `load_job` and
+  `<tier>_rebuild` schedules (from `rebuild_cron`, only `load.mode: rebuild` groups); Airflow
+  `neo4j_load` and `neo4j_rebuild_<tier>`. Runs carry a `neo4j_group` tag (the sample
+  `dagster.yaml` limits it to 1 per group); Airflow backups and loads take a per-group lock object
+  created with the store's conditional write. The first load of a group creates its alias.
+  `just load-smoke` covers CSV and Parquet, read-only and read-write. The `dev` extra adds
+  `pyarrow` for it.
 - **`load <group>`** (#107, core, CLI and MCP): builds each member in the runner from the policy's
   `load.build` (`kind: import`; relative input paths resolve against `load.source`, read by
   neo4j-admin straight from the store), dumps it, seeds a new database from the dump, sets it

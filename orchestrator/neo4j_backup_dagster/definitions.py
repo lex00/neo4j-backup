@@ -355,6 +355,57 @@ def baseline_op(
     return done
 
 
+# --- Load / rebuild (#107, #108) -------------------------------------------------------------
+class LoadConfig(dg.Config):
+    group_id: str
+    replace: bool = False      # by-name: DROP+recreate an existing database
+    keep_failed: bool = False  # keep the new databases when a step before the swap fails
+    baseline: bool = True
+    ticket: str | None = None
+    reason: str | None = None
+
+
+@dg.op(pool="neo4j")
+def load_group_op(
+    context: dg.OpExecutionContext,
+    config: LoadConfig,
+    neo4j: Neo4jResource,
+    store: ObjectStoreResource,
+    runner: RunnerResource,
+    pipes_subprocess_client: dg.PipesSubprocessClient,
+):
+    """Build, dump, seed, check, swap, baseline (#107). A failure is a failed run with the step
+    named; the previous load keeps serving (#108)."""
+    from neo4j_backup_core import load as load_mod
+
+    group = load_policy(POLICY_PATH).group(config.group_id)
+    try:
+        rec = record.fields(config.ticket, config.reason, applying=True)
+    except record.TicketError as e:
+        raise dg.Failure(str(e))
+    context.log.info(record.describe("load", rec))
+    try:
+        out = load_mod.load_group(
+            _admin(context, runner, pipes_subprocess_client),
+            RunnerSet(runner._core(), policy_source=POLICY_PATH),
+            Neo4jSet(neo4j._core(), policy_source=POLICY_PATH),
+            StoreSet(store._core(), policy_source=POLICY_PATH), _layout, group,
+            replace=config.replace, keep_failed=config.keep_failed,
+            baseline=None if config.baseline else False, upload=BACKUP_UPLOAD,
+            staging=UPLOAD_STAGING_PATH, cypher_version=SEED_CYPHER_VERSION,
+            log=context.log.info)
+    except load_mod.LoadError as e:
+        raise dg.Failure(str(e), metadata={"failed_step": e.step})
+    except ops.OpError as e:
+        raise dg.Failure(str(e))
+    return {**out, **rec}
+
+
+@dg.job(tags={"neo4j_lane": "rebuild"})
+def load_job():
+    load_group_op()
+
+
 # The full-lane tag: the baseline step is a full backup, so the job queues behind the full lane's
 # tag concurrency limit like a scheduled full does (#97).
 @dg.job(tags={"backup_kind": "full"})
@@ -396,8 +447,10 @@ def _lane_request(key: str, lane: str, tick: str = "") -> dg.RunRequest:
         # member, lane and tick
         run_key=f"{key}:{lane}:{tick}",
         partition_key=key,
-        # tag concurrency limits keep the lanes apart (#6) and cap work per cluster (#106)
-        tags={"backup_kind": lane, "neo4j_cluster": _cluster_of(key)},
+        # tag concurrency limits keep the lanes apart (#6), cap work per cluster (#106), and keep
+        # a group's backups and its rebuild from overlapping (#108: neo4j_group, limit 1)
+        tags={"backup_kind": lane, "neo4j_cluster": _cluster_of(key),
+              "neo4j_group": parse_partition_key(key)[0]},
         run_config=dg.RunConfig(ops={"backup": BackupConfig(kind=kind)}),
     )
 
@@ -506,6 +559,22 @@ def _make_schedule(tier_name: str, lane: str, cron: str,
     return _diff
 
 
+def _make_rebuild_schedule(tier_name: str, cron: str, status):
+    """`{tier}_rebuild` (#108): one `load_job` run per `load.mode: rebuild` group of the tier,
+    tagged with its group so it never overlaps the group's backups."""
+    @dg.schedule(job=load_job, cron_schedule=cron, name=f"{tier_name}_rebuild",
+                 default_status=status)
+    def _rebuild(context):
+        pol = load_policy(POLICY_PATH)
+        return [dg.RunRequest(
+            run_key=f"{g.id}:rebuild:{_tick(context)}",
+            tags={"neo4j_group": g.id, "neo4j_cluster": g.cluster or "default",
+                  "neo4j_lane": "rebuild"},
+            run_config={"ops": {"load_group_op": {"config": {"group_id": g.id}}}})
+            for g in pol.groups_for_tier(tier_name) if g.load.mode == "rebuild"]
+    return _rebuild
+
+
 def _build_schedules() -> list:
     # A policy that fails to load fails the code location with its error (#75); only "no policy
     # configured at all" builds no schedules.
@@ -517,6 +586,8 @@ def _build_schedules() -> list:
            for tier_name, tier in policy.tiers.items()
            for lane, cron in (("full", tier.full_cron), ("diff", tier.diff_cron))
            if cron]  # a load-only tier may have neither (#103)
+    out += [_make_rebuild_schedule(tier_name, tier.rebuild_cron, status)
+            for tier_name, tier in policy.tiers.items() if tier.rebuild_cron]
     out += [_make_maintenance_schedule(tier_name, lane, cron, status)
             for tier_name, tier in policy.tiers.items()
             for lane, cron in (("verify", tier.verify_cron), ("aggregate", tier.aggregate_cron),
@@ -528,7 +599,7 @@ def _build_schedules() -> list:
 defs = dg.Definitions(
     assets=[backup, aggregate, verify, prune, metadata_export, system_backup],
     jobs=[backup_job, verify_job, aggregate_job, prune_job, dbms_metadata_job, dbms_system_job,
-          restore_group, metadata_restore],
+          restore_group, metadata_restore, load_job],
     schedules=_build_schedules(),
     sensors=[reconcile_registry],
     resources={

@@ -190,6 +190,7 @@ class ObjectStore(Protocol):
     def list_text_keys(self, prefix: str, suffix: str = ".cypher"): ...
     def latest_text_key(self, prefix: str, suffix: str = ".cypher") -> str | None: ...
     def list_load_artifacts(self, prefix: str): ...
+    def create_exclusive(self, key: str, text: str) -> bool: ...
 
 
 def object_store(bucket: str, endpoint_url: str | None = None, region: str = "us-east-1",
@@ -394,6 +395,21 @@ class S3ObjectStore(_BaseObjectStore):
     def get_text(self, key: str) -> str:
         return self._client().get_object(Bucket=self.bucket, Key=key)["Body"].read().decode()
 
+    def create_exclusive(self, key: str, text: str) -> bool:
+        """Write `key` only if it doesn't exist (S3 conditional write, `If-None-Match: *`);
+        False when it already exists. Atomic; used for the per-group lock (#108)."""
+        from botocore.exceptions import ClientError
+
+        try:
+            self._client().put_object(Bucket=self.bucket, Key=key, Body=text.encode(),
+                                      IfNoneMatch="*", **self.write_args)
+            return True
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("PreconditionFailed",
+                                                            "ConditionalRequestConflict"):
+                return False
+            raise
+
     def list_text_keys(self, prefix: str, suffix: str = ".cypher"):
         out = []
         paginator = self._client().get_paginator("list_objects_v2")
@@ -467,6 +483,15 @@ class AzureObjectStore(_BaseObjectStore):
     def get_text(self, key: str) -> str:
         return self._c().get_blob_client(key).download_blob().readall().decode()
 
+    def create_exclusive(self, key: str, text: str) -> bool:
+        from azure.core.exceptions import ResourceExistsError
+
+        try:
+            self._c().upload_blob(name=key, data=text.encode(), overwrite=False)
+            return True
+        except ResourceExistsError:
+            return False
+
     def list_text_keys(self, prefix: str, suffix: str = ".cypher"):
         return [(b.name, b.last_modified)
                 for b in self._c().list_blobs(name_starts_with=prefix) if b.name.endswith(suffix)]
@@ -532,6 +557,15 @@ class GcsObjectStore(_BaseObjectStore):
 
     def get_text(self, key: str) -> str:
         return self._b().blob(key).download_as_bytes().decode()
+
+    def create_exclusive(self, key: str, text: str) -> bool:
+        from google.api_core.exceptions import PreconditionFailed
+
+        try:
+            self._b().blob(key).upload_from_string(text, if_generation_match=0)
+            return True
+        except PreconditionFailed:
+            return False
 
     def list_text_keys(self, prefix: str, suffix: str = ".cypher"):
         return [(b.name, b.updated)

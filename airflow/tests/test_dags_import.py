@@ -73,7 +73,10 @@ def test_policy_crons_drive_every_dag(tmp_path, monkeypatch):
     assert "0 1 * * *" in sched["neo4j_dbms_system_default"]
     assert not {"neo4j_verify", "neo4j_aggregate", "neo4j_prune", "neo4j_metadata_backup",
                 "neo4j_system_backup"} & set(bag.dags)
-    assert not any(d.endswith("_nightly") for d in bag.dags if not d.startswith("neo4j_backup_"))
+    # the rebuild-only tier gets its rebuild DAG (#108) and no maintenance DAGs
+    nightly = sorted(d for d in bag.dags if d.endswith("_nightly"))
+    assert nightly == ["neo4j_rebuild_nightly"], nightly
+    assert "neo4j_load" in bag.dags
 
 
 def test_clusters_get_their_own_dbms_dags_and_pools(tmp_path, monkeypatch):

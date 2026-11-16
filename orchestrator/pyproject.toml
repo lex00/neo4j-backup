@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "dagster-webserver"]
+dev = ["pytest", "dagster-webserver", "pyarrow"]  # pyarrow: Parquet input for just load-smoke (#107)
 # Only needed for RUNNER_MODE=k8s. Subprocess (EC2/VM) deployments don't need it — the
 # import is lazy, so the code location loads without dagster-k8s installed.
 k8s = ["dagster-k8s>=0.24"]

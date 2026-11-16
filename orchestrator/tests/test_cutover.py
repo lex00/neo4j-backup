@@ -86,3 +86,21 @@ def test_from_env_selection(monkeypatch):
     monkeypatch.setenv("CUTOVER_STRATEGY", "bogus")
     with pytest.raises(RuntimeError, match="unknown CUTOVER_STRATEGY"):
         from_env()
+
+
+def test_first_load_creates_the_alias():
+    from neo4j_backup_core.cutover import AliasSwapCutover
+
+    class N:
+        def __init__(self):
+            self.calls = []
+
+        def create_alias(self, a, t):
+            self.calls.append(("create", a, t))
+
+        def alter_alias(self, a, t):
+            self.calls.append(("alter", a, t))
+    n = N()
+    AliasSwapCutover().cutover(n, "cat", "cat-1", None)
+    AliasSwapCutover().cutover(n, "cat", "cat-2", "cat-1")
+    assert n.calls == [("create", "cat", "cat-1"), ("alter", "cat", "cat-2")]

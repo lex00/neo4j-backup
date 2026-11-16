@@ -66,6 +66,7 @@ command on the same cron:
 | `tiers.<t>.verify_cron` | `neo4j-backup verify <group>` |
 | `tiers.<t>.aggregate_cron` | `neo4j-backup aggregate <group> --confirm` |
 | `tiers.<t>.prune_cron` | `neo4j-backup prune --confirm` (all groups and the DBMS sweep; one job is enough) |
+| `tiers.<t>.rebuild_cron` | `neo4j-backup load <group> --confirm` for each `load.mode: rebuild` group on tier `<t>` (never at the same time as that group's backups: one job per group, or a lock in your CI) |
 | `dbms.metadata_cron` | `neo4j-backup metadata export` |
 | `dbms.system_backup_cron` | `neo4j-backup system-backup` |
 

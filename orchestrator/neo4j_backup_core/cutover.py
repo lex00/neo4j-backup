@@ -25,7 +25,10 @@ class AliasSwapCutover:
     """Default — `ALTER ALIAS … SET DATABASE TARGET` (today's behaviour)."""
 
     def cutover(self, neo, alias: str, new_physical: str, old_physical: str | None) -> None:
-        neo.alter_alias(alias, new_physical)
+        if old_physical is None:  # a first load (#107): the alias doesn't exist yet
+            neo.create_alias(alias, new_physical)
+        else:
+            neo.alter_alias(alias, new_physical)
 
 
 class ExternalRoutingCutover:

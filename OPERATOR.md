@@ -247,9 +247,16 @@ there is none, so run `neo4j-backup load <group> --reapply-access --confirm`.
 
 The manual route in [IMPORT.md](IMPORT.md) still works for builds the tool doesn't run.
 
-**Planned:** scheduled rebuilds from the policy
-([#108](https://github.com/lex00/neo4j-backup/issues/108)) and custom build steps such as RDF
-conversion ([#109](https://github.com/lex00/neo4j-backup/issues/109)).
+Scheduled rebuilds come from the tier's `rebuild_cron` (#108): Dagster's `<tier>_rebuild`
+schedule (one `load_job` run per rebuild group) and Airflow's `neo4j_rebuild_<tier>` DAG; on demand,
+Dagster's `load_job` and Airflow's `neo4j_load`. A group's rebuild never overlaps its own backups:
+in Dagster through the `neo4j_group` tag limit (sample `dagster.yaml`), in Airflow through a lock
+object (`_locks/<group>.lock`) that backups and loads both take, waiting up to
+`NEO4J_BACKUP_LOCK_WAIT` seconds (default 3600). A failed rebuild is a failed run; the previous
+load keeps serving. The first load of a new group creates its alias.
+
+**Planned:** custom build steps such as RDF conversion
+([#109](https://github.com/lex00/neo4j-backup/issues/109)).
 
 ## Change a customer's tier
 
