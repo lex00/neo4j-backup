@@ -194,6 +194,32 @@ def _floor(t: datetime) -> datetime:
     return t.replace(microsecond=0)
 
 
+def backs_up(neo4j, group, physical: str) -> dict:
+    """Whether a member gets scheduled backups (#112): only while its live database is
+    read-write AND the group protects its writes (`protect_writes` true, the default for
+    read-write). The live access mode decides, not the policy alone: a database still read-write
+    after the policy says read-only keeps getting backups until a load makes it read-only.
+    Returns {backs_up, reason}."""
+    load = getattr(group, "load", None)
+    if (getattr(load, "writes", None) == "read-write"
+            and getattr(load, "protect_writes", None) is False):
+        return {"backs_up": False, "reason": "protect_writes: false (writes are disposable)"}
+    access = neo4j.database_access(physical) if hasattr(neo4j, "database_access") else None
+    if access == "read-only":
+        return {"backs_up": False, "reason": "the database is read-only (its loads restore it)"}
+    return {"backs_up": True, "reason": None}
+
+
+def apply_access(neo4j, group, physical: str, *, log: Log = _NOLOG) -> str | None:
+    """Make a new physical read-only when the group says `writes: read-only` (#112); called after
+    the seed and before the swap. Returns the access set, or None when nothing changed."""
+    if getattr(getattr(group, "load", None), "writes", None) == "read-only":
+        neo4j.set_read_only(physical, True)
+        log(f"{physical}: set read-only")
+        return "read-only"
+    return None
+
+
 def needs_full(neo4j, store, layout, group_id: str, alias: str) -> bool:
     """True when a DIFF of this member would fail for want of a base full (#74). Unknown
     (pre-#118) backups count as a possible base, so this never forces a full on a guess."""
@@ -203,7 +229,7 @@ def needs_full(neo4j, store, layout, group_id: str, alias: str) -> bool:
 
 def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: str, alias: str,
                   kind: str, *, upload: str = "admin", staging: str | None = None,
-                  log: Log = _NOLOG, physical: str | None = None) -> dict:
+                  log: Log = _NOLOG, physical: str | None = None, group=None) -> dict:
     """Back up the physical the alias currently targets (or `alias` itself if it's a physical
     name) into that physical's own prefix, so repeated backups form one chain. A DIFF with no
     full of the current store to diff against is skipped, not failed: the result has
@@ -218,6 +244,13 @@ def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: s
     if not physical:
         raise OpError(f"{alias!r} resolves to no physical database — bootstrap the group first")
     prefix = layout.physical_prefix(group_id, alias, physical)
+    if group is not None:  # not backed up by design (#112): read-only, or writes disposable
+        decision = backs_up(neo4j, group, physical)
+        if not decision["backs_up"]:
+            log(f"{group_id}/{alias}: not backed up by design ({decision['reason']})")
+            return {"group": group_id, "alias": alias, "physical": physical, "kind": kind,
+                    "artifact": None, "taken": None, "skipped": True, "needs_full": False,
+                    "by_design": decision["reason"]}
     if kind.upper() == "DIFF":
         if artifacts.read(store, prefix)[1]:  # pre-#118 backups: inspect so the check can see them
             record_artifacts(run_admin, runner, store, prefix, log=log)
@@ -688,6 +721,7 @@ def _restore_by_name(neo4j, group, name: str, key: str, existed: bool, *, store,
                         store_base=None if uri and not uri.startswith(store.uri(""))
                         else store.uri(""))
     log(f"restored {name} <= {key}")
+    apply_access(neo4j, group, name, log=log)  # writes: read-only (#112)
     try:
         granted = regrant(neo4j, held, log=log)
     except OpError as e:
@@ -727,6 +761,7 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
                         # an external dump (#159) is outside the backup store by design
                         store_base=None if seed.get("external") else store.uri(""))
     log(f"seeded {newdb} <= {key}" + (f" until {until}" if until else ""))
+    apply_access(neo4j, group, newdb, log=log)  # writes: read-only, before the swap (#112)
     return {"mode": "alias-swap", "alias": name, "newdb": newdb, "old": old, "key": key,
             "seed": seed, "group": group.id}
 
@@ -832,7 +867,8 @@ def baseline_after_restore(run_admin: RunAdmin, neo4j, store, runner, layout, gr
         physical = m.get("newdb") or m["name"]
         try:
             out = backup_target(run_admin, neo4j, store, runner, layout, group.id, alias, "FULL",
-                                upload=upload, staging=staging, log=log, physical=physical)
+                                upload=upload, staging=staging, log=log, physical=physical,
+                                group=group)
         except Exception as e:  # noqa: BLE001 - any failure: the restore itself is done
             raise BaselineError(
                 f"restore applied, but the baseline full of {physical} failed ({e}); run "

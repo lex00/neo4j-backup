@@ -101,7 +101,7 @@ def backup(
         out = ops.backup_target(
             _admin(context, runner, pipes_subprocess_client), neo4j, store, runner, _layout,
             group_id, alias, config.kind, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
-            log=context.log.info,
+            log=context.log.info, group=load_policy(POLICY_PATH).group(group_id),
         )
     except ops.OpError as e:
         raise dg.Failure(str(e))
@@ -115,6 +115,7 @@ def backup(
             "taken": out["taken"] or "",
             # a DIFF with no full to diff against is skipped; the diff schedule asks for a full
             "skipped": out["skipped"], "needs_full": out["needs_full"],
+            "by_design": out.get("by_design") or "",
             "bytes": dg.MetadataValue.int(size), "upload": BACKUP_UPLOAD,
         }
     )

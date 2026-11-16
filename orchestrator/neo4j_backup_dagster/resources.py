@@ -60,6 +60,12 @@ class Neo4jResource(dg.ConfigurableResource):
     def database_created(self, *a, **k):
         return self._core().database_created(*a, **k)
 
+    def database_access(self, *a, **k):
+        return self._core().database_access(*a, **k)
+
+    def set_read_only(self, *a, **k):
+        return self._core().set_read_only(*a, **k)
+
     def stop_database(self, *a, **k):
         return self._core().stop_database(*a, **k)
 

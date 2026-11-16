@@ -100,7 +100,8 @@ def cmd_backup(args):
     store, runner, neo, layout = env.store(), env.runner(), env.neo4j(), paths.get_layout()
     run = _run_admin(runner)
     done = [ops.backup_target(run, neo, store, runner, layout, group.id, name, args.kind,
-                              upload=_UPLOAD, staging=_STAGING, log=_log) for name in group.names]
+                              upload=_UPLOAD, staging=_STAGING, log=_log, group=group)
+            for name in group.names]
     # a DIFF with no full to diff against is skipped, not failed (#74); the caller runs a FULL
     needs = [d["alias"] for d in done if d.get("needs_full")]
     return envelope("backup", ok=True, group=group.id,

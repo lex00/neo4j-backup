@@ -163,7 +163,8 @@ def run_backup(group: str | None = None, kind: str = "AUTO", tenant: str | None 
     store, runner, neo, layout = env.store(), env.runner(), env.neo4j(), _layout()
     run = _run_admin(runner)
     done = [ops.backup_target(run, neo, store, runner, layout, g.id, m, kind,
-                              upload=_UPLOAD, staging=_STAGING, log=_log) for m in g.names]
+                              upload=_UPLOAD, staging=_STAGING, log=_log, group=g)
+            for m in g.names]
     return {"group": group, "kind": kind, "backups": done}
 
 
