@@ -138,6 +138,9 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- `import --to-dump` runs the import, the dump and the removal of the local store as one runner
+  step (#167): two separate steps broke when each command is its own pod (k8s modes), and the
+  leftover store made a second load under the same name fail.
 - **`--until` picks the chain that covers the time** (#114). Restore always seeded from the
   member's newest backup, so a time before an earlier restore (in the previous database's chain)
   failed. Now, per member, it picks the chain whose window covers the time, across every physical
