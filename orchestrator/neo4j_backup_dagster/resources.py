@@ -161,6 +161,9 @@ class ObjectStoreResource(dg.ConfigurableResource):
     def list_load_artifacts(self, *a, **k):
         return self._core().list_load_artifacts(*a, **k)
 
+    def list_prefixes(self, *a, **k):
+        return self._core().list_prefixes(*a, **k)
+
     def latest_text_key(self, *a, **k):
         return self._core().latest_text_key(*a, **k)
 

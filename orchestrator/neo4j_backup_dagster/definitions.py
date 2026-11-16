@@ -204,7 +204,8 @@ def prune(
     out = ops.prune(store, pol, _layout,
                     run_admin=_admin(context, runner, pipes_subprocess_client), runner=runner,
                     log=context.log.info, dbms=config.dbms,
-                    groups=pol.groups_for_tier(config.tier) if config.tier else None)
+                    groups=pol.groups_for_tier(config.tier, include_retired=True)
+                    if config.tier else None)
     context.log.info(f"pruned {out['deleted']} artifacts; kept {out['kept_for_chains']} past "
                      f"retention for their chains; {out['unknown_kept']} without metadata")
     return dg.MaterializeResult(

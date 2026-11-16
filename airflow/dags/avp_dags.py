@@ -45,7 +45,7 @@ def prune_tier(tier: str) -> int:
     """Chain-aware prune (#73) of one tier's groups; the DBMS sweep runs with the DBMS DAGs
     (#104). Artifacts without a sidecar are inspected first via run_admin."""
     pol = load_policy(config.policy_path())
-    return ops.prune(config.store(), pol, _layout, groups=pol.groups_for_tier(tier), dbms=False,
+    return ops.prune(config.store(), pol, _layout, groups=pol.groups_for_tier(tier, include_retired=True), dbms=False,
                      run_admin=run_admin, runner=config.runner(), log=print)["deleted"]
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -259,6 +260,35 @@ class DbGroup(BaseModel):
     topology: Topology | None = None
     overrides: dict[str, dict] = Field(default_factory=dict)
     load: Load = Field(default_factory=Load)  # absent: mode live, as before (#103)
+    # offboarding (#124): a retired group has no schedules; its artifacts stay restorable until
+    # `retired_on` + `retire_after_days` (default: retention_days), then prune deletes them
+    state: Literal["active", "retired"] = "active"
+    retired_on: date | None = None
+    retire_after_days: int | None = None
+
+    @property
+    def retired(self) -> bool:
+        return self.state == "retired"
+
+    def deletes_on(self) -> date | None:
+        """The day prune deletes a retired group's artifacts."""
+        if not self.retired or self.retired_on is None:
+            return None
+        return self.retired_on + timedelta(days=self.retire_after_days
+                                           if self.retire_after_days is not None
+                                           else self.retention_days)
+
+    @model_validator(mode="after")
+    def _retirement(self) -> "DbGroup":
+        if self.retired and self.retired_on is None:
+            raise ValueError(f"group {self.id!r}: state: retired needs retired_on (YYYY-MM-DD), "
+                             f"the day the retention period starts")
+        if not self.retired and (self.retired_on or self.retire_after_days is not None):
+            raise ValueError(f"group {self.id!r}: retired_on and retire_after_days need "
+                             f"state: retired")
+        if self.retire_after_days is not None and self.retire_after_days < 0:
+            raise ValueError(f"group {self.id!r}: retire_after_days must be >= 0")
+        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -527,6 +557,8 @@ class Policy(BaseModel):
         apart than its `rpo_minutes` can't meet it (#123)."""
         out = []
         for g in self.db_groups:
+            if g.retired:  # no schedules (#124)
+                continue
             t = self.tiers[g.tier]
             load = g.load
             by_design = load.writes == "read-only" or (load.writes == "read-write"
@@ -597,8 +629,11 @@ class Policy(BaseModel):
         """One work unit per (group, member), encoded as 'group/name' (alias or database)."""
         return [f"{g.id}/{n}" for g in self.db_groups for n in g.names]
 
-    def groups_for_tier(self, tier: str) -> list[DbGroup]:
-        return [g for g in self.db_groups if g.tier == tier]
+    def groups_for_tier(self, tier: str, *, include_retired: bool = False) -> list[DbGroup]:
+        """The tier's groups for its scheduled lanes; retired groups (#124) are left out, except
+        for prune (`include_retired`), which deletes their artifacts when the period ends."""
+        return [g for g in self.db_groups if g.tier == tier
+                and (include_retired or not g.retired)]
 
 
 def _days(gap) -> str:

@@ -105,7 +105,8 @@ def cmd_status(args):
                   else policy.db_groups)
     except policy_mod.SelectionError as e:
         return envelope("status", ok=False, error=make_error("usage", str(e))), Exit.USAGE
-    out = freshness.status(env.store(), paths.get_layout(), groups)
+    out = freshness.status(env.store(), paths.get_layout(), groups,
+                           policy=None if (args.group or args.tenant) else policy)
     if args.stale and out["stale"]:
         return envelope("status", ok=False, result=out, error=make_error(
             "stale", f"{len(out['stale'])} target(s) past rpo_minutes: "

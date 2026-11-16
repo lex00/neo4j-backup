@@ -333,12 +333,31 @@ tier whose full backups are further apart than the group's `retention_days`, rea
 
 ## Offboard a customer
 
-Remove the group from the policy; its schedules stop. Its backups stay in the bucket and nothing
-deletes them: remove `s3://<bucket>/<group>/` yourself once your retention obligations allow, and
-drop the customer's databases and aliases on the cluster.
+Retire the group rather than removing it (#124):
 
-**Planned:** a `retired` state with a final retention period
-([#124](https://github.com/lex00/neo4j-backup/issues/124)).
+```yaml
+- id: shop
+  profile: app-live
+  aliases: [shop]
+  state: retired
+  retired_on: 2026-11-16      # the retention period starts here
+  retire_after_days: 90       # default: the group's retention_days
+```
+
+1. Ship the policy. The group's schedules stop (backups, verify, aggregate, rebuilds, cleanup).
+   Its backups and loads stay restorable: `restore` and `restore-points` work as before.
+2. `neo4j-backup status` lists the group under `retired` with the day its data goes
+   (`deletes_on`).
+3. On or after that day, the tier's prune (or `neo4j-backup prune`) deletes every member's
+   folder in the store. `prune --dry-run` shows it first.
+4. The tool doesn't touch the cluster: drop the customer's aliases and databases yourself
+   (`DROP ALIAS <alias> FOR DATABASE`, then `DROP DATABASE <physical>`; `SHOW ALIASES FOR
+   DATABASE` lists what each alias points at). Do it after the last restore you might need.
+5. Once the data is gone, remove the group from the policy.
+
+A group removed from the policy without being retired keeps its backups: nothing deletes them.
+`status` reports its folder under `unmanaged` (store folders no group owns) so it isn't
+forgotten; delete it yourself once your retention obligations allow.
 
 ## Recover after losing a cluster, or move a group
 
