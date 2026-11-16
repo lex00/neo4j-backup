@@ -44,8 +44,8 @@ def main() -> None:
     store = config.store()
     before = len(store.list_artifacts(paths.system_prefix()))
 
-    print("== BACKUP: neo4j_system_backup via dag.test() ==")
-    run = sd.neo4j_system_backup_dag.test()
+    print("== BACKUP: neo4j_dbms_system_default via dag.test() ==")
+    run = sd.neo4j_dbms_system_default.test()
     assert _ok(run), f"system backup DAG state={getattr(run,'state',run)}"
     after = len(store.list_artifacts(paths.system_prefix()))
     assert after > before, f"no system artifact written ({before}->{after})"

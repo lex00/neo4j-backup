@@ -59,7 +59,8 @@ at every restore, because the name changes.
    (a file the workers read, or `s3://…` with `NEO4J_BACKUP_POLICY`). Dagster's
    `reconcile_registry` sensor adds the new targets within five minutes; Airflow picks them up at
    the next DAG parse.
-5. If the tier is new, switch on its schedules: Dagster creates them stopped.
+5. If the tier is new, switch on its schedules: Dagster creates them stopped, unless the policy
+   says `schedules: running`.
 6. Run the first backup now rather than waiting for the schedule, then verify it:
    `neo4j-backup backup <group> --kind FULL` and `neo4j-backup verify <group>`.
 7. Tell the customer their tier, how far back they can restore (`retention_days`), and how to
@@ -69,8 +70,7 @@ Give a customer's groups a `tenant:` label (or put it in their profile) to act o
 once: `neo4j-backup backup --tenant acme`, `verify --tenant acme`, `targets --tenant acme`. It's a
 label for selecting groups, not access control.
 
-**Planned:** an `adopt` command ([#92](https://github.com/lex00/neo4j-backup/issues/92)), and an option for
-new schedules to start running ([#104](https://github.com/lex00/neo4j-backup/issues/104)).
+**Planned:** an `adopt` command ([#92](https://github.com/lex00/neo4j-backup/issues/92)).
 
 ## Check that customers are covered
 
@@ -79,13 +79,14 @@ new schedules to start running ([#104](https://github.com/lex00/neo4j-backup/iss
 - Freshness: the MCP tool `backup_status` lists every target's newest backup and its age in
   hours ([MCP.md](MCP.md)).
 - Restorability: `neo4j-backup verify <group>` copies the latest backups aside, combines them
-  into a full backup and runs a consistency check, without touching the cluster. Airflow runs it
-  daily (`neo4j_verify`); in Dagster, materialize the `verify` asset or schedule it yourself.
+  into a full backup and runs a consistency check, without touching the cluster. It runs on each
+  tier's `verify_cron` (default daily 06:00): Dagster's `<tier>_verify` schedule, Airflow's
+  `neo4j_verify_<tier>`. Aggregate and prune run the same way (`aggregate_cron`, `prune_cron`), and
+  the metadata export and `system` backup on the policy's `dbms:` crons (#104).
 
 **Planned:** freshness checked against each group's `rpo_minutes`
 ([#123](https://github.com/lex00/neo4j-backup/issues/123)), a `restore-points` command
-([#113](https://github.com/lex00/neo4j-backup/issues/113)), and verify/aggregate/prune schedules
-set in the policy ([#104](https://github.com/lex00/neo4j-backup/issues/104)).
+([#113](https://github.com/lex00/neo4j-backup/issues/113)).
 
 ## Restore on a customer's request
 

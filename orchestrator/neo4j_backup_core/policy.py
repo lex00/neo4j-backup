@@ -197,12 +197,42 @@ class Tier(BaseModel):
     full_cron: str | None = None
     diff_cron: str | None = None
     rebuild_cron: str | None = None
+    # Maintenance (#104). On a tier that takes backups (has full_cron) an unset value means
+    # today's fixed schedule, so behaviour is unchanged; a rebuild-only tier gets none unless set.
+    verify_cron: str | None = None
+    aggregate_cron: str | None = None
+    prune_cron: str | None = None
+    cleanup_cron: str | None = None  # for cleanup of superseded databases (#93)
 
     @model_validator(mode="after")
     def _some_cron(self) -> "Tier":
         if not (self.full_cron or self.diff_cron or self.rebuild_cron):
             raise ValueError("a tier needs at least one of full_cron, diff_cron, rebuild_cron")
+        if self.full_cron:
+            for name, default in MAINTENANCE_DEFAULTS.items():
+                if getattr(self, name) is None:
+                    setattr(self, name, default)
         return self
+
+    def crons(self) -> dict[str, str]:
+        """Every job this tier schedules: lane name -> cron (only those set)."""
+        names = ("full", "diff", "rebuild", "verify", "aggregate", "prune", "cleanup")
+        return {n: getattr(self, f"{n}_cron") for n in names if getattr(self, f"{n}_cron")}
+
+
+# Today's fixed Airflow schedules (avp_dags.py before #104): the defaults, so nothing moves.
+MAINTENANCE_DEFAULTS = {"verify_cron": "0 6 * * *", "aggregate_cron": "0 5 * * 0",
+                        "prune_cron": "0 7 * * 0"}
+
+
+class Dbms(BaseModel):
+    """DBMS-wide jobs (#104): the metadata export and the `system` database backup, and how many
+    of each to keep. Per cluster once clusters exist (#106); one `default` until then."""
+    model_config = ConfigDict(extra="forbid")
+    metadata_cron: str = "0 2 * * *"
+    system_backup_cron: str = "0 1 * * *"
+    keep_metadata: int = Field(default=14, ge=1)
+    keep_system: int = Field(default=14, ge=1)
 
 
 class SelectionError(ValueError):
@@ -269,6 +299,9 @@ class Policy(BaseModel):
     db_groups: list[DbGroup]
     tiers: dict[str, Tier]
     profiles: dict[str, dict] = Field(default_factory=dict)  # #101; resolved before validation
+    dbms: Dbms = Field(default_factory=Dbms)  # #104
+    # initial status of the Dagster schedules generated from this policy (#104)
+    schedules: Literal["stopped", "running"] = "stopped"
 
     @model_validator(mode="before")
     @classmethod

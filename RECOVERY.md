@@ -163,7 +163,7 @@ There are two ways to recover it, with different trade-offs.
 Capture the metadata as replayable Cypher and replay it against `system` over Bolt on a
 rebuilt cluster — no node access, the same agentless surface as data restore.
 
-- **Backup** — `metadata_export` (Dagster) / `neo4j_metadata_backup` (Airflow) writes one
+- **Backup** — `metadata_export` (Dagster) / `neo4j_dbms_metadata_default` (Airflow) writes one
   `_dbms/metadata-<ts>.cypher` artifact (SSE-KMS, same bucket).
 - **Restore** — `metadata_restore` / `neo4j_metadata_restore` replays the latest (or a given
   `key`): `CREATE ROLE/USER … IF NOT EXISTS`, `GRANT ROLE …`, the `SHOW PRIVILEGES AS
@@ -181,7 +181,7 @@ point-in-time snapshot — in a full DR the data restore repoints user-database 
 For **native-auth** teams that need exact password/role/privilege recovery. Back up the
 binary `system` store and restore it offline.
 
-- **Backup** — `system_backup` (Dagster) / `neo4j_system_backup` (Airflow) runs
+- **Backup** — `system_backup` (Dagster) / `neo4j_dbms_system_default` (Airflow) runs
   `neo4j-admin database backup system` (FULL) to `_dbms/system/` (SSE-KMS, retained).
 - **Restore** — offline + node-local (path B): `system` cannot be seed-from-URI'd or
   `STOP`ped, so the DBMS must be **down**. `bootstrap/restore_system.sh` (`just

@@ -196,8 +196,26 @@ instead of the DBMS default (see [RECOVERY.md](RECOVERY.md), DESIGN.md §3).
 | `full_cron` | cron string | required for groups that back up writes | used | when full backups run (the full lane) |
 | `diff_cron` | cron string | required for groups that back up writes | used | when differential backups run (the diff lane) |
 | `rebuild_cron` | cron string | required for `load.mode: rebuild` groups | decl | when rebuilds run (#108) |
+| `verify_cron` | cron string | `0 6 * * *` on tiers with `full_cron` | used | when `verify` runs for the tier's members (Dagster `<tier>_verify`, Airflow `neo4j_verify_<tier>`) |
+| `aggregate_cron` | cron string | `0 5 * * 0` on tiers with `full_cron` | used | when `aggregate` runs (`<tier>_aggregate`, `neo4j_aggregate_<tier>`) |
+| `prune_cron` | cron string | `0 7 * * 0` on tiers with `full_cron` | used | when the tier's groups are pruned (`<tier>_prune`, `neo4j_prune_<tier>`) |
+| `cleanup_cron` | cron string | `null` | decl | cleanup of superseded databases (#93) |
 
-A tier needs at least one of the three. A tier for load-only groups (read-only, or
+A tier needs at least one of `full_cron`, `diff_cron` and `rebuild_cron`. The maintenance crons
+default to the old fixed schedules on a tier that takes backups; a rebuild-only tier gets them
+only if set.
+
+**`dbms`** (top level; DBMS-wide jobs, one `default` cluster until #106)
+
+| Field | Type | Default | Status | Meaning |
+|---|---|---|---|---|
+| `metadata_cron` | cron string | `0 2 * * *` | used | metadata export (Dagster `default_dbms_metadata`, Airflow `neo4j_dbms_metadata_default`) |
+| `system_backup_cron` | cron string | `0 1 * * *` | used | `system` database backup (`default_dbms_system`, `neo4j_dbms_system_default`) |
+| `keep_metadata` | int (≥1) | `14` | used | metadata exports kept by the DBMS sweep, which runs after each export and system backup |
+| `keep_system` | int (≥1) | `14` | used | `system` backups kept |
+
+**`schedules`** (top level): `stopped` (default) or `running`, the initial status of the
+Dagster schedules generated from the policy. Airflow DAGs follow Airflow's own pause setting. A tier for load-only groups (read-only, or
 `protect_writes: false`) may have only `rebuild_cron`; it gets no backup schedules.
 
 ## What you actually tune

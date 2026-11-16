@@ -210,8 +210,12 @@ def head_physical(store, layout, group_id: str, alias: str) -> tuple[str, str]:
 
 def aggregate_target(run_admin: RunAdmin, store, runner, layout, group_id: str, alias: str,
                      *, upload: str = "admin", staging: str | None = None,
-                     log: Log = _NOLOG) -> dict:
-    """Collapse the live physical's chain into one recovered full, IN PLACE (RTO/retention)."""
+                     log: Log = _NOLOG, skip_missing: bool = False) -> dict:
+    """Collapse the live physical's chain into one recovered full, IN PLACE (RTO/retention).
+    `skip_missing` (scheduled runs, #104): a member with no backups yet is skipped, not failed."""
+    if skip_missing and not store.latest_artifact_key(layout.alias_prefix(group_id, alias)):
+        log(f"{group_id}/{alias}: no backups yet; aggregate skipped")
+        return {"alias": alias, "physical": None, "full": None, "skipped": True}
     _head, physical = head_physical(store, layout, group_id, alias)
     prefix = layout.physical_prefix(group_id, alias, physical)
     full = run_aggregate(run_admin, runner, store, physical, prefix, upload=upload, staging=staging,
@@ -220,8 +224,13 @@ def aggregate_target(run_admin: RunAdmin, store, runner, layout, group_id: str, 
 
 
 def verify_target(run_admin: RunAdmin, store, runner, layout, group_id: str, alias: str,
-                  *, upload: str = "admin", staging: str | None = None) -> dict:
-    """Non-destructive consistency check of the latest backup for the alias."""
+                  *, upload: str = "admin", staging: str | None = None,
+                  skip_missing: bool = False, log: Log = _NOLOG) -> dict:
+    """Non-destructive consistency check of the latest backup for the alias. `skip_missing`
+    (scheduled runs, #104): a member with no backups yet is skipped, not failed."""
+    if skip_missing and not store.latest_artifact_key(layout.alias_prefix(group_id, alias)):
+        log(f"{group_id}/{alias}: no backups yet; verify skipped")
+        return {"alias": alias, "physical": None, "consistent": None, "skipped": True}
     _head, physical = head_physical(store, layout, group_id, alias)
     src = layout.physical_prefix(group_id, alias, physical)
     scratch = f"_verify/{group_id}/{physical}/"
@@ -304,17 +313,23 @@ def keep_count(name: str, value) -> int:
     return value
 
 
-def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 14,
-          dry_run: bool = False, run_admin: RunAdmin | None = None, runner=None,
-          now: datetime | None = None, log: Log = _NOLOG) -> dict:
+def prune(store, policy, layout, *, keep_system: int | None = None,
+          keep_metadata: int | None = None, dry_run: bool = False,
+          run_admin: RunAdmin | None = None, runner=None, now: datetime | None = None,
+          log: Log = _NOLOG, groups: list | None = None, dbms: bool = True) -> dict:
     """Delete backups past each group's `retention_days` without breaking a chain (#73): per
     member, whole chains are deleted only when nothing kept depends on them
     (`plan_member_prune`). Full or diff is read from the sidecars (#118). Artifacts with no sidecar
     are inspected first when `run_admin`/`runner` are given (this writes sidecars even on a dry
     run, so the preview and the real prune see the same chains); otherwise they are kept and
     counted in `unknown_kept`. Also keeps the newest `keep_metadata` DBMS metadata exports and
-    `keep_system` system fulls (both integers >= 1, #78). `dry_run` lists the victims (`keys`)
-    without deleting."""
+    `keep_system` system fulls (both integers >= 1, #78; default: the policy's `dbms:` block).
+    `dry_run` lists the victims (`keys`) without deleting. `groups` limits the artifact prune to
+    those groups (a tier's, #104); `dbms=False` skips the DBMS sweep (it runs per cluster)."""
+    pd = getattr(policy, "dbms", None)
+    keep_system = keep_system if keep_system is not None else getattr(pd, "keep_system", 14)
+    keep_metadata = (keep_metadata if keep_metadata is not None
+                     else getattr(pd, "keep_metadata", 14))
     keep_count("keep_system", keep_system)
     keep_count("keep_metadata", keep_metadata)
     now = now or datetime.now(timezone.utc)
@@ -333,7 +348,7 @@ def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 
             store.delete_keys(keys)
 
     swept: list[str] = []
-    for g in policy.db_groups:
+    for g in (policy.db_groups if groups is None else groups):
         cutoff = now - timedelta(days=g.retention_days)
         for a in g.names:
             prefix = layout.alias_prefix(g.id, a)
@@ -346,15 +361,17 @@ def prune(store, policy, layout, *, keep_system: int = 14, keep_metadata: int = 
             unknown_kept.extend(read["unknown"])
             _sweep(keys, f"{g.id}/{a}")
             swept.append(prefix)
-    # DBMS metadata: keep the newest N (mirrors metadata.prune, but enumerable for dry-run)
-    marts = sorted(store.list_text_keys(layout.metadata_prefix()), key=lambda t: t[1])
-    _sweep([k for (k, _m) in marts[:-keep_metadata]], "_dbms/metadata")
-    sysarts = sorted(store.list_artifacts(layout.system_prefix()), key=lambda t: t[2])
-    _sweep([k for (k, _s, _m) in sysarts[:-keep_system]], "_dbms/system")
+    if dbms:
+        # DBMS metadata: keep the newest N (mirrors metadata.prune, but enumerable for dry-run)
+        marts = sorted(store.list_text_keys(layout.metadata_prefix()), key=lambda t: t[1])
+        _sweep([k for (k, _m) in marts[:-keep_metadata]], "_dbms/metadata")
+        sysarts = sorted(store.list_artifacts(layout.system_prefix()), key=lambda t: t[2])
+        _sweep([k for (k, _s, _m) in sysarts[:-keep_system]], "_dbms/system")
+        swept.append(layout.system_prefix())
     # sidecars (#118) go with their artifacts
     sidecars = 0
     if not dry_run:
-        for prefix in [*swept, layout.system_prefix()]:
+        for prefix in swept:
             sidecars += len(artifacts.drop_orphans(store, prefix))
     return {"deleted": len(victims), "detail": detail, "keys": victims, "dry_run": dry_run,
             "sidecars_deleted": sidecars, "kept_for_chains": held_total,

@@ -191,8 +191,9 @@ All of them read the same policy and produce the same backups, so you can change
    [Airflow README](airflow/README.md).
 7. Try one group by hand. Back up one group, verify it, then restore it into a throwaway
    group before trusting it with a customer. Check the scratch size and the runner's memory.
-8. Turn on the schedules. In Dagster the `reconcile_registry` sensor and the tier schedules
-   start stopped; switch them on. In Airflow, unpause the DAGs.
+8. Turn on the schedules. In Dagster the `reconcile_registry` sensor and the schedules start
+   stopped; switch them on (or set `schedules: running` in the policy). In Airflow, unpause the
+   DAGs. Every schedule comes from the policy: the tier crons and the `dbms:` block.
 
 ### What's planned
 
