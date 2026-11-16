@@ -85,7 +85,7 @@ floci. What that covers, and what it doesn't:
 |---|---|---|
 | Neo4j topology | single server; a three-server cluster in Docker (backup from the cluster's backup ports, restore with `TOPOLOGY 1 PRIMARY 2 SECONDARIES`, the alias seen by every server); two independent servers for restore into another cluster | a production cluster across hosts or zones |
 | Object store | S3 API on floci; Azure on Azurite (store operations; Neo4j can't seed from an emulator); GCS against fakes | real AWS S3, Azure Blob and GCS; SSE-KMS with a real KMS key (checked on MinIO before 2026-11) |
-| Orchestrators | Dagster 1.13 in-process (`execute_in_process`, `materialize`); Airflow 3.2 with `dag.test`; the deploy images build and load (Dagster `definitions validate`, Airflow DagBag); `helm template` of the Dagster values | a deployed Dagster instance or Airflow scheduler with real run launchers |
+| Orchestrators | Dagster 1.13 in-process (`execute_in_process`, `materialize`); Dagster 1.13 on its Helm chart in k3d with `deploy/helm-values.yaml` (code location, `neo4j` pool, a `status_job` run pod; `just k3d-helm-smoke`); Airflow 3.2 with `dag.test`; the Airflow deploy image builds and its DAGs load | Airflow deployed with its Helm chart and KubernetesExecutor; Dagster+ |
 | Runner | subprocess (in a container); `RUNNER_MODE=k8s` on k3d for both orchestrators (backups, an import build, an image build) | k8s on a managed cluster with IRSA or workload identity |
 | CLI and MCP | every command's smoke (`just cli-smoke`, `ops-smoke`, `move-smoke`, `load-smoke`, `mcp-smoke`, ...) | |
 

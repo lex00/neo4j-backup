@@ -73,6 +73,11 @@ k3d-load-smoke:
 k3d-secret-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_k8s_secret.py
 
+# build first: docker build -f orchestrator/deploy/Dockerfile -t neo4j-backup-dagster:k3d .
+# k3d: the Dagster Helm chart with deploy/helm-values.yaml and a status_job run pod (#247)
+k3d-helm-smoke:
+    ./k3d/helm_dagster.sh
+
 # k3d: delete the validation cluster
 k3d-down:
     ./k3d/down.sh
