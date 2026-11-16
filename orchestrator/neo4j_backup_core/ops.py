@@ -329,6 +329,43 @@ def import_to_dump(run_admin: RunAdmin, runner, store, layout, group_id: str, me
             "uri": store.uri(key), "argv": imported["argv"]}
 
 
+def export_dumps(run_admin: RunAdmin, runner, store, layout, group, *, until: str | None = None,
+                 log: Log = _NOLOG) -> dict:
+    """A portable `.dump` of every member at `until` (or its latest backup) (#160), written to the
+    member's `_seed/<ts>/` folder. Each member's chain is chosen as a restore would (#114); the
+    runner restores it into a throwaway local store, dumps it, and removes the store, so the
+    cluster is never touched. A member whose seed is already a load artifact is reported, not
+    copied."""
+    store, runner = _store(store, group.id), _per(runner, group.id)
+    seeds = choose_seeds(store, layout, group, until)
+    ts = naming.ts()
+    out = []
+    for name in group.names:
+        seed = seeds[name]
+        if seed.get("load"):
+            out.append({"member": name, "key": seed["key"], "already_a_dump": True})
+            continue
+        local = f"export-{naming.slug(name)}-{ts}"[:63]
+        prefix = f"{layout.load_prefix(group.id, name)}{ts}/"
+        cmd = runner.export_command(
+            store.uri(seed["key"]), local, store.uri(prefix),
+            until=_admin_until(seed["until"]))
+        _admin(run_admin, cmd, store)
+        key = f"{prefix}{local}.dump"
+        log(f"exported {group.id}/{name} -> {key}")
+        out.append({"member": name, "key": key, "from": seed["key"], "until": seed["until"],
+                    "chain": seed.get("chain")})
+    return {"group": group.id, "until": until, "exports": out}
+
+
+def _admin_until(until: str | None) -> str | None:
+    """neo4j-admin's --restore-until takes `YYYY-MM-DD HH:MM:SS` (UTC); finer precision is
+    dropped, which can only exclude transactions from that last second."""
+    if not until:
+        return None
+    return _sidecar_time(until).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def import_database(run_admin: RunAdmin, runner, database: str, source_args: list) -> dict:
     """Bulk-import raw data into an offline store on the loader (#16): the reusable tail's first step.
     Structures + runs `neo4j-admin database import full`; `source_args` is a passthrough. The rest of

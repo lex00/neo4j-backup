@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **`export <group> [--until T]`** (#160, part of #98): a portable `.dump` of each member at a
+  point in time (or the latest backup), written to its `_seed/` folder. The runner restores the
+  covering chain into a throwaway local store, dumps it and removes it in one step; the cluster is
+  never touched. Guarded (`--dry-run` shows the chain per member), with `--ticket` / `--reason`.
 - **Prune keeps `keep_loads` load artifacts per member** (#157, part of #98): the newest
   `load.keep_loads` dumps in each member's `_seed/` folder stay; older ones go, whatever their
   age. The preview lists them under `loads` (CLI, MCP).

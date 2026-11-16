@@ -39,7 +39,14 @@ neo4j-backup --json restore <group> --from-dump <member>=<result.key> --dry-run 
 neo4j-backup --json restore <group> --from-load --confirm   # every member's newest load
 ```
 
-The restore copies privileges and takes the baseline full backup, as any restore does. A group
+The restore copies privileges and takes the baseline full backup, as any restore does.
+
+**Outbound.** `neo4j-backup export <group> [--until <iso>] --confirm` gives a portable dump of
+each member at any point a backup chain covers (or the latest backup), for a customer who wants
+their data out, or a copy to load elsewhere. In the runner it restores the chain into a throwaway
+local store (`neo4j-admin database restore --restore-until`), dumps it to the member's `_seed/`
+folder and removes the store; the cluster is never touched (#160). `--restore-until` works to the
+second. A group
 whose members have no `.backup` yet (load-only) seeds from the newest load without either flag.
 The imported store stays in the loader's data directory; throw the loader away, or remove the
 store, afterwards. The `.backup` route below stays for anyone who wants a native backup.
