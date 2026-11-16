@@ -95,6 +95,18 @@ def _by_tenant(cmd, op):
     return run
 
 
+def cmd_restore_points(args):
+    """What a group can be restored to, per member (#113). Read-only: sidecars and load folders,
+    and Neo4j only to name the current database."""
+    from neo4j_backup_core import points
+
+    policy = load_policy(env.policy_path())
+    group = policy.group(args.group)
+    out = points.restore_points(env.store(), paths.get_layout(), group, neo4j=env.neo4j(),
+                                policy=policy)
+    return envelope("restore-points", ok=True, group=group.id, result=out), Exit.OK
+
+
 def cmd_backup(args):
     group = _group(args)
     store, runner, neo, layout = env.store(), env.runner(), env.neo4j(), paths.get_layout()
@@ -393,6 +405,10 @@ def build_parser() -> argparse.ArgumentParser:
     b = selectable(sub.add_parser("backup", help="back up every database in a policy group"))
     b.add_argument("--kind", default="AUTO", choices=["AUTO", "FULL", "DIFF"])
     b.set_defaults(func=_by_tenant(cmd_backup, "backup"))
+
+    rp = selectable(sub.add_parser("restore-points",
+                                   help="what each member can be restored to (read-only, #113)"))
+    rp.set_defaults(func=_by_tenant(cmd_restore_points, "restore-points"))
 
     v = selectable(sub.add_parser("verify", help="non-destructively check the latest backups of a group"))
     v.set_defaults(func=_by_tenant(cmd_verify, "verify"))

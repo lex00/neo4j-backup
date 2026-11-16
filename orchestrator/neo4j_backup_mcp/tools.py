@@ -136,6 +136,18 @@ def backup_status(tenant: str | None = None) -> dict:
     return {"targets": rows}
 
 
+@_selectable
+def restore_points(group: str | None = None, tenant: str | None = None) -> dict:
+    """What a group (or every group of a tenant) can be restored to, per member (#113): the
+    current database, each backup chain's point-in-time window, the load artifacts, gaps, and the
+    restore command for each. Read-only; never runs neo4j-admin."""
+    from neo4j_backup_core import points
+
+    policy = load_policy(env.policy_path())
+    return points.restore_points(env.store(), _layout(), policy.group(group), neo4j=env.neo4j(),
+                                 policy=policy)
+
+
 def preview_restore(group: str, replace: bool = False, until: str | None = None) -> dict:
     """The blast radius of restoring a group WITHOUT mutating: per member, the artifact and what
     would happen (by-name create / drop+recreate, or alias-swap seed + swap). Runs preconditions.
@@ -295,6 +307,6 @@ def run_load(group: str, confirm: bool = False, dry_run: bool = False, replace: 
                 "failed_step": e.step, **e.result}
 
 
-READ_TOOLS = [list_targets, latest_artifact, show_chain, backup_status,
+READ_TOOLS = [list_targets, latest_artifact, show_chain, backup_status, restore_points,
               preview_restore, preview_prune]
 WRITE_TOOLS = [run_backup, run_verify, run_aggregate, run_restore, run_prune, run_load]

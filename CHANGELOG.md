@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **`restore-points <group>`** (#113; MCP `restore_points`): per member, the current database,
+  each chain's point-in-time window (older physicals included), the load artifacts, gaps (diffs
+  missing in a window, no backups since the last swap), and the restore command for each.
+  Read-only; never runs neo4j-admin. Takes `--tenant`.
 - **Notice before a load or rebuild** (#126): `load.notice: {hook, before, required}` calls the
   hook (HTTP POST JSON or a command with `NOTICE_*` env vars, the same mechanism as
   `CUTOVER_HOOK`) with the group, tenant, members, swap time and what will be lost, then waits
