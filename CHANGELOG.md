@@ -219,6 +219,9 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- A DIFF of a store whose id changed (after `import incremental`, #99) is skipped with
+  `needs_full` instead of failing; IMPORT.md records the experiment on 2026.05 and the operator
+  procedure. Dagster's subprocess runs keep neo4j-admin's output on a failure.
 - An `image` build's output (k8s runner) is written to the run's log, as a `command` build's
   already was (#109; found on k3d).
 - Azure downloads read 4 MiB at a time, one request at a time (#79): with the SDK defaults a

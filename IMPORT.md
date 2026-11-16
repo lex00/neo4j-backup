@@ -126,6 +126,50 @@ not a production or backup mutation.
 Verify the exact `--nodes`/`--relationships`/option surface against your deployed Neo4j version's
 `neo4j-admin database import full` docs. The local check is `just import-smoke`.
 
+## Incremental import and the backup chain (#99)
+
+`neo4j-admin database import incremental` adds bulk data to an existing database. Tested on
+Neo4j **2026.05.0 Enterprise**, single server, block format, with
+`orchestrator/experiment_incremental.py`:
+
+| Step | Result |
+|---|---|
+| FULL, write, DIFF | normal chain (tx 1-7, then 8) |
+| STOP, `import incremental` prepare, build, merge, START | the database has the imported nodes |
+| DIFF after the import | **fails**: `Remote store and existing backup have different store ids` |
+| FULL after the import | works, and starts a new chain in the same folder (different `storeIdHash`) |
+| DIFF on that full | works |
+| aggregate a copy of the folder, `database check` | aggregates the newest chain; check passes |
+| seed the old chain until a time before the import | correct (the state at that time) |
+| seed the new chain, newest or until a time after its full | correct |
+| a time between the import and the new full | no chain covers it; `restore --until` refuses and lists the nearest windows (#114) |
+
+So the merge rewrites the store and changes its store id, and the chain can't continue: **after
+an incremental import, take a full backup** (`neo4j-backup backup <group> --kind FULL`). The
+tool helps: a scheduled DIFF that meets a changed store id is skipped with
+`needs_full: true, reason: "store id changed"` instead of failing, so the full lane (or you)
+starts the new chain. Point-in-time restores to before the import still use the old chain.
+
+### Running it
+
+The import works on the stopped database's own store files, so it runs **on the server that
+hosts the database**, not on the backup runner, and as the user that runs Neo4j. Files written as
+root leave the database unable to start (it stays offline, with the path of a transaction log in
+`statusMessage`).
+
+1. Back up first (Neo4j recommends it: a failed merge can corrupt the database).
+2. On a cluster, reduce the database to one primary and do the rest on that server; afterwards
+   the other members copy the database from it as the seeder (Neo4j's
+   [incremental import](https://neo4j.com/docs/operations-manual/current/import/incremental-import/)
+   page). On a single server, skip this.
+3. `STOP DATABASE <db>`. Run `neo4j-admin database import incremental <db> --force
+   --stage=prepare --nodes=...`, then `--stage=build` (the database may be online and
+   read-only for this stage), then `--stage=merge` (stopped). Put the database name before
+   `--nodes`/`--relationships`, which take several values. The id column needs the node key's
+   label: `id:ID(P){label:P}`.
+4. `START DATABASE <db>`, restore the topology on a cluster, then
+   `neo4j-backup backup <group> --kind FULL`.
+
 ## Non-goals
 
 Provisioning, delivering params to the loader, monitoring, cleanup, modelling

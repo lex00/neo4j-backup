@@ -218,3 +218,31 @@ def test_restore_from_an_external_dump_skips_the_store_check():
         names = ["orders"]
     ops.restore_group(neo, MemStore(), One(), LAYOUT, loads={"orders": "s3://partner/x.dump"})
     assert neo.seeded[0][1] == "s3://partner/x.dump"
+
+
+def test_diff_after_a_store_id_change_needs_a_full():
+    """#99: an incremental import's merge changes the store id; the DIFF is skipped and a full
+    is asked for, like a missing base (#74)."""
+    import subprocess as sp
+    from neo4j_backup_core.clients import BackupRunner
+    s = MemStore()
+    s.add("g/orders/orders-2/full.backup")
+
+    class N(Neo):
+        def resolve_physical(self, a):
+            return "orders-2"
+
+        def database_created(self, d):
+            return None
+
+    def run(cmd, env=None):
+        if "inspect" in cmd:
+            return '[{"uri": "s3://bucket/g/orders/orders-2/full.backup", "full": true, ' \
+                   '"lowestTransaction": 1, "highestTransaction": 5, "time": ' \
+                   '"2026-11-16T10:00:00", "databaseId": "d", "storeIdHash": 1}]'
+        raise sp.CalledProcessError(1, cmd, output="Execution of backup failed. Remote store "
+                                    "and existing backup have different store ids!")
+    out = ops.backup_target(run, N(), s, BackupRunner(), LAYOUT, "g", "orders", "DIFF")
+    assert out["skipped"] and out["needs_full"] and out["reason"] == "store id changed"
+    with pytest.raises(sp.CalledProcessError):  # a FULL failing the same way is a real failure
+        ops.backup_target(run, N(), s, BackupRunner(), LAYOUT, "g", "orders", "FULL")

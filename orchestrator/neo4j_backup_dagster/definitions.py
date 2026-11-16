@@ -60,8 +60,12 @@ def _run_admin(context, runner, command, subprocess_client, env=None, image=None
     if image:
         raise dg.Failure(f"build image {image!r} needs RUNNER_MODE=k8s; use build.command")
     with tempfile.NamedTemporaryFile("r", suffix=".out") as out:
-        subprocess_client.run(command=capture.tee_to_file(command, out.name), env=env,
-                              context=context)
+        try:
+            subprocess_client.run(command=capture.tee_to_file(command, out.name), env=env,
+                                  context=context)
+        except Exception as e:  # noqa: BLE001 - keep neo4j-admin's output with the failure
+            import subprocess as sp
+            raise sp.CalledProcessError(1, command, output=out.read()) from e
         return out.read()
 
 
