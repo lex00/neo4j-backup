@@ -36,23 +36,23 @@ def test_owns():
 
 # --- #85: Neo4j's database-name rules ----------------------------------------------------------
 
-@pytest.mark.parametrize("ok", ["abc", "orders.eu", "ab-", "orders-", "a" * 63])
+@pytest.mark.parametrize("ok", ["abc", "orders.eu", "2024-orders", "9ab", "a" * 63])
 def test_legal_names(ok):
     naming.validate_db(ok)
 
 
-@pytest.mark.parametrize("bad", ["2024-orders", "ab", "a" * 64, "_x1", "system-x", "Orders",
-                                 "a_b"])
+@pytest.mark.parametrize("bad", ["ab-", "orders-", "orders.", "ab", "a" * 64, "_x1",
+                                 "system-x", "Orders", "a_b", "-ab"])
 def test_illegal_names(bad):
     with pytest.raises(naming.NamingError):
         naming.validate_db(bad)
 
 
-def test_digit_led_slug_keeps_its_prefix_and_gets_db_in_the_physical():
+def test_digit_led_names_are_unchanged():
     from neo4j_backup_core import paths
     assert paths.alias_prefix("g", "2024-orders") == "g/2024-orders/"   # storage unchanged
     p = naming.physical("2024-orders", TS)
-    assert p == f"db-2024-orders-{TS}" and naming.owns("2024-orders", p)
+    assert p == f"2024-orders-{TS}" and naming.owns("2024-orders", p)
 
 
 def test_by_name_databases_are_lowercased():

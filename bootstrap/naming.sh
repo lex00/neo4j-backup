@@ -14,8 +14,8 @@
 #                 into. Always a legal Neo4j database name.
 #
 # Neo4j rules enforced here:
-#   database name: a leading letter, then [a-z0-9.-], 3-63, lowercase, NO underscores,
-#                  reserved `_*`/`system*` (#85).
+#   database name: [a-z0-9.-], 3-63, lowercase, starts and ends with a letter or digit,
+#                  NO underscores, reserved `_*`/`system*` (#85).
 #   alias name:    up to 65534 chars, almost any character (backtick-quoted in Cypher),
 #                  cannot end with a dot, reserved `_*`/`system*`. A dot is parsed as a
 #                  composite database delimiter (database.constituent) — allowed, flagged.
@@ -53,9 +53,9 @@ naming_sanitize() {
 # Assert a legal Neo4j DATABASE name (strict). Non-zero + message if illegal.
 naming_validate_db() {
   local n="$1"
-  # Neo4j: a leading letter, then [a-z0-9.-], 3-63 chars (#85)
-  if ! printf '%s' "$n" | grep -Eq '^[a-z][a-z0-9.-]{2,62}$'; then
-    echo "!! illegal database name '$n' (need a leading letter, then [a-z0-9.-], 3-63 chars)" >&2
+  # Neo4j: [a-z0-9.-], 3-63 chars, starts and ends with a letter or digit (#85)
+  if ! printf '%s' "$n" | grep -Eq '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'; then
+    echo "!! illegal database name '$n' (need [a-z0-9.-], 3-63 chars, start/end alnum)" >&2
     return 1
   fi
   case "$n" in _*|system*) echo "!! reserved database name '$n'" >&2; return 1 ;; esac
@@ -108,7 +108,6 @@ naming_slug() {
 naming_physical() {
   local slug ts tslen base h
   slug="$(naming_slug "$1")"
-  case "$slug" in [a-z]*) ;; *) slug="db$NAMING_JOIN$slug" ;; esac  # leading letter (#85)
   ts="${2:-$(naming_ts)}"
   tslen=$(( ${#ts} + ${#NAMING_JOIN} ))
   if (( ${#slug} + tslen > NAMING_MAXLEN )); then

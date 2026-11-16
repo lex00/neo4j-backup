@@ -33,6 +33,7 @@ def test_defaults_reproduce_todays_names():
     ("prod-{slug}-{ts}", "prod-graph-20261116t1230"),
     ("{group}-{alias}-{ts}", "shop-graph-20261116t1230"),
     ("x{ts}-{slug}", "x20261116t1230-graph"),
+    ("{ts}-{slug}", "20261116t1230-graph"),  # a digit first is legal (#85)
 ])
 def test_each_field(template, expect):
     g = pol(naming={"physical_template": template, "ts_format": "%Y%m%dt%H%M"}).group("shop")
@@ -45,7 +46,7 @@ def test_each_field(template, expect):
 @pytest.mark.parametrize("bad,why", [
     ({"physical_template": "{slug}"}, "must contain {ts}"),
     ({"physical_template": "{slug}-{env}-{ts}"}, "unknown field"),
-    ({"physical_template": "{ts}-{slug}"}, "invalid database name"),       # digit first
+    ({"physical_template": "{slug}-{ts}."}, "invalid database name"),      # trailing dot
     ({"physical_template": "Prod_{slug}-{ts}"}, "invalid database name"),  # uppercase, underscore
     ({"ts_format": "%Y-%m-%d"}, "join character"),
     ({"physical_template": "{slug}-" + "x" * 50 + "-{ts}"}, "invalid database name"),  # too long
