@@ -194,3 +194,73 @@ def test_dagster_rebuild_schedule_requests_only_rebuild_groups(tmp_path):
     assert len(reqs) == 1
     tags, cfg = reqs[0]
     assert tags["neo4j_group"] == "cat" and cfg["ops"]["load_group_op"]["config"]["group_id"] == "cat"
+
+
+# --- #109: kind: command builds ----------------------------------------------------------------
+
+def cmd_group(**build):
+    b = {"kind": "command", "command": ["rdf2csv"], "args": ["--in", "src"],
+         "import_args": ["--nodes=nodes.csv"], "env": {"TOKEN": "secret:env:RDF_TOKEN",
+                                                       "MODE": "fast"}, **build}
+    return Policy.model_validate({"db_groups": [{"id": "cat", "aliases": ["catalog"],
+                                                 "tier": "nightly", "load": {
+                                                     "mode": "rebuild", "writes": "read-only",
+                                                     "build": b}}],
+                                  "tiers": TIERS}).group("cat")
+
+
+def test_command_build_validation():
+    with pytest.raises(ValueError, match="import_args"):
+        cmd_group(import_args=[])
+    with pytest.raises(ValueError, match="timeout"):
+        cmd_group(timeout="soon")
+    assert cmd_group(timeout="90m").load.build.timeout_seconds == 5400
+    cmd_group(output="dump", import_args=[])
+
+
+def test_command_build_runs_in_one_step_with_env_and_timeout(monkeypatch):
+    monkeypatch.setenv("RDF_TOKEN", "t0k")
+    neo, seen = Neo(), []
+
+    def run(cmd, env=None, image=None):
+        seen.append((cmd, env, image))
+        return IMPORT_OUT
+    out = L.load_group(run, BackupRunner(scratch_path="/scratch"), neo, MemStore(), LAYOUT,
+                       cmd_group())
+    cmd, env, image = seen[0]
+    script = cmd[2]
+    assert "timeout 7200 rdf2csv --in src" in script and "database import full" in script
+    assert "--nodes=nodes.csv" in script and "database dump" in script and "rm -rf" in script
+    assert env["TOKEN"] == "t0k" and env["MODE"] == "fast"     # secret resolved
+    assert env["SOURCE_URI"] == "s3://bucket/cat/_source/" and env["WORK_DIR"].startswith("/scratch/")
+    assert image is None and out["members"][0]["import_counts"]["nodes"] == 3
+
+
+def test_command_build_with_dump_output():
+    script = BackupRunner().command_build_command(["make-dump"], "db", "/w", "s3://b/x/", None,
+                                                  "dump", 60)[2]
+    assert "test -s /w/db.dump" in script and "database load --from-path=/w" in script
+
+
+def test_image_build_writes_to_output_uri_then_imports(monkeypatch):
+    monkeypatch.setenv("RDF_TOKEN", "t0k")
+    seen = []
+
+    def run(cmd, env=None, image=None):
+        seen.append((cmd, env, image))
+        return IMPORT_OUT
+    L.load_group(run, BackupRunner(), Neo(), MemStore(), LAYOUT,
+                 cmd_group(command=[], image="registry/rdf:1"))
+    assert seen[0][2] == "registry/rdf:1" and seen[0][0] == ["--in", "src"]
+    out_uri = seen[0][1]["OUTPUT_URI"]
+    assert f"--nodes={out_uri}nodes.csv" in seen[1][0][2]  # the import reads what it wrote
+
+
+def test_failed_command_fails_before_any_seed():
+    neo = Neo()
+
+    def run(cmd, env=None, image=None):
+        raise RuntimeError("exit 3")
+    with pytest.raises(L.LoadError) as e:
+        L.load_group(run, BackupRunner(), neo, MemStore(), LAYOUT, cmd_group())
+    assert e.value.step == "build catalog" and neo.seeded == []

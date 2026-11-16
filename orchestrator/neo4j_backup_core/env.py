@@ -18,7 +18,10 @@ def subprocess_admin(runner, stdout=None):
     subprocess with the runner's environment (raises on non-zero) and returns its output (#118).
     Shared by the CLI and the MCP server; both pass `stdout=sys.stderr` so the child's output never
     lands on their own stdout (the CLI's JSON envelope / the MCP stdio protocol)."""
-    def run(cmd, env=None):
+    def run(cmd, env=None, image=None):
+        if image:  # a customer image (#109) runs as its own pod: the k8s runner modes only
+            raise RuntimeError(f"build image {image!r} needs RUNNER_MODE=k8s (Dagster or "
+                               f"Airflow); in subprocess mode use build.command")
         extra = env or {}
         return run_captured(runner.with_env(cmd, extra), env={**runner.env(), **extra},
                             stream=stdout)

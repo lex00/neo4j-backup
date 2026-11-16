@@ -138,7 +138,19 @@ class LoadBuild(BaseModel):
     args: list[str] = Field(default_factory=list)
     command: list[str] = Field(default_factory=list)
     image: str | None = None
-    env: dict[str, str] = Field(default_factory=dict)
+    env: dict[str, str] = Field(default_factory=dict)  # values `secret:<ref>` are resolved (#105)
+    # kind: command (#109): what the command leaves for the tool
+    output: Literal["import", "dump"] = "import"
+    import_args: list[str] = Field(default_factory=list)  # output: import, paths under the output
+    timeout: str = "2h"                                    # e.g. 90m, 2h, 3600s
+
+    @property
+    def timeout_seconds(self) -> int:
+        n, unit = self.timeout[:-1], self.timeout[-1]
+        mult = {"s": 1, "m": 60, "h": 3600}.get(unit)
+        if mult is None or not n.isdigit():
+            raise ValueError(f"build.timeout {self.timeout!r}: use e.g. 90m, 2h or 3600s")
+        return int(n) * mult
 
     @model_validator(mode="after")
     def _kind_fields(self) -> "LoadBuild":
@@ -146,6 +158,10 @@ class LoadBuild(BaseModel):
             raise ValueError("build.kind 'import' needs input_type (csv or parquet)")
         if self.kind == "command" and not (self.command or self.image):
             raise ValueError("build.kind 'command' needs a command or an image")
+        if self.kind == "command" and self.output == "import" and not self.import_args:
+            raise ValueError("build.kind 'command' with output 'import' needs import_args "
+                             "(the --nodes/--relationships files the command writes)")
+        self.timeout_seconds  # validate
         return self
 
 

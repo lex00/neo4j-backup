@@ -32,7 +32,7 @@ UPLOAD_STAGING_PATH = os.environ.get("UPLOAD_STAGING_PATH") or None
 targets = dg.DynamicPartitionsDefinition(name="backup_targets")
 
 
-def _run_admin(context, runner, command, subprocess_client, env=None) -> str:
+def _run_admin(context, runner, command, subprocess_client, env=None, image=None) -> str:
     """Run a neo4j-admin command via Pipes — subprocess (VM/EC2, validated) or a k8s
     pod, per `runner.mode` — and return its output (#118). Non-zero exit raises; neo4j-admin is
     not Pipes-instrumented, so the output comes back through a wrapper: a local temp file in
@@ -52,10 +52,13 @@ def _run_admin(context, runner, command, subprocess_client, env=None) -> str:
                 "pip install 'neo4j-backup-dagster[k8s]'"
             ) from e
         done = PipesK8sClient().run(
-            context=context, image=runner.image, command=capture.wrap_for_pipes(command),
+            context=context, image=image or runner.image,  # a build image (#109) or neo4j
+            command=capture.wrap_for_pipes(command),
             base_pod_spec=runner.k8s_pod_spec(env),
         )
         return capture.decode_pipes(done.get_custom_messages())
+    if image:
+        raise dg.Failure(f"build image {image!r} needs RUNNER_MODE=k8s; use build.command")
     with tempfile.NamedTemporaryFile("r", suffix=".out") as out:
         subprocess_client.run(command=capture.tee_to_file(command, out.name), env=env,
                               context=context)
@@ -66,11 +69,12 @@ def _admin(context, runner, subprocess_client):
     """Bind a `run_admin(cmd) -> str` callable for `neo4j_backup_core.ops`: run one neo4j-admin
     command via Pipes (subprocess or k8s) with the runner's environment. The op bodies live in
     core; this is only the Dagster-specific execution + env binding."""
-    def run(cmd, env=None):
+    def run(cmd, env=None, image=None):
         extra = env or {}  # a named store's settings for neo4j-admin (#105)
         if runner.mode != "k8s":
             cmd = runner._core().with_env(cmd, extra)
-        return _run_admin(context, runner, cmd, subprocess_client, env={**runner.env(), **extra})
+        return _run_admin(context, runner, cmd, subprocess_client, env={**runner.env(), **extra},
+                          image=image)
     return run
 
 
