@@ -179,7 +179,7 @@ def move(neo4j, store, layout, groups: list, source: str, target: str, *,
     by_id = {g.id: g for g in groups}
     for gp in plan["groups"]:
         group, st = by_id[gp["group"]], ops._store(store, gp["group"])
-        ts = naming.ts()
+        ts = naming.ts_for(group)
         seeded = []
         for m in gp["members"]:  # every seed first: an unreadable store stops here
             seeded.append(ops.seed_member(tgt, st, group, layout, m["alias"],

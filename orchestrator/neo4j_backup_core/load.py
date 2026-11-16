@@ -116,7 +116,7 @@ def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool 
     store, src_store = _store(store, group.id), _source_store(store, group)
     upload = _upload(runner, upload)
     cypher_version = getattr(neo4j, "cypher_version", None) or cypher_version
-    ts = naming.ts()
+    ts = naming.ts_for(group)  # the group's naming.ts_format (#88)
     result = {"group": group.id, "mode": load.mode, "members": [], "notice": result_notice}
     seeded: list[dict] = []
     step = "build"
@@ -146,7 +146,7 @@ def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool 
                 seeded.append(entry)  # by-name is seeded at the swap (DROP + CREATE)
                 continue
             old = neo4j.alias_target(name)
-            newdb = naming.scheme().physical(name, ts, old)  # (#89)
+            newdb = naming.for_group(group).physical(name, ts, old)  # (#88, #89)
             if newdb == old or neo4j.database_exists(newdb):
                 raise OpError(f"{group.id}/{name}: the new physical name {newdb!r} is taken")
             entry.update(alias=name, newdb=newdb, old=old)

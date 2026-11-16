@@ -222,3 +222,93 @@ def reset_scheme() -> None:
     """Forget the loaded scheme (tests)."""
     global _SCHEME
     _SCHEME = None
+
+
+# --- the policy's `naming:` block (#88) -----------------------------------------------------------
+
+DEFAULT_TEMPLATE = "{slug}-{ts}"
+TEMPLATE_FIELDS = ("alias", "slug", "group", "ts")
+
+
+def check_template(template: str) -> None:
+    """A physical_template must contain `{ts}` (each restore needs a new name) and use only
+    TEMPLATE_FIELDS."""
+    import string
+
+    fields = [f for _lit, f, _spec, _conv in string.Formatter().parse(template) if f is not None]
+    unknown = [f for f in fields if f not in TEMPLATE_FIELDS]
+    if unknown:
+        raise NamingError(f"physical_template {template!r}: unknown field(s) {unknown} "
+                          f"(fields: {', '.join('{' + f + '}' for f in TEMPLATE_FIELDS)})")
+    if "ts" not in fields:
+        raise NamingError(f"physical_template {template!r} must contain {{ts}}, so every "
+                          f"restore gets a new database name")
+
+
+def check_ts_format(fmt: str) -> None:
+    if JOIN in fmt:
+        raise NamingError(f"ts_format {fmt!r} contains {JOIN!r}, the join character")
+
+
+def render(template: str, alias: str, group_id: str, ts_val: str) -> str:
+    """A physical name from a template; the default template is `physical()` itself, so
+    today's names are unchanged."""
+    if template == DEFAULT_TEMPLATE:
+        return physical(alias, ts_val)
+    name = template.format(alias=sanitize(alias) or "db", slug=slug(alias),
+                           group=sanitize(group_id) or "g", ts=ts_val)
+    return validate_db(name)
+
+
+class TemplateNaming:
+    """The scheme a group's `naming:` block describes (#88)."""
+
+    def __init__(self, group_id: str, template: str):
+        self.group_id, self.template = group_id, template
+
+    def slug(self, alias: str) -> str:
+        return slug(alias)
+
+    def physical(self, alias: str, ts_val: str, current: str | None = None) -> str:
+        return render(self.template, alias, self.group_id, ts_val)
+
+    def owns(self, alias: str, name: str) -> bool:
+        if self.template == DEFAULT_TEMPLATE:  # with a custom ts_format: rebuild and compare
+            t = name.rpartition(JOIN)[2]
+            try:
+                return bool(t) and physical(alias, t) == name
+            except NamingError:
+                return False
+        pattern = re.escape(self.template)
+        for f, v in (("alias", sanitize(alias) or "db"), ("slug", slug(alias)),
+                     ("group", sanitize(self.group_id) or "g")):
+            pattern = pattern.replace(re.escape("{" + f + "}"), re.escape(v))
+        pattern = pattern.replace(re.escape("{ts}"), r"[a-z0-9.]+")
+        return re.fullmatch(pattern, name) is not None
+
+
+def _group_naming(group):
+    n = getattr(group, "naming", None)
+    return (getattr(n, "physical_template", None) or DEFAULT_TEMPLATE,
+            getattr(n, "ts_format", None))
+
+
+def for_group(group):
+    """The scheme for a group's physical names: a `NAMING` hook (#89) wins; else the group's
+    `naming:` block (#88); else the default."""
+    import os
+
+    template, fmt = _group_naming(group)
+    if os.environ.get("NAMING") or (template == DEFAULT_TEMPLATE and not fmt):
+        return scheme()
+    return _Validated(TemplateNaming(group.id, template))
+
+
+def ts_for(group, now: datetime | None = None) -> str:
+    """The timestamp for a group's new physical names: its `naming.ts_format`, else
+    NAMING_TS_FMT, else the default."""
+    _template, fmt = _group_naming(group)
+    if not fmt:
+        return ts(now)
+    check_ts_format(fmt)
+    return (now or datetime.now(timezone.utc)).strftime(fmt)

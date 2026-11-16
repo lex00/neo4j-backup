@@ -21,6 +21,24 @@ from . import cron, naming
 _log = logging.getLogger(__name__)
 
 
+class Naming(BaseModel):
+    """How new physical databases are named (#88). The defaults reproduce the built-in
+    `<slug>-<ts>` names exactly. Fields: {alias} (sanitized), {slug}, {group}, {ts}."""
+    model_config = ConfigDict(extra="forbid")
+    physical_template: str = naming.DEFAULT_TEMPLATE
+    ts_format: str | None = None  # strftime; None: NAMING_TS_FMT, else %Y%m%dt%H%M%S
+
+    @model_validator(mode="after")
+    def _valid(self) -> "Naming":
+        try:
+            naming.check_template(self.physical_template)
+            if self.ts_format:
+                naming.check_ts_format(self.ts_format)
+        except naming.NamingError as e:
+            raise ValueError(str(e)) from None
+        return self
+
+
 class Encryption(BaseModel):
     mode: Literal["sse-kms", "client-side", "none"] = "sse-kms"
     kms_key_ref: str | None = None
@@ -262,6 +280,7 @@ class DbGroup(BaseModel):
     load: Load = Field(default_factory=Load)  # absent: mode live, as before (#103)
     # offboarding (#124): a retired group has no schedules; its artifacts stay restorable until
     # `retired_on` + `retire_after_days` (default: retention_days), then prune deletes them
+    naming: Naming | None = None  # #88; None: the policy's `naming:`, else the default
     state: Literal["active", "retired"] = "active"
     retired_on: date | None = None
     retire_after_days: int | None = None
@@ -478,11 +497,34 @@ class Policy(BaseModel):
     clusters: dict[str, Cluster] = Field(default_factory=dict)
     # initial status of the Dagster schedules generated from this policy (#104)
     schedules: Literal["stopped", "running"] = "stopped"
+    naming: Naming | None = None  # #88: the default for every group without its own
 
     @model_validator(mode="before")
     @classmethod
     def _apply_profiles(cls, data):
         return resolve_profiles(data)[0] if isinstance(data, dict) else data
+
+    @model_validator(mode="after")
+    def _naming_resolves(self) -> "Policy":
+        """Groups inherit the policy's `naming:`; every member's name is rendered with a sample
+        timestamp and checked against Neo4j's rules here, not at the first restore (#88)."""
+        from datetime import datetime, timezone
+
+        sample = datetime(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        for g in self.db_groups:
+            if g.naming is None and self.naming is not None:
+                g.naming = self.naming
+            if g.naming is None or g.restore_mode == "by-name":
+                continue
+            ts_val = naming.ts_for(g, sample)
+            for a in g.names:
+                try:
+                    naming.render(g.naming.physical_template, a, g.id, ts_val)
+                except naming.NamingError as e:
+                    raise ValueError(f"group {g.id!r}: naming.physical_template "
+                                     f"{g.naming.physical_template!r} gives an invalid name for "
+                                     f"{a!r}: {e}") from None
+        return self
 
     @model_validator(mode="after")
     def _tiers_resolve(self) -> "Policy":

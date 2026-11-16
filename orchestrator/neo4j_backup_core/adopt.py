@@ -101,7 +101,7 @@ def _migrate(run_admin, neo4j, store, runner, layout, group, name: str, *, uploa
     if not verified.get("consistent"):
         raise ops.OpError(f"{name}: the backup didn't verify; nothing dropped")
     st = ops._store(store, group.id)
-    newdb = naming.scheme().physical(name, naming.ts(), None)
+    newdb = naming.for_group(group).physical(name, naming.ts_for(group), None)
     key = backup["artifact"]
     neo.seed_database(newdb, st.uri(key), topology=ops._topology(neo, group, name),
                       cypher_version=ops._cypher(neo, None), store_base=st.uri(""))
