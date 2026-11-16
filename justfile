@@ -62,6 +62,11 @@ k3d-up:
 k3d-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_k8s.py
 
+# k3d: loads with RUNNER_MODE=k8s (#107, #109): an import build and an image build in pods
+k3d-load-smoke:
+    k3d image import amazon/aws-cli:2.27.50 -c neo4j-backup
+    orchestrator/.venv/bin/python orchestrator/smoke_k8s_load.py
+
 # k3d: delete the validation cluster
 k3d-down:
     ./k3d/down.sh
