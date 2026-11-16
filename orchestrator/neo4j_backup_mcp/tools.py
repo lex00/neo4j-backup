@@ -325,6 +325,26 @@ def run_rollback(group: str, members: list[str] | None = None, confirm: bool = F
 
 
 @_recorded
+def run_adopt(group: str, migrate: bool = False, replace: bool = False, confirm: bool = False,
+              dry_run: bool = False, ticket: str | None = None,
+              reason: str | None = None) -> dict:
+    """Bring existing databases under the alias model (#92), from the policy's
+    `overrides.<alias>.adopt_from`. Per member: create, skip, conflict or migrate (same-name,
+    destructive: needs migrate and replace). Needs confirm=true; dry_run returns the plan."""
+    from neo4j_backup_core import adopt
+
+    g = load_policy(env.policy_path()).group(group)
+    plan = adopt.plan_adopt(env.neo4j(), g, migrate=migrate, replace=replace)
+    if dry_run:
+        return {"dry_run": True, **plan}
+    if not confirm:
+        return _needs_confirmation("adopt", {"plan": plan, "drops": plan["drops"]})
+    runner = env.runner()
+    return adopt.adopt(_run_admin(runner), env.neo4j(), env.store(), runner, paths.get_layout(),
+                       g, migrate=migrate, replace=replace, log=_log)
+
+
+@_recorded
 def run_cleanup(group: str, keep: int = 1, older_than_days: float | None = None,
                 confirm: bool = False, dry_run: bool = False, ticket: str | None = None,
                 reason: str | None = None) -> dict:
@@ -373,4 +393,4 @@ def run_restore_to_cluster(to_cluster: str, group: str | None = None,
 READ_TOOLS = [list_targets, latest_artifact, show_chain, backup_status, restore_points,
               preview_restore, preview_prune]
 WRITE_TOOLS = [run_backup, run_verify, run_aggregate, run_restore, run_prune, run_load,
-               run_rollback, run_cleanup, run_restore_to_cluster]
+               run_rollback, run_cleanup, run_restore_to_cluster, run_adopt]

@@ -14,6 +14,11 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **`adopt <group>`** (#92; MCP `run_adopt`): puts existing databases behind the group's
+  aliases from `overrides.<alias>.adopt_from` (create, skip or conflict per member; any
+  conflict stops it). `--migrate --replace` handles a database with the alias's own name: back
+  up, verify, seed a new physical, check, copy privileges, drop the original, create the alias.
+  Adopted targets are recorded for rollback and cleanup.
 - **Restore into another cluster** (#115): `restore <group> --to-cluster <c>`, or
   `restore --from-cluster <lost> --to-cluster <c>` for every group of a cluster (MCP
   `run_restore_to_cluster`, Dagster `move_job`, Airflow `neo4j_restore_to_cluster`). Replays the

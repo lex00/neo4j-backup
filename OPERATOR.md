@@ -36,9 +36,8 @@ at every restore, because the name changes.
    (weekly full, differential every 6 hours) and `bronze` (weekly full, daily differential). The
    differential interval is how much a customer can lose in a restore.
 2. Make sure the database is behind an alias. For a new database, create it and an alias
-   (`CREATE DATABASE`, then `CREATE ALIAS <alias> FOR DATABASE <database>`). For an existing one,
-   create an alias with a different name and move the application to it; reusing the same name
-   needs a migration ([`bootstrap/adopt.sh`](bootstrap/adopt.sh) shows the steps).
+   (`CREATE DATABASE`, then `CREATE ALIAS <alias> FOR DATABASE <database>`). For existing ones,
+   use `adopt` (below).
 3. Grant the customer's role on the database. Grants made through the alias are stored
    against the database behind it; see [the restore runbook](#restore-on-a-customers-request) for
    what that means after a restore.
@@ -69,7 +68,32 @@ Give a customer's groups a `tenant:` label (or put it in their profile) to act o
 once: `neo4j-backup backup --tenant acme`, `verify --tenant acme`, `targets --tenant acme`. It's a
 label for selecting groups, not access control.
 
-**Planned:** an `adopt` command ([#92](https://github.com/lex00/neo4j-backup/issues/92)).
+### Adopt existing databases
+
+`adopt` puts existing databases behind the group's aliases (#92). For an alias with a different
+name from the database, name the database in the policy:
+
+```yaml
+- id: shop
+  profile: app-live
+  aliases: [shop]
+  overrides:
+    shop: {adopt_from: legacy-shop}
+```
+
+```bash
+neo4j-backup --json adopt shop --dry-run      # per member: create, skip, conflict, migrate
+neo4j-backup --json adopt shop --confirm      # CREATE ALIAS shop FOR DATABASE legacy-shop
+```
+
+Nothing is copied or dropped, and the application moves to the alias when it's ready. If any
+alias already points somewhere else (`conflict`), nothing happens. A member whose database
+already has the alias's name can't get an alias of that name; `--migrate --replace` backs the
+database up, verifies the backup, seeds a new physical from it, checks it, copies its
+privileges, DROPs the original and creates the alias. Applications using the name follow the
+alias without a change, but the original database is gone, so try it on a copy first. Each
+adopted target is recorded for `rollback` and `cleanup`. MCP has `run_adopt`.
+`bootstrap/adopt.sh` stays as the local demo helper.
 
 ## Check that customers are covered
 
