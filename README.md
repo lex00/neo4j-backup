@@ -88,7 +88,7 @@ floci. What that covers, and what it doesn't:
 
 | Area | Validated on | Not validated |
 |---|---|---|
-| Neo4j topology | single server; two independent single servers for restore into another cluster | a multi-server cluster (backup from a secondary, seeding with `TOPOLOGY`, the alias swap seen by every member) |
+| Neo4j topology | single server; a three-server cluster in Docker (backup from the cluster's backup ports, restore with `TOPOLOGY 1 PRIMARY 2 SECONDARIES`, the alias seen by every server); two independent servers for restore into another cluster | a production cluster across hosts or zones |
 | Object store | S3 API on floci; Azure on Azurite (store operations; Neo4j can't seed from an emulator); GCS against fakes | real AWS S3, Azure Blob and GCS; SSE-KMS with a real KMS key (checked on MinIO before 2026-11) |
 | Orchestrators | Dagster 1.13 in-process (`execute_in_process`, `materialize`); Airflow 3.2 with `dag.test` | a deployed Dagster instance or Airflow scheduler with real run launchers |
 | Runner | subprocess (in a container); `RUNNER_MODE=k8s` on k3d for both orchestrators (backups, an import build, an image build) | k8s on a managed cluster with IRSA or workload identity |

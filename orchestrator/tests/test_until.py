@@ -33,6 +33,8 @@ class Recorder(Neo4jClient):
         self.cypher = []
 
     def run_system(self, cypher, **params):
+        if cypher.startswith("SHOW DATABASE"):  # the seed's wait for every server
+            return [{"currentStatus": "online"}]
         self.cypher.append(cypher)
         return []
 

@@ -319,3 +319,16 @@ def test_a_store_id_change_makes_the_next_tick_ask_for_a_full():
         return "[]"
     ops.backup_target(full, N(), s, BackupRunner(), LAYOUT, "g", "orders", "FULL")
     assert not ops.needs_full(N(), s, LAYOUT, "g", "orders")  # the full cleared the mark
+
+
+def test_verify_copies_only_the_newest_databases_chain():
+    """Seen on the stack: a folder with backups of two databases named alike fails aggregate."""
+    s = MemStore()
+    folder = "g/orders/orders/"
+    put(s, folder, "a-full.backup", True, "2026-11-15T08:00:00", "OLD")
+    put(s, folder, "b-full.backup", True, "2026-11-16T08:00:00", "NEW")
+    put(s, folder, "c-diff.backup", False, "2026-11-16T09:00:00", "NEW")
+    assert ops.newest_database_keys(s, folder) == [folder + "b-full.backup",
+                                                   folder + "c-diff.backup"]
+    s.add(folder + "d-nometa.backup")
+    assert ops.newest_database_keys(s, folder) is None  # unknown backups: the whole folder

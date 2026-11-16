@@ -7,10 +7,13 @@ from neo4j_backup_core.clients import Neo4jClient
 
 
 class Rec(Neo4jClient):
-    def __init__(self, rows):
+    def __init__(self, rows, status=None):
         self.rows, self.q = rows, []
+        self.status = status if status is not None else [{"currentStatus": "online"}]
 
     def run_system(self, q, **p):
+        if q.startswith("SHOW DATABASE"):
+            return self.status
         self.q.append(q)
         return self.rows
 
@@ -50,3 +53,24 @@ def test_no_alias_moves_until_every_new_database_is_online():
     with pytest.raises(ops.OpError, match="graph-2 isn't online"):
         ops.cutover_seeded(neo, seeded)
     assert neo.moved == []
+
+
+def test_seed_waits_until_every_server_has_it_online(monkeypatch):
+    """Seen on a 3-server cluster: Cypher 25's WAIT returns before the secondaries are online."""
+    calls = iter([[{"currentStatus": "online"}, {"currentStatus": "starting"}],
+                  [{"currentStatus": "online"}, {"currentStatus": "online"}]])
+
+    class Slow(Rec):
+        def run_system(self, q, **p):
+            if q.startswith("SHOW DATABASE"):
+                return next(calls)
+            return []
+    import time
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    Slow([]).seed_database("orders-2", "s3://b/k.backup")  # returns once both are online
+
+
+def test_seed_fails_if_not_online_in_time():
+    never = Rec([], status=[{"currentStatus": "starting", "statusMessage": "seeding"}])
+    with pytest.raises(RuntimeError, match="isn't online on every server after 0s: starting"):
+        never.wait_online("orders-2", 0, sleep=lambda s: None)

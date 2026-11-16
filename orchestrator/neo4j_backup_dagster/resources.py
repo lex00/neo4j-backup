@@ -114,6 +114,9 @@ class Neo4jResource(dg.ConfigurableResource):
     def database_online(self, *a, **k):
         return self._core().database_online(*a, **k)
 
+    def wait_online(self, *a, **k):
+        return self._core().wait_online(*a, **k)
+
 
 class ObjectStoreResource(dg.ConfigurableResource):
     bucket: str

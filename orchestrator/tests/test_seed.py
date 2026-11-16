@@ -7,6 +7,8 @@ from neo4j_backup_core.policy import Topology
 
 class _CaptureClient(Neo4jClient):
     def run_system(self, cypher, **params):  # don't hit a real server
+        if cypher.startswith("SHOW DATABASE"):
+            return [{"currentStatus": "online"}]
         self.last = cypher
         return []
 

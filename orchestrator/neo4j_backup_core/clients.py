@@ -106,9 +106,13 @@ class Neo4jClient:
             from .until import parse_until  # normalised here too: never the raw input (#77)
 
             opts += f", seedRestoreUntil: datetime('{parse_until(restore_until)}')"
-        # A plain WAIT gives up after 300 s and returns a row with success=false instead of
-        # raising (#221), so wait as long as the group allows and check every row.
+        # Wait as long as the group allows (a plain WAIT gives up after 300 s, #221). Under
+        # CYPHER 5 the statement returns a row per server with `success`; checked here. Under
+        # Cypher 25 (the 2026.05 default) it returns no rows, so the guard is the online check
+        # every new database must pass before any alias moves (ops.cutover_seeded).
         wait = int(wait_seconds or os.environ.get("NEO4J_SEED_WAIT_SECONDS", "3600"))
+        import time
+        started = time.monotonic()
         rows = self.run_system(f"{prefix}CREATE DATABASE {quote(name)}{topo} OPTIONS {{ {opts} }} "
                                f"WAIT {wait} SECONDS")
         failed = [r for r in rows or [] if r.get("success") is False]
@@ -116,6 +120,27 @@ class Neo4jClient:
             raise RuntimeError(f"CREATE DATABASE {name} didn't finish within {wait}s: "
                                + "; ".join(f"{r.get('address')}: {r.get('state')} "
                                            f"{r.get('message') or ''}".strip() for r in failed))
+        # Under Cypher 25 the WAIT returns before every member has the database (seen on a
+        # 3-server 2026.05 cluster: the secondaries came online a moment later), so wait here
+        # until every server hosting it reports it online, within the same limit.
+        self.wait_online(name, wait, started)
+
+    def wait_online(self, name: str, wait: float, started: float | None = None,
+                    sleep=None) -> None:
+        import time
+        sleep = sleep or time.sleep
+        started = time.monotonic() if started is None else started
+        while True:
+            rows = self.run_system(f"SHOW DATABASE {quote(name)} YIELD currentStatus, "
+                                   f"statusMessage RETURN currentStatus, statusMessage")
+            if rows and all(r.get("currentStatus") == "online" for r in rows):
+                return
+            if time.monotonic() - started > wait:
+                raise RuntimeError(f"{name} isn't online on every server after {int(wait)}s: "
+                                   + "; ".join(f"{r.get('currentStatus')} "
+                                               f"{r.get('statusMessage') or ''}".strip()
+                                               for r in rows or []))
+            sleep(1)
 
     def database_online(self, name: str) -> bool:
         """Every server hosting `name` reports it online (#221)."""

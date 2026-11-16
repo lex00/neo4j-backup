@@ -52,8 +52,20 @@ Fixes from the v0.6.0 operator docs audit (#216).
   (7) (#231).
 - Airflow rebuilds of a named cluster's groups run in its pool (#232).
 - A backup that produced no artifact fails instead of reporting success (#218).
+- A seed now waits until every server hosting the new database reports it online. On a
+  three-server 2026.05 cluster, `CREATE DATABASE … WAIT` under Cypher 25 returned before the
+  secondaries were online (and returns no result rows), so the swap could have come too early.
+- `verify` copies only the newest database's backups when a folder holds backups of two
+  databases with the same name (after a by-name restore with `--replace`, or a same-name
+  adopt); neo4j-admin refused to aggregate them together. Found on the stack by `adopt
+  --migrate`, which stopped safely before its drop.
+- `just down` also removes the containers of the optional profiles (Azurite, the second
+  cluster, the three-server cluster), which otherwise kept pointing at removed networks.
 
 ### Added
+- A three-server cluster for the local stack (`docker/compose.cluster.yaml`, `just
+  cluster-smoke`), and smokes for the guards (`just guards-smoke`) and Kubernetes Secrets
+  (`just k3d-secret-smoke`) (#234).
 - Freshness alerting in the orchestrators: Dagster `status_job` and `status_check` schedule,
   Airflow `neo4j_status` DAG, on `dbms.status_cron` (#233).
 - k8s runner settings: `RUNNER_NAMESPACE` (Dagster too), `RUNNER_CPU_REQUEST`,

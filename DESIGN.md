@@ -778,7 +778,7 @@ Decisions locked:
 
 | Decision | Choice |
 |---|---|
-| Start scope | Single node first; clusters (`clusters:`, restore into another cluster) added later, not yet validated on a multi-server cluster |
+| Start scope | Single node first; clusters (`clusters:`, restore into another cluster) added later; validated on a three-server cluster in Docker |
 | Local env | Docker Compose first; k3d for k8s-mode validation |
 | Restore | Pure Cypher seed-from-URI + alias-swap (path A) |
 | Encryption | SSE-KMS, cloud KMS, per-group bucket/key |
@@ -803,6 +803,6 @@ Open risks / findings:
 - Plain-HTTP seed and path-style addressing are validated against the local emulator (MinIO
   until 2026-11, floci since #127); SSE-KMS read via seed-from-URI was validated on MinIO.
 
-Not yet validated: a multi-server cluster (backup from a secondary, seeding with a topology,
-the alias swap seen by every member). NOM is for cluster monitoring only (not a backup
+Validated on a three-server cluster in Docker (`just cluster-smoke`): backup from the cluster's
+backup ports, seeding with a topology, the alias swap seen by every member. NOM is for cluster monitoring only (not a backup
 feature).

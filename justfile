@@ -17,7 +17,9 @@ up: _env
 
 # stop and remove the stack + volumes
 down:
-    {{compose}} --profile tools down -v
+    # every profile, so Azurite, neo4j-b and the cluster go too (their containers would keep
+    # pointing at the removed networks)
+    {{compose}} -f docker/compose.cluster.yaml --profile tools --profile azure --profile gcp --profile multi --profile cluster down -v
 
 # boot the demo group + data from scratch
 bootstrap:
@@ -67,6 +69,10 @@ k3d-load-smoke:
     k3d image import amazon/aws-cli:2.27.50 -c neo4j-backup
     orchestrator/.venv/bin/python orchestrator/smoke_k8s_load.py
 
+# k3d: a k8s-mode backup with bucket credentials from a Kubernetes Secret (#229)
+k3d-secret-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_k8s_secret.py
+
 # k3d: delete the validation cluster
 k3d-down:
     ./k3d/down.sh
@@ -108,6 +114,15 @@ ops-smoke:
 move-smoke:
     {{compose}} --profile multi up -d --wait neo4j-b
     orchestrator/.venv/bin/python orchestrator/smoke_move.py
+
+# Three-server cluster (#234): backup from the cluster, restore with a topology, alias on every member
+cluster-smoke:
+    {{compose}} -f docker/compose.cluster.yaml --profile cluster up -d --wait core1 core2 core3
+    orchestrator/.venv/bin/python orchestrator/smoke_cluster.py
+
+# Guards from the v0.6.0 audit (#216): fence in Dagster, store-id change, seed wait, driver reuse, status
+guards-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_guards.py
 
 # Azure backend on Azurite (#79, #80): upload, copy with wait, streamed download (needs a backup)
 azure-smoke:

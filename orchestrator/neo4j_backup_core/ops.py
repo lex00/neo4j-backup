@@ -204,13 +204,35 @@ def run_aggregate(run_admin: RunAdmin, runner, store, physical: str, prefix: str
     return key
 
 
+def newest_database_keys(store, prefix: str) -> list[str] | None:
+    """The backups in `prefix` of the database its newest backup belongs to. A folder can hold
+    backups of two databases with the same name (a by-name restore with --replace, a same-name
+    adopt, a re-created database), and neo4j-admin refuses to aggregate them together ("same
+    database name but different database ids"). None when some backup has no sidecar: then the
+    whole folder is used, as before."""
+    metas, unknown = artifacts.read(store, prefix)
+    if unknown or not metas:
+        return None
+    newest = max(metas.values(), key=lambda m: m.get("time") or "")
+    dbid = newest.get("database_id")
+    return sorted(k for k, m in metas.items() if m.get("database_id") == dbid)
+
+
 def run_verify(run_admin: RunAdmin, runner, store, physical: str, src: str, scratch: str,
                *, upload: str = "admin", staging: str | None = None) -> int:
-    """Non-destructively prove `src` is restorable: copy it aside, aggregate the copy into a
-    recovered full, `database check` it, then clean up. Return the artifact count checked."""
+    """Non-destructively prove `src` is restorable: copy its newest database's chain aside,
+    aggregate the copy into a recovered full, `database check` it, then clean up. Return the
+    artifact count checked."""
+    keys = newest_database_keys(store, src)
     if upload == "pipeline":
         stage = _stage(runner, "_verify", physical, staging)
-        copied = store.download_prefix(src, stage)  # verify on local disk — no S3 scratch writes
+        if keys is None:
+            copied = store.download_prefix(src, stage)  # on local disk, no S3 scratch writes
+        else:
+            os.makedirs(stage, exist_ok=True)
+            for k in keys:
+                store._download(k, os.path.join(stage, k[len(src):]))
+            copied = len(keys)
         try:
             _admin(run_admin, runner.aggregate_command(physical, stage), store)
             full = next(f for f in sorted(os.listdir(stage)) if f.endswith(".backup"))
@@ -219,7 +241,12 @@ def run_verify(run_admin: RunAdmin, runner, store, physical: str, src: str, scra
             shutil.rmtree(stage, ignore_errors=True)
         return copied
     try:
-        copied = store.copy_prefix(src, scratch)
+        if keys is None:
+            copied = store.copy_prefix(src, scratch)
+        else:  # only the newest database's chain
+            for k in keys:
+                store._copy(k, scratch + k[len(src):])
+            copied = len(keys)
         _admin(run_admin, runner.aggregate_command(physical, store.uri(scratch)), store)
         full = store.latest_artifact_key(scratch)
         _admin(run_admin, runner.check_command(physical, store.uri(full)), store)

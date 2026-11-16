@@ -1,0 +1,62 @@
+# A three-server Neo4j cluster beside the base stack (#234), for testing backups from a
+# secondary, seeding with a TOPOLOGY, and an alias swap every member sees. Not started by
+# default:
+#
+#   docker compose --env-file .env -f docker/compose.yaml -f docker/compose.cluster.yaml \
+#     --profile cluster up -d --wait core1 core2 core3
+#
+# Bolt for host clients: neo4j://localhost:7691 (any of 7691-7693 routes). Backup ports for the
+# runner: core1:6362, core2:6362, core3:6362 on the stack network.
+
+x-core: &core
+  image: neo4j:${NEO4J_VERSION}
+  profiles: ["cluster"]
+  networks: [neo4j, ops]
+  environment: &core-env
+    NEO4J_ACCEPT_LICENSE_AGREEMENT: "eval"
+    NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD}"
+    DB_PASSWORD: "${NEO4J_PASSWORD}"
+    NEO4J_dbms_cluster_endpoints: "core1:6000,core2:6000,core3:6000"
+    NEO4J_dbms_cluster_minimum__initial__system__primaries__count: "3"
+    NEO4J_server_backup_enabled: "true"
+    NEO4J_server_backup_listen__address: "0.0.0.0:6362"
+    NEO4J_server_memory_heap_initial__size: "512m"
+    NEO4J_server_memory_heap_max__size: "512m"
+    NEO4J_server_memory_pagecache_size: "256m"
+    AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+    AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+    AWS_REGION: "${AWS_REGION}"
+    AWS_ENDPOINT_URL_S3: "${AWS_ENDPOINT_URL_S3}"
+  healthcheck:
+    # on `system`: the default database lives on only some of the servers
+    test: ["CMD-SHELL", "cypher-shell -a bolt://localhost:7687 -d system -u neo4j -p $${DB_PASSWORD} 'SHOW DEFAULT DATABASE' || exit 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 40
+    start_period: 60s
+
+services:
+  core1:
+    <<: *core
+    hostname: core1
+    ports: ["7691:7687"]
+    environment:
+      <<: *core-env
+      NEO4J_server_default__advertised__address: "core1"
+      NEO4J_server_bolt_advertised__address: "localhost:7691"
+  core2:
+    <<: *core
+    hostname: core2
+    ports: ["7692:7687"]
+    environment:
+      <<: *core-env
+      NEO4J_server_default__advertised__address: "core2"
+      NEO4J_server_bolt_advertised__address: "localhost:7692"
+  core3:
+    <<: *core
+    hostname: core3
+    ports: ["7693:7687"]
+    environment:
+      <<: *core-env
+      NEO4J_server_default__advertised__address: "core3"
+      NEO4J_server_bolt_advertised__address: "localhost:7693"

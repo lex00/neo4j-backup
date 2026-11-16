@@ -105,25 +105,24 @@ Remaining notes:
   HEAD restores 3. Confirms `seedRestoreUntil` needs a differential chain (a lone full
   errors with "can only be fully restored").
 
-## Parked: cluster topology (for later)
+## A three-server cluster
 
-When topologies earn their keep, add `docker/compose.cluster.yaml` based on the
-verified current-version config below (3 primaries + 1 secondary). Key points:
+`docker/compose.cluster.yaml` adds three Neo4j servers (`core1`-`core3`) beside the base
+stack:
 
-- Image tag `>= 2025.01` (current discovery model).
-- Discovery is unified under `dbms.cluster.endpoints` (NOT the old
-  `dbms.cluster.discovery.v2.endpoints`); the official tutorial uses a shared network
-  alias with `dbms.cluster.discovery.resolver_type=DNS` and
-  `dbms.cluster.endpoints=neo4j-network:6000`.
-- Per-server env: `NEO4J_initial_server_mode__constraint=PRIMARY` (or `SECONDARY`).
-- `dbms.cluster.minimum_initial_system_primaries_count` defaults to 3 (set to 2 for a
-  two-server cluster).
-- Default ports: cluster/discovery 6000, Raft 7000, routing 7688, backup 6362.
-- Back up from a **secondary/follower**: set `NEO4J_BACKUP_SOURCE` to that member's
-  `:6362`. The resolution order already prefers secondary → follower → writer.
+```bash
+docker compose --env-file .env -f docker/compose.yaml -f docker/compose.cluster.yaml \
+  --profile cluster up -d --wait core1 core2 core3
+just cluster-smoke
+```
 
-Source: Neo4j "Deploying a Neo4j cluster in a Docker container" tutorial and the
-clustering discovery / ports references (current docs).
+Host clients use `neo4j://localhost:7691` (7691-7693 are the three servers' Bolt ports); the
+runner reaches the backup ports as `core1:6362`, `core2:6362`, `core3:6362`. Discovery is
+`dbms.cluster.endpoints`, each server advertises its own name, and the health check queries
+`system` because the default database lives on only some of the servers. `just cluster-smoke`
+backs up a database hosted as 1 primary and 2 secondaries, restores it with that topology and
+checks every server sees the alias on the new database. `just down` removes these containers
+too.
 
 ## A second cluster
 
