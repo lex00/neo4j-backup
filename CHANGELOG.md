@@ -183,6 +183,8 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- `NAMING_TS_FMT` is honoured by `naming.py` as by `naming.sh` (#86); a format containing `-`
+  (the join character) is refused on both sides.
 - Database-name validation follows Neo4j (#85): a leading letter, then `[a-z0-9.-]`, 3-63
   characters, no `_` or `system` prefix; a trailing dash or dot is allowed. A digit-led slug gets
   `db-` in front of it inside the physical name only (storage prefixes are unchanged). by-name

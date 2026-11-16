@@ -81,3 +81,28 @@ if __name__ == "__main__":
         print("FAIL:\n" + "\n".join(fails))
         sys.exit(1)
     print(f"PASS: naming.py matches naming.sh across {len(CASES)} inputs")
+
+
+def test_ts_format_parity(monkeypatch):
+    """#86: NAMING_TS_FMT gives the same timestamp in Python and the shell."""
+    import os
+    import subprocess as sp
+    from datetime import datetime, timezone
+    fmt = "%Y%m%d%H%M"
+    monkeypatch.setenv("NAMING_TS_FMT", fmt)
+    py = naming.ts(datetime.now(timezone.utc))
+    sh = sp.run(["bash", "-c", f'source "{NAMING_SH}"; naming_ts'], capture_output=True,
+                text=True, env={**os.environ, "NAMING_TS_FMT": fmt}).stdout.strip()
+    assert len(py) == len(sh) == 12 and py[:10] == sh[:10]
+
+
+def test_ts_format_with_the_join_character_is_refused(monkeypatch):
+    import os
+    import subprocess as sp
+    import pytest
+    monkeypatch.setenv("NAMING_TS_FMT", "%Y-%m-%d")
+    with pytest.raises(naming.NamingError):
+        naming.ts()
+    out = sp.run(["bash", "-c", f'source "{NAMING_SH}"'], capture_output=True, text=True,
+                 env={**os.environ, "NAMING_TS_FMT": "%Y-%m-%d"})
+    assert out.returncode != 0 and "join character" in out.stderr
