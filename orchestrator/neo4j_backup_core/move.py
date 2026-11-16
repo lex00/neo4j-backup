@@ -41,8 +41,8 @@ def split_metadata(text: str) -> dict:
     out = {"security": [], "scoped": [], "aliases": {}}
     for stmt in metadata.statements(text):
         m = _ALIAS_RE.match(stmt)
-        if m:
-            out["aliases"][_unquote(m.group(1))] = _unquote(m.group(2))
+        if m:  # alias names are stored lowercase (#206): key them so
+            out["aliases"][_unquote(m.group(1)).lower()] = _unquote(m.group(2))
         elif stmt.startswith("CREATE ALIAS"):
             continue  # remote aliases: not part of a group move
         elif _NAMED_DB.search(stmt):
@@ -140,7 +140,7 @@ def plan_move(neo4j, store, layout, groups: list, source: str, target: str, *,
         for name in group.names:
             by_name = group.restore_mode == "by-name"
             old_src = name if by_name else (src.alias_target(name) if src is not None
-                                            else meta["aliases"].get(name))
+                                            else meta["aliases"].get(name.lower()))
             scoped = (src.privilege_commands(old_src) if src is not None and old_src
                       else privileges.scoped_to(meta["scoped"], old_src) if old_src else [])
             members.append({"alias": name, "mode": group.restore_mode, "seed": seeds[name],

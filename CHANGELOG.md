@@ -219,6 +219,9 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- Mixed-case aliases (#206): Neo4j stores alias names lowercase, so `alias_target` and
+  `database_exists` now compare case-insensitively. Before, a group with an alias like `Orders`
+  couldn't be backed up, and a restore left the alias on the old database.
 - The `mcp` extra pins `mcp<2` (#203): mcp 2.x renamed `FastMCP` and the server couldn't start.
   CI now installs the extra, so the MCP server tests run there.
 - `kind: command` builds: relative `import_args` files are passed to neo4j-admin as absolute

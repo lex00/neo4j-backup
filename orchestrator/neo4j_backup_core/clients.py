@@ -85,16 +85,18 @@ class Neo4jClient:
         self.run_system(f"CREATE ALIAS {quote(alias)} IF NOT EXISTS FOR DATABASE {quote(target)}")
 
     def alias_target(self, alias: str) -> str | None:
+        # Neo4j stores alias (and database) names lowercase: `MixCase` is listed as `mixcase`
+        # (verified on 2026.05), so compare case-insensitively (#206)
         rows = self.run_system(
             "SHOW ALIASES FOR DATABASE YIELD name, database "
-            "WHERE name = $a RETURN database",
+            "WHERE toLower(name) = toLower($a) RETURN database",
             a=alias,
         )
         return rows[0]["database"] if rows else None
 
     def database_exists(self, name: str) -> bool:
         rows = self.run_system(
-            "SHOW DATABASES YIELD name WHERE name = $n RETURN name", n=name
+            "SHOW DATABASES YIELD name WHERE toLower(name) = toLower($n) RETURN name", n=name
         )
         return bool(rows)
 
