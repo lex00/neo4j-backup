@@ -256,6 +256,24 @@ def cmd_load(args):
     return envelope("load", ok=True, group=group.id, result=out), Exit.OK
 
 
+def cmd_adopt(args):
+    """Bring existing databases under the alias model (#92)."""
+    from neo4j_backup_core import adopt
+
+    group = _group(args)
+    neo = env.neo4j()
+    plan = adopt.plan_adopt(neo, group, migrate=args.migrate, replace=args.replace)
+    short = _guard("adopt", group.id, {"plan": plan, "drops": plan["drops"]}, args.confirm,
+                   args.dry_run)
+    if short:
+        return short
+    runner = env.runner()
+    out = adopt.adopt(_run_admin(runner), neo, env.store(), runner, paths.get_layout(), group,
+                      migrate=args.migrate, replace=args.replace, upload=_UPLOAD,
+                      staging=_STAGING, log=_log)
+    return envelope("adopt", ok=True, group=group.id, result=out), Exit.OK
+
+
 def cmd_cleanup(args):
     """Drop superseded physicals of a group (#93), keeping the current one and `--keep` before
     it; databases the tool didn't create are never touched."""
@@ -526,6 +544,15 @@ def build_parser() -> argparse.ArgumentParser:
     ld.add_argument("--reapply-access", action="store_true",
                     help="only apply the policy's `writes` to the current databases (#112)")
     ld.set_defaults(func=_recorded(cmd_load))
+
+    ad = guarded(sub.add_parser("adopt", help="bring existing databases under the alias model "
+                                              "(#92)"))
+    ad.add_argument("group")
+    ad.add_argument("--migrate", action="store_true",
+                    help="same-name members: back up, seed a new physical, DROP the original, "
+                         "create the alias (destructive; needs --replace)")
+    ad.add_argument("--replace", action="store_true", help="allow the DROP in --migrate")
+    ad.set_defaults(func=_recorded(cmd_adopt))
 
     cu = guarded(sub.add_parser("cleanup", help="drop superseded databases of a group (#93)"))
     cu.add_argument("group")

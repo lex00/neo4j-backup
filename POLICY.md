@@ -216,7 +216,7 @@ configured `SECRET_PROVIDER`. An S3 `credentials_ref` resolves to JSON:
 | `rto_minutes` | int | `120` | decl | target, not enforced |
 | `encryption` | object | `{mode: sse-kms}` | decl | recorded intent; SSE-KMS applied by your bucket |
 | `topology` | object | `null` | used | cluster shape seeded on restore/import; omit for standalone |
-| `overrides` | map | `{}` | decl | per-alias cadence overrides; not wired (but `overrides[alias].topology` **is** — it overrides the group topology for that alias) |
+| `overrides` | map | `{}` | decl | per-alias cadence overrides; not wired (but `overrides[alias].topology` **is** — it overrides the group topology for that alias, and `overrides[alias].adopt_from` names the existing database `adopt` puts behind the alias, #92) |
 | `load` | object | `{mode: live}` | decl (see below) | how the group's data arrives and what is kept (#103) |
 
 **`db_groups[].load`** — chooses the customer's path. Validation runs now; loads and rebuilds
