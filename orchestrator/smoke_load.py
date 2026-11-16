@@ -41,7 +41,13 @@ CASES = [  # group, alias, input type, writes
 ]
 
 
-def policy_file() -> str:
+CMD = ("if [ \"$FAIL\" = 1 ]; then echo 'build failed on purpose' >&2; exit 3; fi; "
+       "printf 'id:ID,name,:LABEL\\n1,a,Item\\n2,b,Item\\n3,c,Item\\n' > nodes.csv && "
+       "printf ':START_ID,:END_ID,:TYPE\\n1,2,LINKS\\n2,3,LINKS\\n' > rels.csv && "
+       "echo SMOKE109-converted")
+
+
+def policy_file(fail: bool = False) -> str:
     raw = yaml.safe_load(open(os.path.join(REPO, "policies", "demo.yaml")))
     for gid, alias, kind, writes in CASES:
         ext = "csv" if kind == "csv" else "parquet"
@@ -52,6 +58,13 @@ def policy_file() -> str:
         if writes == "read-write":
             load["protect_writes"] = True
         raw["db_groups"].append({"id": gid, "aliases": [alias], "tier": "both", "load": load})
+    # #109: a command build (the RDF-style "convert, then import" shape) in the runner
+    raw["db_groups"].append({"id": "ldcmd", "aliases": ["ld-cmd"], "tier": "both", "load": {
+        "mode": "rebuild", "writes": "read-only",
+        "build": {"kind": "command", "command": ["sh", "-c", CMD], "output": "import",
+                  "import_args": ["--nodes=nodes.csv", "--relationships=rels.csv"],
+                  "env": {"FAIL": "1" if fail else "0"}, "timeout": "5m"},
+        "checks": [{"query": "MATCH (i:Item) RETURN count(i)", "expect": "== 3"}]}})
     raw["tiers"]["both"] = {"full_cron": "0 2 * * *", "diff_cron": "0 * * * *",
                             "rebuild_cron": "0 1 * * *"}
     f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
@@ -93,6 +106,45 @@ def cli(pol: str, *args) -> dict:
     return json.loads(p.stdout)["result"]
 
 
+def cli_raw(pol: str, *args):
+    env = {**os.environ, "NEO4J_BOLT_URI": BOLT, "AWS_ENDPOINT_URL_S3": "http://localhost:9000",
+           "SCRATCH_PATH": "/scratch", "RUNNER_EXEC_PREFIX": json.dumps(EXEC),
+           "BACKUP_UPLOAD": "admin", "NEO4J_BACKUP_POLICY": pol}
+    return subprocess.run([CLI, "--json", *args], cwd=REPO, env=env, capture_output=True,
+                          text=True)
+
+
+def alias_db(alias: str) -> str:
+    return q("system", f"SHOW ALIASES FOR DATABASE YIELD name, database WHERE name = '{alias}' "
+                       f"RETURN database")[0]["database"]
+
+
+def command_build(pol: str) -> None:
+    """#109 on the stack: the command's output is imported; its logs reach the CLI's stderr;
+    a failing command stops the load before any seed and leaves the alias where it was (#107)."""
+    p = cli_raw(pol, "load", "ldcmd", "--confirm", "--ticket", "SMOKE-109")
+    assert p.returncode == 0, f"command build failed\n{p.stdout}\n{p.stderr[-3000:]}"
+    m = json.loads(p.stdout)["result"]["members"][0]
+    assert m["import_counts"] == {"nodes": 3, "relationships": 2}, m
+    assert q("ld-cmd", "MATCH (i:Item) RETURN count(i) AS n")[0]["n"] == 3
+    assert "SMOKE109-converted" in p.stderr, p.stderr[-2000:]
+    print("== command build: converted, imported, 3 nodes via ld-cmd; its log is in stderr ==")
+    bad = policy_file(fail=True)
+    try:
+        before = alias_db("ld-cmd")
+        dbs = {r["name"] for r in q("system", "SHOW DATABASES YIELD name")}
+        f = cli_raw(bad, "load", "ldcmd", "--confirm")
+        assert f.returncode != 0, f.stdout
+        env = json.loads(f.stdout)
+        assert env["ok"] is False and "no alias was moved" in env["error"]["msg"], env
+        assert alias_db("ld-cmd") == before
+        assert {r["name"] for r in q("system", "SHOW DATABASES YIELD name")} == dbs
+        assert "build failed on purpose" in f.stderr, f.stderr[-2000:]
+        print(f"== failing build: {env['error']['msg'][:100]}; alias still on {before} ==")
+    finally:
+        os.unlink(bad)
+
+
 def q(db: str, cypher: str):
     with GraphDatabase.driver(BOLT, auth=AUTH) as d, d.session(database=db) as s:
         return [r.data() for r in s.run(cypher)]
@@ -119,7 +171,8 @@ def main() -> None:
             if writes == "read-write":
                 assert base and base[0]["taken"] == "full", base
             print(f"== {kind} {writes}: 3 nodes, 2 relationships via {alias}, access {writes} ==")
-        print("PASS: load (CSV and Parquet, read-only and read-write)")
+        command_build(pol)
+        print("PASS: load (CSV and Parquet, read-only and read-write; a command build)")
     finally:
         os.unlink(pol)
 
