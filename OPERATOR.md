@@ -346,6 +346,20 @@ Everything below is optional and defaults to the tested behaviour. The full list
 - Cutover: the default moves the alias; `CUTOVER_STRATEGY=external` calls your hook to repoint
   a router or proxy instead.
 - Storage layout: `PATH_LAYOUT` brings your own bucket key scheme.
+- Database names: `NAMING=module.Class` brings your own scheme (#89). For example, two fixed
+  names per alias that a restore flips between:
+
+  ```python
+  class BlueGreen:
+      def slug(self, alias): return alias
+      def physical(self, alias, ts, current=None):
+          return f"{alias}-green" if current == f"{alias}-blue" else f"{alias}-blue"
+      def owns(self, alias, name): return name in (f"{alias}-blue", f"{alias}-green")
+  ```
+
+  Every name it returns is checked against Neo4j's rules. A restore refuses a name that is
+  already in use, so with blue/green, clean up (or drop) the idle one first. The shell scripts
+  under `bootstrap/` use the default scheme only.
 - Policy source: `NEO4J_BACKUP_POLICY=s3://…` lets you change the policy without a redeploy,
   with a cache and last-known-good fallback (`POLICY_CACHE_TTL`); `POLICY_LOADER` for an
   authenticated source such as Vault. If the policy can't be loaded when Dagster or Airflow

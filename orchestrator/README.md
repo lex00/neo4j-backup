@@ -107,6 +107,7 @@ All default to today's behaviour; set only what you need. Shared by both adapter
 | `SECRET_PROVIDER` / `NEO4J_PASSWORD_REF` | `env` / — | Credential source: `env` reads `NEO4J_PASSWORD`; `aws-sm` fetches `NEO4J_PASSWORD_REF` (secret id/ARN, optional `#json_key`) per connect. |
 | `SEED_CYPHER_VERSION` | unset | Pin the restore seed language. `5` emits `CYPHER 5 … existingData: 'use'` (required in Cypher 5); `25` omits it; unset = server default. Set to match your cluster. |
 | `CUTOVER_STRATEGY` / `CUTOVER_HOOK` | `alias-swap` / — | Restore cutover. `alias-swap` (default) does `ALTER ALIAS`; `external` invokes `CUTOVER_HOOK` (http(s) URL or command) so an external router repoints. |
+| `NAMING` | unset | Custom naming scheme (`module.Class` with `slug`, `physical(alias, ts, current)`, `owns`), #89; unset = the default `<slug>-<ts>`. See OPERATOR.md for an example. |
 | `PATH_LAYOUT` | unset | Custom object-store key layout class (`module.Class`); unset = the default `<group>/<slug>/<physical>/` scheme. |
 | `NEO4J_RETRY_ATTEMPTS` / `_BASE` / `_CAP` | `5` / `0.2` / `5.0` | Bounded exponential backoff for transient Bolt failures (leader re-election, dropped session, expired token). |
 | `POLICY_CACHE_TTL` | `60` | Seconds to cache a policy loaded from `NEO4J_BACKUP_POLICY` (`0` = always fetch). Applies to an `s3://` source so edits are picked up without a redeploy; a failed re-read falls back to the last known good. The reconcile sensor always reads fresh. |

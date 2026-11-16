@@ -14,6 +14,9 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Naming hook** (#89): `NAMING=module.Class` (`slug`, `physical(alias, ts, current)`,
+  `owns`) replaces the default scheme everywhere (layout, restore, load); its output is
+  validated, and a physical name already in use is refused (blue/green safe).
 - **`rollback <group>`** (#122; MCP `run_rollback`, Dagster `rollback_job`, Airflow
   `neo4j_rollback`): points each alias back at its database before the most recent swap, from
   `_state/<group>.json`, which every restore, load and rebuild now writes. Refuses if the previous

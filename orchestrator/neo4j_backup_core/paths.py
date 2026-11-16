@@ -39,7 +39,7 @@ class DefaultPathLayout:
     """
 
     def alias_prefix(self, group_id: str, alias: str) -> str:
-        return f"{group_id}/{naming.slug(alias)}/"
+        return f"{group_id}/{naming.scheme().slug(alias)}/"  # the configured scheme (#89)
 
     def physical_prefix(self, group_id: str, alias: str, physical: str) -> str:
         return f"{self.alias_prefix(group_id, alias)}{physical}/"
