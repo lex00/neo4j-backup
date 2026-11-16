@@ -27,6 +27,7 @@ class PathLayout(Protocol):
     def metadata_key(self, ts: str, cluster: str = "default") -> str: ...
     def metadata_listing(self, cluster: str = "default") -> str: ...
     def system_prefix(self, cluster: str = "default") -> str: ...
+    def load_prefix(self, group_id: str, alias: str) -> str: ...
 
 
 class DefaultPathLayout:
@@ -45,6 +46,11 @@ class DefaultPathLayout:
 
     def physical_of_key(self, group_id: str, alias: str, key: str) -> str:
         return key[len(self.alias_prefix(group_id, alias)):].split("/")[0]
+
+    def load_prefix(self, group_id: str, alias: str) -> str:
+        """Load artifacts for one member (#156): `.dump` (or `.backup`) files a load or seed
+        uses, beside its physical folders. `_seed` can't be a database name (no underscore)."""
+        return f"{self.alias_prefix(group_id, alias)}_seed/"
 
     # DBMS objects per cluster (#106): the default cluster keeps the original keys
     # (`_dbms/metadata-<ts>.cypher`, `_dbms/system/`); a named cluster uses `_dbms/<cluster>/`.
@@ -96,6 +102,10 @@ def physical_of_key(group_id: str, alias: str, key: str) -> str:
 
 def metadata_prefix() -> str:
     return _DEFAULT.metadata_prefix()
+
+
+def load_prefix(group_id: str, alias: str) -> str:
+    return _DEFAULT.load_prefix(group_id, alias)
 
 
 def metadata_listing(cluster: str = "default") -> str:
