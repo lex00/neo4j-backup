@@ -206,6 +206,9 @@ its **exact password authenticates**.
 
 **Full-cluster restore order:** re-provision nodes → restore the metadata layer (replay B,
 or offline-restore A) → restore each user database (seed-from-URI, modes 1–3).
+With the replacement in the policy's `clusters:`, `restore --from-cluster <lost> --to-cluster
+<new>` does the replay of B and every group's restore in one plan (#115; see
+[OPERATOR.md](OPERATOR.md#recover-after-losing-a-cluster-or-move-a-group)).
 
 ## Caveats
 

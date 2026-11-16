@@ -340,7 +340,37 @@ def run_cleanup(group: str, keep: int = 1, older_than_days: float | None = None,
     return ops.cleanup(env.neo4j(), g, keep=keep, older_than_days=older_than_days, log=_log)
 
 
+@_recorded
+def run_restore_to_cluster(to_cluster: str, group: str | None = None,
+                           from_cluster: str | None = None, until: str | None = None,
+                           fence_source: bool = False, skip_metadata: bool = False,
+                           baseline: bool = True, confirm: bool = False, dry_run: bool = False,
+                           ticket: str | None = None, reason: str | None = None) -> dict:
+    """Restore a group, or every group of `from_cluster`, into another cluster of the policy
+    (#115). Refuses while the source answers unless fence_source; replays the source's users
+    and roles; creates or swaps the aliases on the target; never edits the policy. Needs
+    confirm=true; dry_run returns the plan."""
+    from neo4j_backup_core import move
+
+    pol = load_policy(env.policy_path())
+    groups, source = move.groups_for(pol, group, from_cluster)
+    store, neo, layout = env.store(), env.neo4j(), paths.get_layout()
+    kw = dict(until=parse_until(until), fence_source=fence_source,
+              skip_metadata=skip_metadata, clusters=pol.cluster_names())
+    plan = move.public(move.plan_move(neo, store, layout, groups, source, to_cluster, **kw))
+    if dry_run:
+        return {"dry_run": True, **plan}
+    if not confirm:
+        return _needs_confirmation("restore --to-cluster", {"plan": plan})
+    out = move.public(move.move(neo, store, layout, groups, source, to_cluster, log=_log, **kw))
+    if baseline:
+        runner = env.runner()
+        out["baseline"] = move.baseline(_run_admin(runner), neo, store, runner, layout, groups,
+                                        out, log=_log)
+    return out
+
+
 READ_TOOLS = [list_targets, latest_artifact, show_chain, backup_status, restore_points,
               preview_restore, preview_prune]
 WRITE_TOOLS = [run_backup, run_verify, run_aggregate, run_restore, run_prune, run_load,
-               run_rollback, run_cleanup]
+               run_rollback, run_cleanup, run_restore_to_cluster]

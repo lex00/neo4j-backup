@@ -14,6 +14,12 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Restore into another cluster** (#115): `restore <group> --to-cluster <c>`, or
+  `restore --from-cluster <lost> --to-cluster <c>` for every group of a cluster (MCP
+  `run_restore_to_cluster`, Dagster `move_job`, Airflow `neo4j_restore_to_cluster`). Replays the
+  source's users and roles, seeds on the target, rewrites the members' privileges, creates or
+  swaps the aliases, takes the baselines, and fences the groups on the source until the policy
+  names the target. Refuses while the source answers unless `--fence-source`.
 - **`cleanup <group>`** (#93; MCP `run_cleanup`, tier `cleanup_cron` in Dagster and Airflow):
   drops superseded databases the tool created and no alias targets, keeping the current target
   and `--keep` before it; revokes their copied privileges first; never a customer's database.

@@ -362,6 +362,55 @@ def baseline_op(
     return done
 
 
+# --- Restore into another cluster (#115) -----------------------------------------------------
+class MoveConfig(dg.Config):
+    to_cluster: str
+    group_id: str | None = None      # one group (its policy cluster is the source) ...
+    from_cluster: str | None = None  # ... or every group of this cluster
+    restore_until: str | None = None
+    fence_source: bool = False       # the source still answers: fence the groups off it
+    skip_metadata: bool = False      # don't replay the source's users and roles
+    baseline: bool = True
+    ticket: str | None = None
+    reason: str | None = None
+
+
+@dg.op
+def move_op(context: dg.OpExecutionContext, config: MoveConfig, neo4j: Neo4jResource,
+            store: ObjectStoreResource, runner: RunnerResource,
+            pipes_subprocess_client: dg.PipesSubprocessClient):
+    """Seed the groups on the target cluster, create or swap the aliases there, fence them on
+    the source, then take the baseline fulls on the target (#115)."""
+    from neo4j_backup_core import move
+
+    try:
+        until = parse_until(config.restore_until)
+        rec = record.fields(config.ticket, config.reason, applying=True)
+        pol = load_policy(POLICY_PATH)
+        groups, source = move.groups_for(pol, config.group_id, config.from_cluster)
+        neos = Neo4jSet(neo4j._core(), policy_source=POLICY_PATH)
+        stores = StoreSet(store._core(), policy_source=POLICY_PATH)
+        out = move.public(move.move(
+            neos, stores, _layout, groups, source, config.to_cluster, until=until,
+            fence_source=config.fence_source, skip_metadata=config.skip_metadata,
+            clusters=pol.cluster_names(), log=context.log.info))
+        if config.baseline:
+            out["baseline"] = move.baseline(
+                _admin(context, runner, pipes_subprocess_client), neos, stores,
+                RunnerSet(runner._core(), policy_source=POLICY_PATH), _layout, groups, out,
+                upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH, log=context.log.info)
+    except (UntilError, record.TicketError, ops.OpError) as e:
+        raise dg.Failure(str(e))
+    context.log.info(record.describe("restore --to-cluster", rec))
+    context.log.info(out["policy"])
+    return {**out, **rec}
+
+
+@dg.job(tags={"backup_kind": "full"})
+def move_job():
+    move_op()
+
+
 # --- Load / rebuild (#107, #108) -------------------------------------------------------------
 class LoadConfig(dg.Config):
     group_id: str
@@ -664,7 +713,7 @@ def _build_schedules() -> list:
 defs = dg.Definitions(
     assets=[backup, aggregate, verify, prune, metadata_export, system_backup],
     jobs=[backup_job, verify_job, aggregate_job, prune_job, dbms_metadata_job, dbms_system_job,
-          restore_group, metadata_restore, load_job, rollback_job, cleanup_job],
+          restore_group, metadata_restore, load_job, rollback_job, cleanup_job, move_job],
     schedules=_build_schedules(),
     sensors=[reconcile_registry],
     resources={

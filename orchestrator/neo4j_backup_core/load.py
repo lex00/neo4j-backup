@@ -107,6 +107,8 @@ def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool 
                staging: str | None = None, cypher_version: str | None = None,
                log=_NOLOG, sleep=None) -> dict:
     """Build, dump, seed, check, set access, swap, baseline (#107). See the module docstring."""
+    from .ops import check_fence
+    check_fence(neo4j, store, group.id)  # moved to another cluster (#115)
     plan = plan_load(neo4j, store, layout, group, replace=replace)
     load = group.load
     result_notice = notify(group, plan, log=log, sleep=sleep)

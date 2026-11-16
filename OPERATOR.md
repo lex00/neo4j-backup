@@ -315,22 +315,40 @@ drop the customer's databases and aliases on the cluster.
 **Planned:** a `retired` state with a final retention period
 ([#124](https://github.com/lex00/neo4j-backup/issues/124)).
 
-## Recover after losing a cluster
+## Recover after losing a cluster, or move a group
 
-Not yet tested end to end. The pieces exist:
+With both clusters in the policy's `clusters:` (#106), `restore --to-cluster` restores a group
+into another cluster (#115):
 
-1. Bring up the replacement cluster and give its servers read access to the bucket.
-2. Restore users, roles and privileges: `neo4j-backup metadata restore --confirm` replays the
-   latest export (passwords aren't in it), or restore the `system` database offline for exact
-   copies ([RECOVERY.md](RECOVERY.md#the-metadata-layer-users-roles-privileges-aliases)).
-3. Point the tool at the new cluster (`NEO4J_BOLT_URI`, `NEO4J_BACKUP_SOURCE`) and restore each
-   group. The grants replayed in step 2 name the old cluster's physical databases, so the restore
-   has nothing to copy from. Check that each customer role reads through its alias, and if not,
-   copy the grants by hand from the old physical name (see the privileges note in
-   [RECOVERY.md](RECOVERY.md)). Grants on `*` carry over as they are.
+```bash
+# one group; the source is the group's cluster in the policy
+neo4j-backup --json restore orders --to-cluster west --dry-run
+# every group of a lost cluster, in one plan
+neo4j-backup --json restore --from-cluster east --to-cluster west --confirm --ticket INC-77
+# the source still answers (a planned move): stop the groups' writes there
+neo4j-backup --json restore orders --to-cluster west --fence-source --confirm
+```
 
-**Planned:** several clusters in one policy ([#106](https://github.com/lex00/neo4j-backup/issues/106))
-and restoring a group into another cluster ([#115](https://github.com/lex00/neo4j-backup/issues/115)).
+Before anything changes, it checks that the target is in the policy and answers, that every
+member has a seed (`--until` works as for a restore), and that the source either doesn't answer
+or `--fence-source` was given. Then, on the target:
+
+1. It replays the source's users, roles and DBMS-wide privileges, live from the source if it
+   answers, else from its newest metadata export (`--no-metadata` skips this when the target
+   has them already). Native passwords aren't in an export, so users get a placeholder and
+   CHANGE REQUIRED.
+2. It seeds every member. The target's servers must be able to read the group's store; if they
+   can't, the seed fails here and no alias has moved.
+3. It grants the members' privileges, rewritten from the source's database names to the new
+   ones (#117), then creates each alias (or swaps it, if the target has it) and takes the
+   baseline fulls on the target.
+4. It fences the groups on the source in `_state/<group>.json`: backups, restores and loads that
+   the policy still sends to the source refuse, so two clusters never write one chain.
+
+The policy isn't edited. If the move is permanent, set `cluster: west` on the groups; that also
+lifts the fence. In Dagster it's the `move_job`, in Airflow `neo4j_restore_to_cluster`, in MCP
+`run_restore_to_cluster`. `--member`, `--from-load`, `--from-dump`, `--replace` and `--check`
+don't combine with `--to-cluster`.
 
 ## Notice changes customers make directly
 

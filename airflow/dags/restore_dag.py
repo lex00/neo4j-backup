@@ -150,3 +150,48 @@ def neo4j_rollback():
 
 
 neo4j_rollback_dag = neo4j_rollback()
+
+
+@dag(dag_id="neo4j_restore_to_cluster", schedule=None, start_date=datetime(2025, 1, 1),
+     catchup=False,
+     params={"to_cluster": Param("default", type="string"),
+             "group_id": Param(None, type=["null", "string"]),
+             "from_cluster": Param(None, type=["null", "string"]),
+             "until": Param(None, type=["null", "string"]),
+             "fence_source": Param(False, type="boolean"),
+             "skip_metadata": Param(False, type="boolean"),
+             "baseline": Param(True, type="boolean"),
+             "ticket": Param(None, type=["null", "string"]),
+             "reason": Param(None, type=["null", "string"])},
+     tags=["neo4j-backup", "restore", "move"])
+def neo4j_restore_to_cluster():
+    """Restore a group, or every group of a cluster, into another cluster (#115)."""
+    @task
+    def move_groups() -> dict:
+        from neo4j_backup_core import move
+
+        p = get_current_context()["params"]
+        rec = record.fields(p.get("ticket"), p.get("reason"), applying=True)
+        print(record.describe("restore --to-cluster", rec))
+        pol = load_policy(config.policy_path())
+        try:
+            groups, source = move.groups_for(pol, p.get("group_id"), p.get("from_cluster"))
+            out = move.public(move.move(
+                config.neo4j(), config.store(), _layout, groups, source, p["to_cluster"],
+                until=parse_until(p.get("until")), fence_source=p.get("fence_source", False),
+                skip_metadata=p.get("skip_metadata", False), clusters=pol.cluster_names(),
+                log=print))
+            if p.get("baseline", True):
+                out["baseline"] = move.baseline(run_admin, config.neo4j(), config.store(),
+                                                config.runner(), _layout, groups, out, log=print,
+                                                upload=upload.BACKUP_UPLOAD,
+                                                staging=upload.STAGING)
+        except ops.OpError as e:
+            raise RuntimeError(str(e))
+        print(out["policy"])
+        return {**out, **rec}
+
+    move_groups()
+
+
+neo4j_restore_to_cluster_dag = neo4j_restore_to_cluster()

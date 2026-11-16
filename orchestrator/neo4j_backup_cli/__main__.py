@@ -312,7 +312,50 @@ def _loads_arg(args):
     return "latest" if args.from_load else None
 
 
+def cmd_move(args):
+    """`restore --to-cluster` (#115): one group, or every group of `--from-cluster`."""
+    from neo4j_backup_core import move
+
+    bad = [f for f, v in (("--member", args.member), ("--from-load", args.from_load),
+                          ("--from-dump", args.from_dump), ("--replace", args.replace),
+                          ("--check", args.check)) if v]
+    if bad:
+        return envelope("restore", ok=False, group=args.group, error=make_error(
+            "usage", f"--to-cluster doesn't take {', '.join(bad)}")), Exit.USAGE
+    pol = load_policy(env.policy_path())
+    groups, source = move.groups_for(pol, args.group, args.from_cluster)
+    store, neo, layout = env.store(), env.neo4j(), paths.get_layout()
+    kw = dict(until=args.until, fence_source=args.fence_source,
+              skip_metadata=args.no_metadata, clusters=pol.cluster_names())
+    plan = move.public(move.plan_move(neo, store, layout, groups, source, args.to_cluster, **kw))
+    plan["baseline"] = not args.no_baseline
+    short = _guard("restore", args.group, {"plan": plan}, args.confirm, args.dry_run)
+    if short:
+        return short
+    out = move.public(move.move(neo, store, layout, groups, source, args.to_cluster,
+                                cypher_version=_CYPHER, log=_log, **kw))
+    if not args.no_baseline:
+        runner = env.runner()
+        try:
+            out["baseline"] = move.baseline(_run_admin(runner), neo, store, runner, layout,
+                                            groups, out, upload=_UPLOAD, staging=_STAGING,
+                                            log=_log)
+        except ops.BaselineError as e:
+            return envelope("restore", ok=False, group=args.group,
+                            result={**out, "baseline": e.done},
+                            error=make_error(ops.BaselineError.kind, str(e))), Exit.FAILURE
+    return envelope("restore", ok=True, group=args.group, result=out), Exit.OK
+
+
 def cmd_restore(args):
+    if args.to_cluster or args.from_cluster:
+        if not args.to_cluster:
+            return envelope("restore", ok=False, error=make_error(
+                "usage", "--from-cluster needs --to-cluster")), Exit.USAGE
+        return cmd_move(args)
+    if not args.group:
+        return envelope("restore", ok=False, error=make_error(
+            "usage", "name a group to restore")), Exit.USAGE
     group = ops.only_members(_group(args), args.member)  # some members only (#121)
     store, neo, layout = env.store(), env.neo4j(), paths.get_layout()
     loads = _loads_arg(args)
@@ -444,7 +487,16 @@ def build_parser() -> argparse.ArgumentParser:
     a.set_defaults(func=_recorded(_by_tenant(cmd_aggregate, "aggregate")))
 
     r = guarded(sub.add_parser("restore", help="restore a group (alias-swap or by-name)"))
-    r.add_argument("group")
+    r.add_argument("group", nargs="?")
+    r.add_argument("--to-cluster", metavar="ID",
+                   help="restore into another cluster of the policy (#115)")
+    r.add_argument("--from-cluster", metavar="ID",
+                   help="with --to-cluster: every group of this cluster in one plan")
+    r.add_argument("--fence-source", action="store_true",
+                   help="with --to-cluster: the source still answers; stop the groups' backups "
+                        "and loads there")
+    r.add_argument("--no-metadata", action="store_true",
+                   help="with --to-cluster: don't replay the source's users and roles")
     r.add_argument("--until", type=_until_arg,
                    help="ISO-8601 point-in-time, UTC if no offset (needs a differential chain)")
     r.add_argument("--replace", action="store_true", help="by-name: DROP+recreate an existing target")
