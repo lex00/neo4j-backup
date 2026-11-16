@@ -14,6 +14,7 @@ class _FakeContainer:
     def __init__(self):
         self.blobs: dict[str, bytes] = {}
         self.uploaded, self.deleted, self.copied = [], [], []
+        self.read_whole = []
 
     class _BlobClient:
         def __init__(self, c, key):
@@ -26,9 +27,14 @@ class _FakeContainer:
         def get_blob_properties(self):
             return types.SimpleNamespace(size=len(self._c.blobs[self.key]))
 
-        def download_blob(self):
+        def download_blob(self, **kw):
             data = self._c.blobs[self.key]
-            return types.SimpleNamespace(readall=lambda: data)
+            c = self._c
+
+            def readall():
+                c.read_whole.append(self.key)
+                return data
+            return types.SimpleNamespace(readall=readall, readinto=lambda f: f.write(data))
 
         def start_copy_from_url(self, url):
             src = url.split("az://", 1)[1]
@@ -94,3 +100,12 @@ def test_base_composites_run_over_azure(store, tmp_path):
     assert latest == "g/s/p/b.backup"
     assert set(store._fake.blobs) == {"g/s/p/a.backup", "g/s/p/b.backup"}
     assert not d.exists()
+
+
+def test_download_streams_to_disk(store, tmp_path):
+    """#79: a backup is streamed into the file, never read whole into memory."""
+    store._fake.blobs["g/a/p/x.backup"] = b"0123456789" * 1000
+    dst = tmp_path / "x.backup"
+    store._download("g/a/p/x.backup", str(dst))
+    assert dst.read_bytes() == b"0123456789" * 1000
+    assert store._fake.read_whole == []

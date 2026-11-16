@@ -208,6 +208,8 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- Azure: downloads stream to disk instead of reading the whole blob into memory (#79), so a
+  multi-GB backup in `BACKUP_UPLOAD=pipeline` mode doesn't exhaust the worker's memory.
 - `just backup` writes under the physical prefix like the CLI and orchestrators, and
   `just restore` seeds from the full key of the newest backup, so it works after a CLI or
   orchestrator backup (#131).

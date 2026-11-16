@@ -471,8 +471,9 @@ class AzureObjectStore(_BaseObjectStore):
         c.get_blob_client(dst_key).start_copy_from_url(c.get_blob_client(src_key).url)
 
     def _download(self, key: str, local_path: str) -> None:
+        # streamed to disk in chunks, never the whole blob in memory (#79)
         with open(local_path, "wb") as f:
-            f.write(self._c().get_blob_client(key).download_blob().readall())
+            self._c().get_blob_client(key).download_blob(max_concurrency=4).readinto(f)
 
     def uri(self, key: str) -> str:
         account = os.environ.get("AZURE_STORAGE_ACCOUNT", "devstoreaccount1")
