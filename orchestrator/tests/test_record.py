@@ -27,7 +27,7 @@ def test_required_only_when_applying(monkeypatch):
 def _prune(monkeypatch):
     import neo4j_backup_cli.__main__ as cli
     monkeypatch.setattr(cli.ops, "prune", lambda *a, dry_run=False, **k: {
-        "deleted": 0, "detail": {}, "keys": [], "kept_for_chains": 0, "unknown_kept": 0,
+        "deleted": 0, "detail": {}, "keys": [], "kept_for_chains": 0, "unknown_kept": 0, "loads": [],
         "dry_run": dry_run})
 
 
@@ -51,7 +51,7 @@ def test_cli_requires_a_ticket_when_configured(monkeypatch):
 def test_mcp_write_tools_record_and_require(monkeypatch):
     from neo4j_backup_mcp import tools
     monkeypatch.setattr(tools.ops, "prune", lambda *a, dry_run=False, **k: {
-        "deleted": 1, "detail": {}, "keys": ["a"], "kept_for_chains": 0, "unknown_kept": 0,
+        "deleted": 1, "detail": {}, "keys": ["a"], "kept_for_chains": 0, "unknown_kept": 0, "loads": [],
         "dry_run": dry_run})
     monkeypatch.setattr(tools.env, "runner", lambda: None)
     monkeypatch.setattr(tools, "_run_admin", lambda r: None)

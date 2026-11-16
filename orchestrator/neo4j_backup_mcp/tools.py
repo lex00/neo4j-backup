@@ -151,7 +151,7 @@ def preview_prune() -> dict:
     (#73); `kept_for_chains` counts artifacts past retention kept because newer ones need them,
     `unknown_kept` those with no metadata sidecar yet (kept; run_prune fills them in first)."""
     out = ops.prune(env.store(), load_policy(env.policy_path()), _layout(), dry_run=True)
-    return {k: out[k] for k in ("deleted", "detail", "keys", "kept_for_chains", "unknown_kept")}
+    return {k: out[k] for k in ("deleted", "detail", "keys", "kept_for_chains", "unknown_kept", "loads")}
 
 
 # --- mutating (read-write scope only; each guarded by confirm) --------------------------------
@@ -253,7 +253,7 @@ def run_prune(confirm: bool = False, dry_run: bool = False, ticket: str | None =
     fill = {"run_admin": _run_admin(runner), "runner": runner, "log": _log}
     preview = ops.prune(store, policy, layout, dry_run=True, **fill)
     shown = {k: preview[k] for k in ("deleted", "detail", "keys", "kept_for_chains",
-                                     "unknown_kept")}
+                                     "unknown_kept", "loads")}
     if dry_run:
         return {"dry_run": True, **shown}
     if not confirm:

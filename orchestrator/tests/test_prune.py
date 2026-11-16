@@ -157,3 +157,22 @@ def test_metadata_prune_refuses_zero():
     from neo4j_backup_core import metadata
     with pytest.raises(ValueError):
         metadata.prune(MemStore(), keep=0)
+
+
+def test_prune_keeps_the_newest_keep_loads_per_member():
+    store = MemStore()
+    for ts in ("20261101t000000", "20261102t000000", "20261103t000000"):
+        store.add(f"g/orders/_seed/{ts}/orders.dump")
+    put(store, P1, "full.backup", True, 1, 5, day(1))
+
+    class GL(G):
+        class load:
+            keep_loads = 2
+    out = ops.prune(store, Pol(GL()), LAYOUT, dry_run=True, now=NOW)
+    assert out["loads"] == ["g/orders/_seed/20261101t000000/orders.dump"]
+    assert out["detail"]["g/orders/loads"] == 1
+    assert "g/orders/_seed/20261101t000000/orders.dump" in store.objects  # dry run
+    ops.prune(store, Pol(GL()), LAYOUT, now=NOW)
+    assert "g/orders/_seed/20261101t000000/orders.dump" not in store.objects
+    assert "g/orders/_seed/20261103t000000/orders.dump" in store.objects
+    assert P1 + "full.backup" in store.objects  # chains untouched by the load sweep
