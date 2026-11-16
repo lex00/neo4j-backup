@@ -28,6 +28,8 @@ CASES = [
     "a.b.c",
     "x" * 70,
     "tenant_42",
+    "Customer Graph (EU) – production instance number 42",  # #87: hash kept when cut
+    "y" * 200,
 ]
 TS = "20260628t120000"
 

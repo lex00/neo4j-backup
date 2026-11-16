@@ -183,6 +183,9 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- Long aliases: `physical()` cuts the readable part of the name and keeps the 8-character alias
+  hash (#87), in `naming.py` and `naming.sh`; `naming.owns(alias, physical)` recognises the
+  tool's own physicals (for cleanup, #93).
 - `import --to-dump` runs the import, the dump and the removal of the local store as one runner
   step (#167): two separate steps broke when each command is its own pod (k8s modes), and the
   leftover store made a second load under the same name fail.
