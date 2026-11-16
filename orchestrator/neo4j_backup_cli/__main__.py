@@ -256,6 +256,20 @@ def cmd_load(args):
     return envelope("load", ok=True, group=group.id, result=out), Exit.OK
 
 
+def cmd_cleanup(args):
+    """Drop superseded physicals of a group (#93), keeping the current one and `--keep` before
+    it; databases the tool didn't create are never touched."""
+    group = _group(args)
+    neo = env.neo4j()
+    plan = ops.plan_cleanup(neo, group, keep=args.keep, older_than_days=args.older_than)
+    short = _guard("cleanup", group.id, {"plan": plan, "drops": plan["drops"]}, args.confirm,
+                   args.dry_run)
+    if short:
+        return short
+    out = ops.cleanup(neo, group, keep=args.keep, older_than_days=args.older_than, log=_log)
+    return envelope("cleanup", ok=True, group=group.id, result=out), Exit.OK
+
+
 def cmd_rollback(args):
     """Point each alias back at its previous database (#122)."""
     group = _group(args)
@@ -460,6 +474,14 @@ def build_parser() -> argparse.ArgumentParser:
     ld.add_argument("--reapply-access", action="store_true",
                     help="only apply the policy's `writes` to the current databases (#112)")
     ld.set_defaults(func=_recorded(cmd_load))
+
+    cu = guarded(sub.add_parser("cleanup", help="drop superseded databases of a group (#93)"))
+    cu.add_argument("group")
+    cu.add_argument("--keep", type=int, default=1,
+                    help="previous databases kept for rollback (default 1)")
+    cu.add_argument("--older-than", type=float, metavar="DAYS",
+                    help="only databases created more than DAYS ago")
+    cu.set_defaults(func=_recorded(cmd_cleanup))
 
     rb = guarded(sub.add_parser("rollback", help="point each alias back at the database it "
                                                  "targeted before the last swap (#122)"))

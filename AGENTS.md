@@ -55,6 +55,7 @@ Configuration is environment + policy (`NEO4J_PASSWORD`, `NEO4J_BOLT_URI`, `BACK
 | `aggregate <group>` | Collapse each chain into one recovered full, in place | **yes** | `--dry-run`, `--confirm`, `--ticket`, `--reason`, `--tenant <t>` instead of a group |
 | `restore <group>` | Restore a group (alias-swap or by-name) | **yes** | `--until <iso>`, `--member <m>`, `--from-load`, `--from-dump M=K`, `--replace`, `--no-baseline`, `--dry-run`, `--confirm`, `--ticket`, `--reason` |
 | `load <group>` | Load or rebuild a group from its policy build: build, dump, seed, check, swap, baseline | **yes** | `--dry-run`, `--confirm`, `--replace`, `--keep-failed`, `--no-baseline`, `--reapply-access`, `--ticket`, `--reason` |
+| `cleanup <group>` | Drop superseded databases the tool created (keeps current + `--keep`) | **yes** | `--keep N`, `--older-than D`, `--dry-run`, `--confirm`, `--ticket`, `--reason` |
 | `rollback <group>` | Point each alias back at its database before the last swap | **yes** | `--member <m>`, `--dry-run`, `--confirm`, `--ticket`, `--reason` |
 | `export <group>` | A portable `.dump` per member, at `--until` or the latest backup; never touches the cluster | writes artifacts | `--until <iso>`, `--dry-run`, `--confirm`, `--ticket`, `--reason` |
 | `prune` | Delete backups past each group's retention | **yes** | `--dry-run`, `--confirm`, `--ticket`, `--reason` |

@@ -14,6 +14,9 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **`cleanup <group>`** (#93; MCP `run_cleanup`, tier `cleanup_cron` in Dagster and Airflow):
+  drops superseded databases the tool created and no alias targets, keeping the current target
+  and `--keep` before it; revokes their copied privileges first; never a customer's database.
 - **Naming hook** (#89): `NAMING=module.Class` (`slug`, `physical(alias, ts, current)`,
   `owns`) replaces the default scheme everywhere (layout, restore, load); its output is
   validated, and a physical name already in use is refused (blue/green safe).

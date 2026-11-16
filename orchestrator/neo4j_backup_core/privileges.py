@@ -33,3 +33,15 @@ def scoped_to(commands: list[str], database: str) -> list[str]:
 def rewrite(command: str, old: str, new: str) -> str:
     """`command` with its ON clause moved from `old` to `new`; role names are not touched."""
     return _on(old).sub(lambda m: f" ON {m.group(1)} {quote(new)}", command)
+
+
+def revoke(command: str) -> str:
+    """The REVOKE that undoes a GRANT/DENY from SHOW PRIVILEGES AS COMMANDS (#93):
+    `GRANT x TO r` -> `REVOKE GRANT x FROM r`, and the same for DENY."""
+    verb, _, rest = command.strip().partition(" ")
+    if verb.upper() not in ("GRANT", "DENY"):
+        raise ValueError(f"not a GRANT or DENY: {command!r}")
+    body, sep, role = rest.rpartition(" TO ")
+    if not sep:
+        raise ValueError(f"no role in {command!r}")
+    return f"REVOKE {verb.upper()} {body} FROM {role}"

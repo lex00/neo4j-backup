@@ -817,6 +817,57 @@ def check_seeded(neo4j, group, seeded: list[dict], *, expect_counts: dict | None
                           + ("" if keep_failed else "; the new databases were dropped")) from e
 
 
+def plan_cleanup(neo4j, group, *, keep: int = 1, older_than_days: float | None = None,
+                 now: datetime | None = None) -> dict:
+    """Superseded physicals a group can drop (#93). A candidate is a database the naming scheme
+    says the tool created for the member (`owns`, #89), that no alias targets, and that is
+    neither the current target nor one of the `keep` newest before it (rollback, #122). With
+    `older_than_days`, only databases created longer ago. Databases a customer created are never
+    candidates."""
+    keep_count("keep", keep)
+    neo4j = _per(neo4j, group.id)
+    now = now or datetime.now(timezone.utc)
+    targeted = set(neo4j.list_aliases().values())
+    all_dbs = sorted(set(neo4j.list_databases()))  # one row per server on a cluster
+    members = []
+    for name in group.names:
+        if group.restore_mode == "by-name":
+            continue  # restored in place: no superseded physicals
+        current = neo4j.alias_target(name)
+        mine = [d for d in all_dbs if naming.scheme().owns(name, d) and d != current]
+        created = {d: neo4j.database_created(d) for d in mine}
+        newest_first = sorted(mine, key=lambda d: created[d] or now, reverse=True)
+        kept = newest_first[:keep]
+        drops = []
+        for d in newest_first[keep:]:
+            if d in targeted:
+                continue
+            c = created[d]
+            if older_than_days is not None and c is not None and \
+                    (now - _floor(c)).total_seconds() < older_than_days * 86400:
+                continue
+            drops.append(d)
+        members.append({"alias": name, "current": current, "kept": kept, "drops": drops})
+    return {"group": group.id, "members": members,
+            "drops": [d for m in members for d in m["drops"]]}
+
+
+def cleanup(neo4j, group, *, keep: int = 1, older_than_days: float | None = None,
+            log: Log = _NOLOG) -> dict:
+    """Drop the databases `plan_cleanup` lists, first revoking the privileges copied to them
+    (#117), so no grant naming a dropped database is left behind."""
+    from .privileges import revoke
+
+    plan = plan_cleanup(neo4j, group, keep=keep, older_than_days=older_than_days)
+    neo = _per(neo4j, group.id)
+    for d in plan["drops"]:
+        for cmd in neo.privilege_commands(d):
+            neo.run_system(revoke(cmd))
+        neo.drop_database(d)
+        log(f"dropped {d}")
+    return plan
+
+
 STATE_PREFIX = "_state/"
 
 
