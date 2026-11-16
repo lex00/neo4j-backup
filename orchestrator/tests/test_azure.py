@@ -67,7 +67,7 @@ class _FakeContainer:
 def store(monkeypatch):
     s = AzureObjectStore("mycontainer")
     fake = _FakeContainer()
-    monkeypatch.setattr(s, "_c", lambda: fake)
+    monkeypatch.setattr(s, "_c", lambda **kw: fake)
     s._fake = fake
     return s
 

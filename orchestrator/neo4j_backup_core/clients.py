@@ -444,11 +444,19 @@ class AzureObjectStore(_BaseObjectStore):
         self.container = bucket
         self.write_args: dict = json.loads(write_args_json or "{}")
 
-    def _c(self):
+    # Downloads read 4 MiB at a time, one request at a time (#79). The SDK's defaults (a 32 MiB
+    # first read, larger chunks, parallel requests) held ~288 MiB to stream a 64 MiB blob on
+    # Azurite; with these the peak stays ~40 MiB whatever the blob size.
+    _GET_SIZE = 4 << 20
+
+    def _c(self, *, streaming: bool = False):
         from azure.storage.blob import BlobServiceClient
 
         conn = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
-        return BlobServiceClient.from_connection_string(conn).get_container_client(self.container)
+        kw = ({"max_single_get_size": self._GET_SIZE, "max_chunk_get_size": self._GET_SIZE}
+              if streaming else {})
+        return BlobServiceClient.from_connection_string(conn, **kw).get_container_client(
+            self.container)
 
     def list_prefixes(self, prefix: str = "") -> list[str]:
         return [b.name for b in self._c().walk_blobs(name_starts_with=prefix, delimiter="/")
@@ -502,7 +510,8 @@ class AzureObjectStore(_BaseObjectStore):
     def _download(self, key: str, local_path: str) -> None:
         # streamed to disk in chunks, never the whole blob in memory (#79)
         with open(local_path, "wb") as f:
-            self._c().get_blob_client(key).download_blob(max_concurrency=4).readinto(f)
+            self._c(streaming=True).get_blob_client(key).download_blob(
+                max_concurrency=1).readinto(f)
 
     def uri(self, key: str) -> str:
         account = os.environ.get("AZURE_STORAGE_ACCOUNT", "devstoreaccount1")

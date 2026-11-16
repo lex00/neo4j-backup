@@ -219,6 +219,8 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- Azure downloads read 4 MiB at a time, one request at a time (#79): with the SDK defaults a
+  64 MiB blob held ~288 MiB; now the peak stays ~40 MiB at any size (measured on Azurite).
 - Mixed-case aliases (#206): Neo4j stores alias names lowercase, so `alias_target` and
   `database_exists` now compare case-insensitively. Before, a group with an alias like `Orders`
   couldn't be backed up, and a restore left the alias on the old database.

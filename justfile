@@ -95,6 +95,11 @@ rebuild-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_rebuild_dagster.py
     airflow/.venv/bin/python airflow/smoke_rebuild.py
 
+# Azure backend on Azurite (#79, #80): upload, copy with wait, streamed download (needs a backup)
+azure-smoke:
+    docker compose --env-file .env -f docker/compose.yaml --profile azure up -d azurite
+    orchestrator/.venv/bin/python orchestrator/smoke_azure.py
+
 # Dump path (#161): import -> dump -> seed -> baseline -> diff -> point-in-time -> export
 dump-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_dump.py
