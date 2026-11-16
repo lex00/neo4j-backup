@@ -60,6 +60,13 @@ with the time restored to and the new database names.
 - The old database is kept for a while, so a restore can be undone by moving the alias back.
   Ask quickly if the restore wasn't what you needed.
 
+## Scheduled rebuilds
+
+If your graph is rebuilt on a schedule, the platform team can have the tool warn you before each
+rebuild (a webhook or a message): when the switch will happen and what will be lost (your writes
+since the previous load, unless they're kept). Transactions running at the switch are cancelled,
+as for a restore.
+
 ## If you have credentials on the cluster
 
 Some teams can run administration commands on the cluster. Please don't:

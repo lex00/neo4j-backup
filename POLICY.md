@@ -247,6 +247,7 @@ arrive with #107 and #108, write enforcement with #112. `baseline` is used today
 | `build.output` | `import` \| `dump` | `import` | used | `import`: the command writes CSV/Parquet that the built-in import reads (`build.import_args`, paths relative to the work dir, or to `OUTPUT_URI` for an image); `dump`: the command leaves `<work>/<database>.dump` (command only) |
 | `build.import_args` | list | `[]` | used | the import's `--nodes` / `--relationships` for `output: import` |
 | `build.timeout` | `90m`, `2h`, `3600s` | `2h` | used | the command is stopped after this; the load fails before any seed |
+| `notice` | `{hook, before, required}` | `null` | used | warn the customer before a load or rebuild (#126): `hook` (an http(s) URL POSTed JSON, or a command given `NOTICE_*` env vars, as `CUTOVER_HOOK`) gets `group`, `tenant`, `members`, `swap_at`, `loses`, `mode`; the load then waits `before` (e.g. `15m`). A failed hook is logged and the load goes on, unless `required: true`. Settable in a profile |
 | `checks` | list of `{query, expect, name?}` | `[]` | used | checks on a new database before its swap (#111): Cypher returning one number; `expect` is `== n`, `>= n`, `<= n` or `between a b`. Run after every load (with the default checks: online, non-zero counts, counts equal to the import's) and by `restore --check` |
 
 Rejected at load, naming the group: `live` with `read-only`; `live` with `protect_writes: false`;

@@ -41,28 +41,30 @@ class ExternalRoutingCutover:
         self.hook = hook
 
     def cutover(self, neo, alias: str, new_physical: str, old_physical: str | None) -> None:
-        payload = {"alias": alias, "new_physical": new_physical, "old_physical": old_physical}
-        if self.hook.startswith(("http://", "https://")):
-            import json
-            import urllib.request
+        call_hook(self.hook, {"alias": alias, "new_physical": new_physical,
+                              "old_physical": old_physical}, env_prefix="CUTOVER_")
 
-            req = urllib.request.Request(
-                self.hook, data=json.dumps(payload).encode(),
-                headers={"Content-Type": "application/json"}, method="POST",
-            )
-            with urllib.request.urlopen(req) as resp:  # non-2xx raises HTTPError
-                resp.read()
-        else:
-            import shlex
-            import subprocess
 
-            env = {
-                **os.environ,
-                "CUTOVER_ALIAS": alias,
-                "CUTOVER_NEW_PHYSICAL": new_physical,
-                "CUTOVER_OLD_PHYSICAL": old_physical or "",
-            }
-            subprocess.run(shlex.split(self.hook), check=True, env=env)
+def call_hook(hook: str, payload: dict, *, env_prefix: str, timeout: float = 60) -> None:
+    """Call a hook: an http(s) URL is POSTed the JSON payload (non-2xx raises); anything else
+    is a command run with each payload field as `<env_prefix><FIELD>` (non-zero exit raises).
+    Shared by the cutover (#17) and the load notice (#126)."""
+    if hook.startswith(("http://", "https://")):
+        import json
+        import urllib.request
+
+        req = urllib.request.Request(hook, data=json.dumps(payload).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # non-2xx raises HTTPError
+            resp.read()
+        return
+    import json
+    import shlex
+    import subprocess
+
+    env = {**os.environ, **{f"{env_prefix}{k.upper()}": v if isinstance(v, str) else
+                            ("" if v is None else json.dumps(v)) for k, v in payload.items()}}
+    subprocess.run(shlex.split(hook), check=True, env=env, timeout=timeout)
 
 
 def from_env() -> CutoverStrategy:
