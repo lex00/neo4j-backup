@@ -104,15 +104,39 @@ def slug(a: str) -> str:
     return f"{base}-{_hash8(a)}"
 
 
+def _hashed(a: str) -> bool:
+    return not _SLUG_CLEAN_RE.fullmatch(a)
+
+
 def physical(a: str, ts_val: str | None = None) -> str:
-    """Unique physical database name for an alias at a timestamp: <slug>-<ts>."""
+    """Unique physical database name for an alias at a timestamp: <slug>-<ts>. When that is too
+    long, the readable base is cut and the 8-character hash kept (#87), so the name still says
+    whose it is (`owns`)."""
     s = slug(a)
     t = ts_val if ts_val is not None else ts()
     tslen = len(t) + len(JOIN)
     if len(s) + tslen > DB_MAXLEN:
-        s = s[: DB_MAXLEN - tslen]
-        s = re.sub(r"[.-]+$", "", s)
+        if _hashed(a):
+            base, h = s.rsplit(JOIN, 1)
+            base = re.sub(r"[.-]+$", "", base[: DB_MAXLEN - tslen - len(h) - len(JOIN)])
+            s = f"{base or 'db'}{JOIN}{h}"
+        else:
+            s = re.sub(r"[.-]+$", "", s[: DB_MAXLEN - tslen])
     return validate_db(f"{s}{JOIN}{t}")
+
+
+def owns(a: str, name: str) -> bool:
+    """Whether `name` is a physical this tool would have created for alias `a` (#87, #89):
+    `<slug or its cut-down form>-<ts>`; for a hashed slug the alias hash must be intact."""
+    prefix, sep, t = name.rpartition(JOIN)
+    if not sep or not re.fullmatch(r"\d{8}t\d{6}", t):
+        return False
+    s = slug(a)
+    if not _hashed(a):
+        return prefix == s
+    base, h = s.rsplit(JOIN, 1)
+    pbase, psep, ph = prefix.rpartition(JOIN)
+    return bool(psep) and ph == h and base.startswith(pbase)
 
 
 def slug_of_physical(name: str) -> str:

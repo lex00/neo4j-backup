@@ -101,13 +101,21 @@ naming_slug() {
 
 # Unique physical database name for an alias at a timestamp: <slug><join><ts>.
 naming_physical() {
-  local slug ts tslen
+  local slug ts tslen base h
   slug="$(naming_slug "$1")"
   ts="${2:-$(naming_ts)}"
   tslen=$(( ${#ts} + ${#NAMING_JOIN} ))
   if (( ${#slug} + tslen > NAMING_MAXLEN )); then
-    slug="${slug:0:$(( NAMING_MAXLEN - tslen ))}"
-    slug="$(printf '%s' "$slug" | sed -E 's/[.-]+$//')"
+    if [ "$slug" != "$1" ]; then  # hashed slug: cut the base, keep the 8-char hash (#87)
+      h="${slug##*-}"; base="${slug%-*}"
+      base="${base:0:$(( NAMING_MAXLEN - tslen - ${#h} - ${#NAMING_JOIN} ))}"
+      base="$(printf '%s' "$base" | sed -E 's/[.-]+$//')"
+      [ -z "$base" ] && base="db"
+      slug="$base$NAMING_JOIN$h"
+    else
+      slug="${slug:0:$(( NAMING_MAXLEN - tslen ))}"
+      slug="$(printf '%s' "$slug" | sed -E 's/[.-]+$//')"
+    fi
   fi
   printf '%s%s%s' "$slug" "$NAMING_JOIN" "$ts"
 }
