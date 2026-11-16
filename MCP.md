@@ -33,10 +33,10 @@ Read-only (always available):
 
 | Tool | Returns |
 |---|---|
-| `list_targets` | every group/member the policy covers |
+| `list_targets(group, tenant)` | every group/member the policy covers (or one group's or tenant's), with each group's tenant |
 | `latest_artifact(group, member)` | the chain head for one member |
 | `show_chain(group, member)` | the member's artifacts, oldest first, and its chains (full then diffs, per database folder) with the time window each covers, read from the artifact sidecars |
-| `backup_status` | every target's latest artifact and its age in hours |
+| `backup_status(tenant)` | every target's (or one tenant's) latest artifact, its age in hours, and its tenant |
 | `preview_restore(group, replace)` | the restore plan / blast radius, without mutating |
 | `preview_prune` | the artifacts retention would delete, without deleting (whole chains only; `kept_for_chains`, `unknown_kept`) |
 
@@ -44,9 +44,9 @@ Mutating (only with `NEO4J_BACKUP_MCP_MODE=read-write`; each needs `confirm=true
 
 | Tool | Does |
 |---|---|
-| `run_backup(group, kind)` | back up a group (additive) |
-| `run_verify(group)` | consistency-check the latest backups (non-destructive) |
-| `run_aggregate(group, confirm, dry_run, ticket, reason)` | collapse chains to a recovered full, in place |
+| `run_backup(group, kind, tenant)` | back up a group, or every group with a tenant label (additive) |
+| `run_verify(group, tenant)` | consistency-check the latest backups (non-destructive) |
+| `run_aggregate(group, confirm, dry_run, ticket, reason, tenant)` | collapse chains to a recovered full, in place |
 | `run_restore(group, until, replace, confirm, dry_run, verify_first, baseline, ticket, reason)` | restore (alias-swap / by-name, PITR), then a full backup of each restored database unless `baseline=false` |
 | `run_prune(confirm, dry_run, ticket, reason)` | delete backups past retention |
 

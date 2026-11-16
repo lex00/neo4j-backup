@@ -115,7 +115,10 @@ class Load(BaseModel):
 class DbGroup(BaseModel):
     id: str
     profile: str | None = None  # the profile its settings came from (#101), for reporting
-    owner: str | None = None
+    # A label for selecting a customer's groups (#102). NOT an access boundary: the deployment
+    # has full access to every database in its clusters. `owner` is the old name.
+    tenant: str | None = None
+    owner: str | None = None  # deprecated: read as `tenant`
     # A group is alias-swap (apps connect via aliases; restore seeds a new physical + swaps the
     # alias — the default, non-destructive) OR by-name (#48: no alias; restore targets the
     # database by its own name — create-if-absent, or destructive DROP+CREATE with replace).
@@ -145,6 +148,15 @@ class DbGroup(BaseModel):
                                  for err in e.errors())
                 raise ValueError(f"group {data.get('id')!r}: load: {msgs}") from None
         return data
+
+    @model_validator(mode="after")
+    def _owner_is_tenant(self) -> "DbGroup":
+        if self.owner is not None:
+            if self.tenant is None:
+                self.tenant = self.owner
+            _log.warning("policy: group %r uses 'owner', which is now 'tenant' (#102); "
+                         "rename it", self.id)
+        return self
 
     @model_validator(mode="after")
     def _validate_members(self) -> "DbGroup":
@@ -191,6 +203,10 @@ class Tier(BaseModel):
         if not (self.full_cron or self.diff_cron or self.rebuild_cron):
             raise ValueError("a tier needs at least one of full_cron, diff_cron, rebuild_cron")
         return self
+
+
+class SelectionError(ValueError):
+    """A command was given no group, both a group and a tenant, or an unknown one (#102)."""
 
 
 PROFILE_FORBIDDEN = ("id", "aliases", "databases", "overrides", "profile")
@@ -302,6 +318,28 @@ class Policy(BaseModel):
             if g.id == gid:
                 return g
         raise KeyError(gid)
+
+    def tenants(self) -> list[str]:
+        return sorted({g.tenant for g in self.db_groups if g.tenant})
+
+    def select(self, group: str | None = None, tenant: str | None = None) -> list[DbGroup]:
+        """The groups a command acts on: one by id, or every group with a tenant label (#102).
+        Raises SelectionError for both, neither, or an unknown group or tenant."""
+        if group and tenant:
+            raise SelectionError("give a group or --tenant, not both")
+        if tenant:
+            out = [g for g in self.db_groups if g.tenant == tenant]
+            if not out:
+                known = ", ".join(self.tenants()) or "none"
+                raise SelectionError(f"unknown tenant {tenant!r} (tenants: {known})")
+            return out
+        if not group:
+            raise SelectionError("give a group or --tenant")
+        try:
+            return [self.group(group)]
+        except KeyError:
+            known = ", ".join(g.id for g in self.db_groups)
+            raise SelectionError(f"unknown group {group!r} (groups: {known})") from None
 
     def partition_keys(self) -> list[str]:
         """One work unit per (group, member), encoded as 'group/name' (alias or database)."""

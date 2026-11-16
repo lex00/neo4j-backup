@@ -29,6 +29,7 @@ class _Group:
     names = ["orders", "customers"]
     retention_days = 7
     restore_mode = "alias-swap"
+    tenant = "acme"
 
 
 class _Policy:
@@ -36,6 +37,14 @@ class _Policy:
 
     def group(self, gid):
         return _Group()
+
+    def select(self, group=None, tenant=None):
+        from neo4j_backup_core.policy import SelectionError
+        if group and tenant:
+            raise SelectionError("both")
+        if tenant and tenant != "acme":
+            raise SelectionError(f"unknown tenant {tenant!r} (tenants: acme)")
+        return [_Group()]
 
     def partition_keys(self):
         return ["demo/orders", "demo/customers"]
@@ -68,7 +77,8 @@ def stub_env(monkeypatch):
 # --- read-only --------------------------------------------------------------------------------
 
 def test_list_targets():
-    assert tools.list_targets() == {"targets": ["demo/orders", "demo/customers"]}
+    assert tools.list_targets() == {"targets": ["demo/orders", "demo/customers"],
+                                    "tenants": {"demo": "acme"}}
 
 
 def test_backup_status_reports_age(monkeypatch):
