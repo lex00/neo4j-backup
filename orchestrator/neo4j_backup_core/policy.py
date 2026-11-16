@@ -45,6 +45,9 @@ class StoreConfig(BaseModel):
     url: str
     region: str | None = None
     endpoint: str | None = None
+    # the endpoint as neo4j-admin on the runner sees it, when it differs (e.g. a local stack where
+    # the tool runs on the host and the runner in the compose network); default: `endpoint`
+    runner_endpoint: str | None = None
     sse: str | None = None
     sse_kms_key_id: str | None = None
     write_args: dict = Field(default_factory=dict)

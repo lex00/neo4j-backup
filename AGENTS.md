@@ -48,6 +48,7 @@ Configuration is environment + policy (`NEO4J_PASSWORD`, `NEO4J_BOLT_URI`, `BACK
 | `targets [<group>]` | List the policy's group/member targets and each group's tenant | no | `--tenant <t>` |
 | `policy show <group>` | A group's effective settings after profiles, and where each came from | no | |
 | `policy validate <file>` | Validate a policy file (no cluster or store); exit `2` if invalid | no | |
+| `policy check` | List, write and delete a probe in every store the policy uses; exit `1` if any fails | probe only | |
 | `backup <group>` | Back up every database in a group | writes artifacts | `--kind AUTO\|FULL\|DIFF`, `--tenant <t>` instead of a group |
 | `verify <group>` | Consistency-check the latest backups (non-destructive) | no | `--tenant <t>` instead of a group |
 | `aggregate <group>` | Collapse each chain into one recovered full, in place | **yes** | `--dry-run`, `--confirm`, `--ticket`, `--reason`, `--tenant <t>` instead of a group |

@@ -54,6 +54,13 @@ def _store(store, group_id: str):
     return store.for_group(group_id) if hasattr(store, "for_group") else store
 
 
+def _admin(run_admin: RunAdmin, cmd: list, store) -> str:
+    """Run a neo4j-admin command that reads or writes `store`, with the store's own settings
+    (region, runner endpoint, credentials) in its environment when it has any (#105)."""
+    env = store.admin_env() if hasattr(store, "admin_env") else {}
+    return run_admin(cmd, env=env) if env else run_admin(cmd)
+
+
 def _stage(runner, tag: str, name: str, staging: str | None) -> str:
     return f"{(staging or runner.scratch_path).rstrip('/')}/{tag}/{name}"
 
@@ -75,7 +82,7 @@ def record_artifacts(run_admin: RunAdmin, runner, store, prefix: str, *, rewrite
         want = None if rewrite else {k[len(prefix):] for k in unknown}
         written = []
         if want is None or want:
-            out = run_admin(runner.inspect_command(store.uri(prefix)))
+            out = _admin(run_admin, runner.inspect_command(store.uri(prefix)), store)
             written = artifacts.write_sidecars(store, prefix, out, only=want)
         dropped = artifacts.drop_orphans(store, prefix)
         return {"written": len(written), "dropped": len(dropped)}
@@ -91,10 +98,10 @@ def run_backup(run_admin: RunAdmin, runner, store, database: str, prefix: str, k
     if upload == "pipeline":
         stage = _stage(runner, "_stage", database, staging)
         os.makedirs(stage, exist_ok=True)
-        run_admin(runner.backup_command(database, stage, kind=kind))
+        _admin(run_admin, runner.backup_command(database, stage, kind=kind), store)
         key = store.upload_backups(stage, prefix)  # SSE-KMS PUT, then remove local
     else:
-        run_admin(runner.backup_command(database, store.uri(prefix), kind=kind))
+        _admin(run_admin, runner.backup_command(database, store.uri(prefix), kind=kind), store)
         key = store.latest_artifact_key(prefix)
     record_artifacts(run_admin, runner, store, prefix, log=log)  # reads stay direct (#39)
     return key
@@ -108,10 +115,10 @@ def run_aggregate(run_admin: RunAdmin, runner, store, physical: str, prefix: str
     if upload == "pipeline":
         stage = _stage(runner, "_agg", physical, staging)
         store.download_prefix(prefix, stage)
-        run_admin(runner.aggregate_command(physical, stage))
+        _admin(run_admin, runner.aggregate_command(physical, stage), store)
         key = store.sync_up(stage, prefix)
     else:
-        run_admin(runner.aggregate_command(physical, store.uri(prefix)))
+        _admin(run_admin, runner.aggregate_command(physical, store.uri(prefix)), store)
         key = store.latest_artifact_key(prefix)
     record_artifacts(run_admin, runner, store, prefix, rewrite=True, log=log)
     return key
@@ -125,17 +132,17 @@ def run_verify(run_admin: RunAdmin, runner, store, physical: str, src: str, scra
         stage = _stage(runner, "_verify", physical, staging)
         copied = store.download_prefix(src, stage)  # verify on local disk — no S3 scratch writes
         try:
-            run_admin(runner.aggregate_command(physical, stage))
+            _admin(run_admin, runner.aggregate_command(physical, stage), store)
             full = next(f for f in sorted(os.listdir(stage)) if f.endswith(".backup"))
-            run_admin(runner.check_command(physical, os.path.join(stage, full)))
+            _admin(run_admin, runner.check_command(physical, os.path.join(stage, full)), store)
         finally:
             shutil.rmtree(stage, ignore_errors=True)
         return copied
     try:
         copied = store.copy_prefix(src, scratch)
-        run_admin(runner.aggregate_command(physical, store.uri(scratch)))
+        _admin(run_admin, runner.aggregate_command(physical, store.uri(scratch)), store)
         full = store.latest_artifact_key(scratch)
-        run_admin(runner.check_command(physical, store.uri(full)))
+        _admin(run_admin, runner.check_command(physical, store.uri(full)), store)
     finally:
         store.delete_prefix(scratch)
     return copied

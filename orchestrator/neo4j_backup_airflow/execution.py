@@ -23,7 +23,8 @@ def run_admin(command: list, env: dict | None = None) -> str:
     full_env = {**runner.env(), **(env or {})}
     if runner.mode == "k8s":
         return _run_pod(runner, command, full_env)
-    return capture.run_captured(command, env=full_env, stream=sys.stdout)
+    return capture.run_captured(runner.with_env(command, env or {}), env=full_env,
+                                stream=sys.stdout)
 
 
 def _run_pod(runner, command: list, env: dict) -> str:

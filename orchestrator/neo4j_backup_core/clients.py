@@ -202,6 +202,11 @@ class _BaseObjectStore:
         arts = self.list_artifacts(prefix)
         return max(arts, key=lambda t: t[2])[0] if arts else None
 
+    def admin_env(self) -> dict[str, str]:
+        """Environment neo4j-admin needs to reach this store (#105): a named store's region,
+        runner endpoint and credentials. Empty for the environment's own store."""
+        return dict(getattr(self, "admin_env_vars", {}) or {})
+
     def delete_prefix(self, prefix: str) -> int:
         return self.delete_keys([k for (k, _s, _m) in self.list_artifacts(prefix)])
 
@@ -276,14 +281,23 @@ class S3ObjectStore(_BaseObjectStore):
             self.write_args["ServerSideEncryption"] = sse
         if sse_kms_key_id:
             self.write_args["SSEKMSKeyId"] = sse_kms_key_id
+        # a named store's own key pair (#105); None: the process's default AWS credentials
+        self.credentials: dict | None = None
+        # environment for neo4j-admin when it reads/writes this store (#105); {} = inherit
+        self.admin_env_vars: dict[str, str] = {}
 
     def _client(self):
         import boto3
         from botocore.config import Config
 
         cfg = Config(s3={"addressing_style": "path"}) if self.endpoint_url else None
+        creds = {}
+        if self.credentials:
+            creds = {"aws_access_key_id": self.credentials["access_key_id"],
+                     "aws_secret_access_key": self.credentials["secret_access_key"],
+                     "aws_session_token": self.credentials.get("session_token")}
         return boto3.client(
-            "s3", endpoint_url=self.endpoint_url, region_name=self.region, config=cfg
+            "s3", endpoint_url=self.endpoint_url, region_name=self.region, config=cfg, **creds
         )
 
     def list_artifacts(self, prefix: str):
@@ -563,6 +577,18 @@ class BackupRunner:
 
     def env(self) -> dict:
         return {"HEAP_SIZE": self.heap_size}
+
+    def with_env(self, cmd: list, names) -> list:
+        """`cmd` with `-e NAME` for each name after the `exec` of a `docker … exec` prefix, so the
+        container inherits those variables from the caller's environment (values never appear in
+        the argv). Other prefixes, or none, pass the environment through the process (#105)."""
+        names = list(names)
+        n = len(self.exec_prefix)
+        if not names or not n or "exec" not in self.exec_prefix:
+            return cmd
+        i = self.exec_prefix.index("exec") + 1
+        flags = [x for name in names for x in ("-e", name)]
+        return [*cmd[:i], *flags, *cmd[i:]]
 
     def k8s_pod_spec(self, env: dict) -> dict:
         env = {**json.loads(self.extra_env_json or "{}"), **env}

@@ -67,3 +67,33 @@ def build(name: str) -> SecretProvider:
 
 def from_env() -> SecretProvider:
     return build(os.environ.get("SECRET_PROVIDER", "env"))
+
+
+def resolve_ref(ref: str) -> str:
+    """The one secret-reference syntax used in the policy (#105): `credentials_ref`, cluster
+    `password_ref` (#106) and build `env` values (#109). `<provider>:<ref>` names the provider
+    (`env:FINANCE_S3`, `aws-sm:arn:aws:secretsmanager:…#key`); a bare `<ref>` uses the configured
+    SECRET_PROVIDER."""
+    if not ref:
+        raise RuntimeError("empty secret reference")
+    name, sep, rest = ref.partition(":")
+    if sep and name in _PROVIDERS:
+        return build(name).resolve(rest)
+    return from_env().resolve(ref)
+
+
+def key_pair(ref: str) -> dict[str, str]:
+    """An S3 key pair from a secret reference: the secret is JSON with `access_key_id`,
+    `secret_access_key` and optionally `session_token`."""
+    import json
+
+    try:
+        value = json.loads(resolve_ref(ref))
+        out = {"access_key_id": value["access_key_id"],
+               "secret_access_key": value["secret_access_key"]}
+    except (ValueError, KeyError, TypeError) as e:
+        raise RuntimeError(f"credentials {ref!r} must be JSON with access_key_id and "
+                           f"secret_access_key") from e
+    if value.get("session_token"):
+        out["session_token"] = value["session_token"]
+    return out

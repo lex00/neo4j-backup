@@ -300,6 +300,7 @@ Everything below is optional and defaults to the tested behaviour. The full list
 |---|---|---|
 | `targets` | lists the policy's groups and members | no |
 | `policy show <group>` / `policy validate <file>` | a group's effective settings and their source / check a policy file | no |
+| `policy check` | can the tool list and write every store the policy uses; which stores the servers must read | writes and deletes one probe object per store |
 | `backup <group> [--kind AUTO\|FULL\|DIFF]` | backs up every database in a group | adds backups |
 | `verify <group>` | checks the latest backups restore and are consistent | no |
 | `aggregate <group>` | combines each chain into one full backup, in place | yes |
