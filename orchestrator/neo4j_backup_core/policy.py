@@ -514,16 +514,62 @@ class Policy(BaseModel):
         for g in self.db_groups:
             if g.naming is None and self.naming is not None:
                 g.naming = self.naming
-            if g.naming is None or g.restore_mode == "by-name":
+            bases = {a for a, ov in g.overrides.items()
+                     if isinstance(ov, dict) and ov.get("physical_base")}
+            if (g.naming is None and not bases) or g.restore_mode == "by-name":
                 continue
             ts_val = naming.ts_for(g, sample)
+            scheme = naming.TemplateNaming(
+                g.id, g.naming.physical_template if g.naming else naming.DEFAULT_TEMPLATE,
+                {a: g.overrides[a]["physical_base"] for a in bases})
             for a in g.names:
                 try:
-                    naming.render(g.naming.physical_template, a, g.id, ts_val)
+                    scheme.physical(a, ts_val)
                 except naming.NamingError as e:
-                    raise ValueError(f"group {g.id!r}: naming.physical_template "
-                                     f"{g.naming.physical_template!r} gives an invalid name for "
-                                     f"{a!r}: {e}") from None
+                    what = (f"overrides.{a}.physical_base {g.overrides[a]['physical_base']!r}"
+                            if a in bases else
+                            f"naming.physical_template {g.naming.physical_template!r}")
+                    raise ValueError(f"group {g.id!r}: {what} gives an invalid database name "
+                                     f"for {a!r} (with room for the timestamp): {e}") from None
+        return self
+
+    @model_validator(mode="after")
+    def _member_prefixes(self) -> "Policy":
+        """`overrides.<alias>.prefix` (#90): only on members; ends in '/'; not a tool-owned
+        `_` folder or a load folder; and no two members of one store share a prefix or nest
+        one in another (each member's chain must be listable on its own)."""
+        by_store: dict[str, list[tuple[str, str]]] = {}
+        for g in self.db_groups:
+            for a, ov in g.overrides.items():
+                if not isinstance(ov, dict):
+                    continue
+                for key in ("prefix", "physical_base"):
+                    if ov.get(key) and a not in g.names:
+                        raise ValueError(f"group {g.id!r}: overrides.{a}.{key}: {a!r} is not "
+                                         f"a member")
+                p = ov.get("prefix")
+                if p is None:
+                    continue
+                if not isinstance(p, str) or not p.endswith("/") or p.startswith("/"):
+                    raise ValueError(f"group {g.id!r}: overrides.{a}.prefix {p!r} must be a "
+                                     f"relative folder ending in '/'")
+                if p.startswith("_") or "/_seed/" in f"/{p}":
+                    raise ValueError(f"group {g.id!r}: overrides.{a}.prefix {p!r} is reserved "
+                                     f"(_dbms/, _verify/, _seed/, _state/ and other '_' "
+                                     f"folders belong to the tool)")
+            for a in g.names:
+                ov = g.overrides.get(a) or {}
+                p = (ov.get("prefix") if isinstance(ov, dict) else None) or \
+                    f"{g.id}/{naming.slug(a)}/"
+                by_store.setdefault(self.store_name(g.id), []).append((p, f"{g.id}/{a}"))
+        for store, items in by_store.items():
+            items.sort()
+            for (p1, m1), (p2, m2) in zip(items, items[1:]):
+                if m1 != m2 and p2.startswith(p1):  # a repeated member: _tiers_resolve says so
+                    raise ValueError(
+                        f"members {m1} and {m2} " + ("share" if p1 == p2 else "nest")
+                        + f" storage prefixes ({p1!r}, {p2!r}) in store {store!r}; set "
+                        f"overrides.<alias>.prefix so each member has its own")
         return self
 
     @model_validator(mode="after")

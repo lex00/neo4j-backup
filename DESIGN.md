@@ -715,7 +715,7 @@ any third-party SDK imported lazily so nothing is pulled unless the non-default 
 | **Secret provider** | `env` (reads `NEO4J_PASSWORD`) | `SECRET_PROVIDER=aws-sm` + `NEO4J_PASSWORD_REF`; resolved per connect (rotation) |
 | **Cutover** | alias swap (`ALTER ALIAS`) | `CUTOVER_STRATEGY=external` + `CUTOVER_HOOK` (external router) |
 | **Restore mode** | `alias-swap` (seed new + swap) | policy `restore_mode: by-name` (#48): target the database by its own name — create-if-absent, or destructive DROP+recreate with `replace`. No non-destructive in-place (Neo4j has no rename) |
-| **Path layout** | `<group>/<slug>/<physical>/` | `PATH_LAYOUT=module.Class` |
+| **Path layout** | `<group>/<slug>/<physical>/` | `PATH_LAYOUT=module.Class`; per member, policy `overrides.<alias>.prefix` (#90), passed to any layout as its `prefix_for(group, alias)` attribute |
 | **Naming** | `<slug>-<ts>` physicals (`naming.py`) | `NAMING=module.Class` with `slug(alias)`, `physical(alias, ts, current)`, `owns(alias, physical)` (#89); every physical it returns is validated against Neo4j's rules, and a name already in use (blue/green) is refused |
 | **Seed topology** | DBMS default | policy `topology:` → `TOPOLOGY n PRIMARIES m SECONDARIES` |
 | **Seed Cypher version** | server default | `SEED_CYPHER_VERSION=5` (adds `existingData`) / `25` |

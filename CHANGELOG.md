@@ -14,6 +14,9 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Per-member `prefix` and `physical_base`** (#90): `overrides.<alias>.prefix` pins a member's
+  storage folder (renaming an alias keeps its history), `physical_base` the base of its
+  database names. Duplicate, nested and reserved prefixes are refused at policy load.
 - **Policy `naming:` block** (#88): `physical_template` (`{alias}`, `{slug}`, `{group}`,
   `{ts}`) and `ts_format`, at the top level, in a profile or per group. Defaults reproduce
   today's names; every member's name is checked at policy load. Used by restore, load, adopt,

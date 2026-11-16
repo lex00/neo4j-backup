@@ -45,10 +45,10 @@ def test_each_field(template, expect):
 @pytest.mark.parametrize("bad,why", [
     ({"physical_template": "{slug}"}, "must contain {ts}"),
     ({"physical_template": "{slug}-{env}-{ts}"}, "unknown field"),
-    ({"physical_template": "{ts}-{slug}"}, "invalid name"),       # digit first
-    ({"physical_template": "Prod_{slug}-{ts}"}, "invalid name"),  # uppercase, underscore
+    ({"physical_template": "{ts}-{slug}"}, "invalid database name"),       # digit first
+    ({"physical_template": "Prod_{slug}-{ts}"}, "invalid database name"),  # uppercase, underscore
     ({"ts_format": "%Y-%m-%d"}, "join character"),
-    ({"physical_template": "{slug}-" + "x" * 50 + "-{ts}"}, "invalid name"),  # too long
+    ({"physical_template": "{slug}-" + "x" * 50 + "-{ts}"}, "invalid database name"),  # too long
 ])
 def test_rejected_templates(bad, why):
     with pytest.raises(Exception, match=why):
