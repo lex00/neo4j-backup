@@ -208,6 +208,9 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- `just backup` writes under the physical prefix like the CLI and orchestrators, and
+  `just restore` seeds from the full key of the newest backup, so it works after a CLI or
+  orchestrator backup (#131).
 - The CLI keeps its contract on any error (#140): one JSON envelope, exit 1, error kind
   `neo4j_error` for driver errors or `internal_error`; the traceback only with `--debug` or
   `NEO4J_BACKUP_DEBUG=1`. A group restore that fails while seeding drops the members already

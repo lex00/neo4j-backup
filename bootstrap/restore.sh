@@ -18,11 +18,11 @@ aliases=(); news=(); olds=()
 for raw in "${DEMO_ALIASES[@]}"; do
   alias_name="$(naming_alias "$raw")"
   slug="$(naming_slug "$alias_name")"
-  artifact="$(latest_artifact "$GROUP/$slug/")"
-  if [ -z "$artifact" ]; then
+  key="$(latest_artifact_key "$GROUP/$slug/")"  # the full key, physical folder included (#131)
+  if [ -z "$key" ]; then
     echo "!! no .backup under $GROUP/$slug/ — run 'just backup $GROUP' first" >&2; exit 1
   fi
-  uri="s3://$BUCKET/$GROUP/$slug/$artifact"
+  uri="s3://$BUCKET/$key"
   newdb="$(naming_physical "$alias_name" "$ts")"
   naming_validate_db "$newdb"
   echo ">>   seed $newdb <= $uri"
