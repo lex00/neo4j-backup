@@ -120,6 +120,27 @@ class Check(BaseModel):
         return self
 
 
+class Notice(BaseModel):
+    """Warn a customer before a load or rebuild replaces their database (#126)."""
+    model_config = ConfigDict(extra="forbid")
+    hook: str                 # an http(s) URL (POST JSON) or a command (NOTICE_* env vars)
+    before: str = "0m"        # wait this long after the notice before building (e.g. 15m)
+    required: bool = False    # a failed hook stops the load (default: logged, load goes on)
+
+    @property
+    def before_seconds(self) -> int:
+        n, unit = self.before[:-1], self.before[-1]
+        mult = {"s": 1, "m": 60, "h": 3600}.get(unit)
+        if mult is None or not n.isdigit():
+            raise ValueError(f"notice.before {self.before!r}: use e.g. 15m, 1h or 900s")
+        return int(n) * mult
+
+    @model_validator(mode="after")
+    def _check(self) -> "Notice":
+        self.before_seconds
+        return self
+
+
 class LoadSource(BaseModel):
     """Where a rebuild's input files live (#103): a named store (#105) and a prefix. Default:
     the group's own store under `<group>/_source/`."""
@@ -186,6 +207,7 @@ class Load(BaseModel):
     source: LoadSource | None = None
     build: LoadBuild | None = None
     checks: list[Check] = Field(default_factory=list)  # #111, after the default checks
+    notice: Notice | None = None  # #126, before the build
 
     @model_validator(mode="after")
     def _combinations(self) -> "Load":

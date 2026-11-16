@@ -264,3 +264,49 @@ def test_failed_command_fails_before_any_seed():
     with pytest.raises(L.LoadError) as e:
         L.load_group(run, BackupRunner(), neo, MemStore(), LAYOUT, cmd_group())
     assert e.value.step == "build catalog" and neo.seeded == []
+
+
+# --- #126: notice before the swap -----------------------------------------------------------------
+
+def notice_group(**notice):
+    g = group()
+    from neo4j_backup_core.policy import Notice
+    g.load.notice = Notice(**{"hook": "notify-me", "before": "15m", **notice})
+    return g
+
+
+def test_notice_calls_the_hook_then_waits(monkeypatch):
+    from datetime import datetime, timezone
+    calls, waits = [], []
+    monkeypatch.setattr("neo4j_backup_core.cutover.call_hook",
+                        lambda hook, payload, env_prefix: calls.append((hook, payload, env_prefix)))
+    g = notice_group()
+    plan = L.plan_load(Neo(), MemStore(), LAYOUT, g)
+    st = L.notify(g, plan, sleep=waits.append,
+                  now=datetime(2026, 11, 16, 1, 0, tzinfo=timezone.utc))
+    hook, payload, prefix = calls[0]
+    assert prefix == "NOTICE_" and payload["group"] == "cat" and payload["members"] == ["catalog"]
+    assert payload["swap_at"] == "2026-11-16T01:15:00+00:00" and payload["loses"]
+    assert waits == [900] and st["sent"] is True
+
+
+def test_failed_notice_is_logged_unless_required(monkeypatch):
+    def boom(*a, **k):
+        raise ConnectionError("hook down")
+    monkeypatch.setattr("neo4j_backup_core.cutover.call_hook", boom)
+    plan = L.plan_load(Neo(), MemStore(), LAYOUT, notice_group())
+    st = L.notify(notice_group(before="0m"), plan, sleep=lambda s: None)
+    assert st["sent"] is False and "hook down" in st["error"]
+    with pytest.raises(ops.OpError, match="notice.required"):
+        L.notify(notice_group(required=True), plan, sleep=lambda s: None)
+
+
+def test_notice_command_gets_env_vars(monkeypatch):
+    import subprocess
+    from neo4j_backup_core.cutover import call_hook
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", lambda args, **kw: seen.update(args=args, env=kw["env"]))
+    call_hook("notify --x", {"group": "cat", "members": ["a"], "tenant": None},
+              env_prefix="NOTICE_")
+    assert seen["args"] == ["notify", "--x"] and seen["env"]["NOTICE_GROUP"] == "cat"
+    assert seen["env"]["NOTICE_MEMBERS"] == '["a"]' and seen["env"]["NOTICE_TENANT"] == ""

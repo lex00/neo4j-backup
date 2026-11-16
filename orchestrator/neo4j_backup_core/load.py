@@ -105,16 +105,17 @@ def _source_store(store, group):
 def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool = False,
                keep_failed: bool = False, baseline: bool | None = None, upload: str = "admin",
                staging: str | None = None, cypher_version: str | None = None,
-               log=_NOLOG) -> dict:
+               log=_NOLOG, sleep=None) -> dict:
     """Build, dump, seed, check, set access, swap, baseline (#107). See the module docstring."""
     plan = plan_load(neo4j, store, layout, group, replace=replace)
     load = group.load
+    result_notice = notify(group, plan, log=log, sleep=sleep)
     neo4j, runner = _per(neo4j, group.id), _per(runner, group.id)
     store, src_store = _store(store, group.id), _source_store(store, group)
     upload = _upload(runner, upload)
     cypher_version = getattr(neo4j, "cypher_version", None) or cypher_version
     ts = naming.ts()
-    result = {"group": group.id, "mode": load.mode, "members": []}
+    result = {"group": group.id, "mode": load.mode, "members": [], "notice": result_notice}
     seeded: list[dict] = []
     step = "build"
     try:
@@ -181,6 +182,39 @@ def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool 
             run_admin, neo4j, store, runner, layout, group, seeded, upload=upload,
             staging=staging, log=log)
     return result
+
+
+def notify(group, plan: dict, *, log=_NOLOG, sleep=None, now=None) -> dict | None:
+    """The load notice (#126): call `load.notice.hook` with the group, tenant, members, the
+    scheduled swap time (now + `before`) and what will be lost, then wait `before`. A failed hook
+    is logged and the load goes on, unless `required`."""
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    from .cutover import call_hook
+
+    n = getattr(group.load, "notice", None)
+    if n is None:
+        return None
+    t0 = now or datetime.now(timezone.utc)
+    swap_at = (t0 + timedelta(seconds=n.before_seconds)).isoformat()
+    payload = {"group": group.id, "tenant": getattr(group, "tenant", None),
+               "members": [m["member"] for m in plan["members"]], "swap_at": swap_at,
+               "loses": plan["members"][0]["loses"] if plan["members"] else None,
+               "mode": group.load.mode}
+    status = {"hook": n.hook, "swap_at": swap_at, "sent": False}
+    try:
+        call_hook(n.hook, payload, env_prefix="NOTICE_")
+        status["sent"] = True
+        log(f"notice sent for {group.id}: swap at {swap_at}")
+    except Exception as e:  # noqa: BLE001 - notifying must not take the load down by default
+        status["error"] = f"{type(e).__name__}: {e}"
+        log(f"notice for {group.id} failed: {status['error']}")
+        if n.required:
+            raise OpError(f"notice hook failed and notice.required is set: {status['error']}")
+    if n.before_seconds:
+        (sleep or time.sleep)(n.before_seconds)
+    return status
 
 
 def build_env(build) -> dict:

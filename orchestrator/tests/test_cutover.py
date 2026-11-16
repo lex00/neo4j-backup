@@ -59,7 +59,7 @@ def test_external_http_hook_posts_payload(monkeypatch):
         def read(self):
             return b""
 
-    def fake_urlopen(req):
+    def fake_urlopen(req, **kw):
         seen["url"] = req.full_url
         seen["data"] = req.data
         return _Resp()

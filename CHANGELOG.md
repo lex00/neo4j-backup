@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Notice before a load or rebuild** (#126): `load.notice: {hook, before, required}` calls the
+  hook (HTTP POST JSON or a command with `NOTICE_*` env vars, the same mechanism as
+  `CUTOVER_HOOK`) with the group, tenant, members, swap time and what will be lost, then waits
+  `before`. A failed hook is logged and doesn't stop the load unless `required: true`.
 - **Custom build steps** (#109): `build.kind: command` runs a customer command in the runner
   (one step with the import and dump, under `timeout`) or an `image` as its own pod in the k8s
   runner modes, with `SOURCE_URI`, `WORK_DIR`, `OUTPUT_URI` and `env` (values `secret:<ref>`
