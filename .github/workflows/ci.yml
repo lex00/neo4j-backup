@@ -20,6 +20,10 @@ jobs:
       - run: pip install -e 'orchestrator[dev,azure,gcp]'
       - name: unit tests
         run: pytest orchestrator/tests/ -q
+      - name: actionlint (this workflow and the CI recipes in examples/ci/)
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint .github/workflows/*.yml examples/ci/github-actions.yml examples/ci/forgejo-actions.yml
       - name: validate Dagster definitions
         env:
           NEO4J_PASSWORD: dummy
