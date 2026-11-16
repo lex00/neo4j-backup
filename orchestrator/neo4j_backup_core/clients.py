@@ -549,6 +549,25 @@ class GcsObjectStore(_BaseObjectStore):
                  write_args_json: str = "{}"):
         self.bucket_name = bucket
         self.write_args: dict = json.loads(write_args_json or "{}")
+        unknown = set(self.write_args) - set(self._WRITE_ARGS)
+        if unknown:  # never drop an encryption setting silently (#81)
+            raise ValueError(f"GCS write_args: unsupported {sorted(unknown)}; supported: "
+                             f"{list(self._WRITE_ARGS)}")
+
+    # write_args GCS applies to every object the tool writes (#81)
+    _WRITE_ARGS = ("kms_key_name", "content_type", "metadata", "cache_control", "storage_class")
+
+    def _new_blob(self, key: str, content_type: str | None = None):
+        """A blob carrying the store's write_args: `kms_key_name` (CMEK) on creation, the rest
+        as blob properties."""
+        a = self.write_args
+        blob = (self._b().blob(key, kms_key_name=a["kms_key_name"]) if a.get("kms_key_name")
+                else self._b().blob(key))
+        for attr in ("metadata", "cache_control", "storage_class"):
+            if attr in a:
+                setattr(blob, attr, a[attr])
+        blob.content_type = a.get("content_type") or content_type
+        return blob
 
     def _b(self):
         from google.cloud import storage
@@ -595,11 +614,13 @@ class GcsObjectStore(_BaseObjectStore):
         return f"gs://{self.bucket_name}/{key}"
 
     def upload_file(self, local_path: str, key: str) -> str:
-        self._b().blob(key).upload_from_filename(local_path)
+        blob = self._new_blob(key)
+        blob.upload_from_filename(local_path, content_type=blob.content_type)
         return key
 
     def put_text(self, key: str, text: str) -> str:
-        self._b().blob(key).upload_from_string(text, content_type="text/plain; charset=utf-8")
+        blob = self._new_blob(key, "text/plain; charset=utf-8")
+        blob.upload_from_string(text, content_type=blob.content_type)
         return key
 
     def get_text(self, key: str) -> str:

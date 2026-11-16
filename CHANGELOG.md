@@ -208,6 +208,9 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- GCS applies `write_args` (`kms_key_name`, `content_type`, `metadata`, `cache_control`,
+  `storage_class`) to every object the tool writes, and refuses other keys instead of dropping
+  them (#81).
 - Azure: a server-side copy waits until Azure reports it finished (#80), so verify never
   aggregates a partial scratch copy; `failed`, `aborted` or `AZURE_COPY_TIMEOUT` (default 3600 s)
   raise. Copies keep the store's `encryption_scope` (and tier, metadata, tags).
