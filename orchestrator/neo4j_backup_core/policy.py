@@ -106,6 +106,20 @@ class Cluster(BaseModel):
                 else self.backup_source)
 
 
+class Check(BaseModel):
+    """A check on a new database before its swap (#111): Cypher returning one number."""
+    model_config = ConfigDict(extra="forbid")
+    query: str
+    expect: str
+    name: str | None = None
+
+    @model_validator(mode="after")
+    def _expect(self) -> "Check":
+        from .checks import parse_expect
+        parse_expect(self.expect)
+        return self
+
+
 class LoadSource(BaseModel):
     """Where a rebuild's input files live (#103): a named store (#105) and a prefix. Default:
     the group's own store under `<group>/_source/`."""
@@ -155,6 +169,7 @@ class Load(BaseModel):
     baseline: bool = True  # full backup right after a load or restore (#97)
     source: LoadSource | None = None
     build: LoadBuild | None = None
+    checks: list[Check] = Field(default_factory=list)  # #111, after the default checks
 
     @model_validator(mode="after")
     def _combinations(self) -> "Load":

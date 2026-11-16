@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Checks before a swap** (#111): `load.checks` in the policy (Cypher returning one number, with
+  `== n`, `>= n`, `<= n` or `between a b`), plus default checks (online, non-zero counts, counts
+  equal to the import's). `restore --check` runs them before the swap; a failure drops the new
+  databases (unless `--keep-failed`) and moves no alias. Loads (#107) run them every time.
 - `just dump-smoke` (#161): import -> dump -> seed -> baseline -> diff -> point-in-time restore
   -> export, end to end on the local stack.
 - **`export <group> [--until T]`** (#160, part of #98): a portable `.dump` of each member at a

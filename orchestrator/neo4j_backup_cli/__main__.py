@@ -249,7 +249,8 @@ def cmd_restore(args):
     if short:
         return short
     out = ops.restore_group(neo, store, group, layout, restore_until=args.until,
-                            replace=args.replace, cypher_version=_CYPHER, log=_log, loads=loads)
+                            replace=args.replace, cypher_version=_CYPHER, log=_log, loads=loads,
+                            check=args.check, keep_failed=args.keep_failed)
     if args.no_baseline:
         return envelope("restore", ok=True, group=group.id,
                         result={**out, "baseline": None}), Exit.OK
@@ -375,6 +376,10 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--from-dump", action="append", metavar="MEMBER=KEY_OR_URI",
                      help="seed a member from a dump: a key in its _seed/ folder, or a URI the "
                           "servers can read (an external dump, #159); repeat per member")
+    r.add_argument("--check", action="store_true",
+                   help="run the group's load.checks on the new databases before the swap (#111)")
+    r.add_argument("--keep-failed", action="store_true",
+                   help="with --check: keep the new databases when a check fails")
     r.add_argument("--no-baseline", action="store_true",
                    help="skip the full backup of each restored database (taken by default, #97)")
     r.set_defaults(func=_recorded(cmd_restore))

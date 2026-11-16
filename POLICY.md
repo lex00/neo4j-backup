@@ -243,6 +243,7 @@ arrive with #107 and #108, write enforcement with #112. `baseline` is used today
 | `build.input_type` | `csv` \| `parquet` | required for `import` | decl | the import's input format |
 | `build.args` | list of string | `[]` | decl | passed through to the import (the tool puts the database name first) |
 | `build.command` / `build.image` / `build.env` | list / string / map | | decl | for `kind: command` (#109): one of `command` or `image` is required |
+| `checks` | list of `{query, expect, name?}` | `[]` | used | checks on a new database before its swap (#111): Cypher returning one number; `expect` is `== n`, `>= n`, `<= n` or `between a b`. Run after every load (with the default checks: online, non-zero counts, counts equal to the import's) and by `restore --check` |
 
 Rejected at load, naming the group: `live` with `read-only`; `live` with `protect_writes: false`;
 `read-only` with `protect_writes: true`; `rebuild` without `build`, or on a tier without
