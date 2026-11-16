@@ -223,20 +223,33 @@ removes the privileges granted on it.
 
 ## Load a customer's data in bulk
 
-When a customer's data starts as CSV or Parquet files, follow [IMPORT.md](IMPORT.md): import it
-on a separate loader machine, back it up into the group's folder in the bucket, then
-`neo4j-backup restore <group> --confirm`, which takes the baseline full backup as for any restore.
+Give the group a `load:` block (POLICY.md): `mode` (`once` or `rebuild`), `writes`, and a `build`
+of `kind: import` whose `args` name the input files relative to the source folder
+(`load.source`, default `<group>/_source/` in the group's store; one `<slug>/` folder per member
+when the group has several). Put the files there, then:
 
-For a customer whose graph is rebuilt in full from external sources on a schedule, run the same
-steps each cycle. Their writes since the previous load are replaced each time.
+```bash
+neo4j-backup --json load <group> --dry-run        # source objects, build argv, target, what is lost
+neo4j-backup --json load <group> --confirm --ticket CHG-1234
+```
 
-**Planned:** a `load` command that runs the whole sequence
-([#107](https://github.com/lex00/neo4j-backup/issues/107)), scheduled rebuilds from the policy
-([#108](https://github.com/lex00/neo4j-backup/issues/108)), custom build steps such as RDF
-conversion ([#109](https://github.com/lex00/neo4j-backup/issues/109)), checks before the switch
-([#111](https://github.com/lex00/neo4j-backup/issues/111)), read-only databases between loads
-([#112](https://github.com/lex00/neo4j-backup/issues/112)), and dump files as the load artifact
-([#98](https://github.com/lex00/neo4j-backup/issues/98)).
+For each member the runner imports the files (neo4j-admin reads them from the store), dumps the
+offline store into the member's `_seed/` folder and removes it; the cluster then seeds a new
+database from the dump. The new databases are set read-only for `writes: read-only`, checked
+(online, counts equal to the import's, and the group's `load.checks`, #111), and only when every
+member passed are the privileges copied and the aliases moved, all together. A failure before the
+swap drops the new databases (keep them with `--keep-failed`) and names the failed step. The
+baseline backup follows if the group backs up its writes. by-name groups need `--replace` to drop
+and recreate an existing database.
+
+A group switched from read-write to read-only takes effect at its next load; for `mode: once`
+there is none, so run `neo4j-backup load <group> --reapply-access --confirm`.
+
+The manual route in [IMPORT.md](IMPORT.md) still works for builds the tool doesn't run.
+
+**Planned:** scheduled rebuilds from the policy
+([#108](https://github.com/lex00/neo4j-backup/issues/108)) and custom build steps such as RDF
+conversion ([#109](https://github.com/lex00/neo4j-backup/issues/109)).
 
 ## Change a customer's tier
 

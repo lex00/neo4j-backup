@@ -26,6 +26,10 @@ def test_import_counts():
     out = "IMPORT DONE in 746ms.\nImported:\n  3 nodes\n  2 relationships\n  6 properties\n"
     assert checks.import_counts(out) == {"nodes": 3, "relationships": 2}
     assert checks.import_counts("nothing") is None
+    new = ("Importing nodes\nImported Stats[processed=3, created=3, updated=0, deleted=0] nodes in "
+           "160ms\nImporting relationships\nImported Stats[processed=1, created=1, updated=0, "
+           "deleted=0] relationships in 104ms\n")  # 2026.05, seen on the stack
+    assert checks.import_counts(new) == {"nodes": 3, "relationships": 1}
 
 
 class Neo:

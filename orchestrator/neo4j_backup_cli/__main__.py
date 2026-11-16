@@ -209,6 +209,41 @@ def _guard(op, group, blast, confirmed, dry_run):
     return None
 
 
+def cmd_load(args):
+    """Load or rebuild a group (#107): build in the runner, dump, seed, check, set access, swap,
+    baseline. `--reapply-access` only applies the policy's `writes` to the current databases."""
+    from neo4j_backup_core import load as load_mod
+
+    group = _group(args)
+    store, runner, neo, layout = env.store(), env.runner(), env.neo4j(), paths.get_layout()
+    if args.reapply_access:
+        blast = {"reapply_access": [{"member": n, "writes": group.load.writes}
+                                    for n in group.names]}
+        short = _guard("load", group.id, blast, args.confirm, args.dry_run)
+        if short:
+            return short
+        out = load_mod.reapply_access(neo, group, log=_log)
+        return envelope("load", ok=True, group=group.id, result={"access": out}), Exit.OK
+    plan = load_mod.plan_load(neo, store, layout, group, replace=args.replace)
+    short = _guard("load", group.id, {"plan": plan}, args.confirm, args.dry_run)
+    if short:
+        return short
+    try:
+        out = load_mod.load_group(_run_admin(runner), runner, neo, store, layout, group,
+                                  replace=args.replace, keep_failed=args.keep_failed,
+                                  baseline=False if args.no_baseline else None,
+                                  upload=_UPLOAD, staging=_STAGING, cypher_version=_CYPHER,
+                                  log=_log)
+    except load_mod.LoadError as e:
+        return envelope("load", ok=False, group=group.id,
+                        result={**e.result, "failed_step": e.step},
+                        error=make_error("load_failed", str(e))), Exit.FAILURE
+    except ops.BaselineError as e:
+        return envelope("load", ok=False, group=group.id, result={"baseline": e.done},
+                        error=make_error(e.kind, str(e))), Exit.FAILURE
+    return envelope("load", ok=True, group=group.id, result=out), Exit.OK
+
+
 def cmd_export(args):
     """A portable dump per member, at --until or the latest backup (#160). Writes to `_seed/`;
     never touches the cluster. Guarded like the other writes that act on a whole group."""
@@ -384,6 +419,17 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--no-baseline", action="store_true",
                    help="skip the full backup of each restored database (taken by default, #97)")
     r.set_defaults(func=_recorded(cmd_restore))
+
+    ld = guarded(sub.add_parser("load", help="load or rebuild a group from its policy build "
+                                             "(#107)"))
+    ld.add_argument("group")
+    ld.add_argument("--replace", action="store_true", help="by-name: DROP+recreate existing")
+    ld.add_argument("--keep-failed", action="store_true",
+                    help="keep the new databases when a step before the swap fails")
+    ld.add_argument("--no-baseline", action="store_true", help="skip the baseline backup")
+    ld.add_argument("--reapply-access", action="store_true",
+                    help="only apply the policy's `writes` to the current databases (#112)")
+    ld.set_defaults(func=_recorded(cmd_load))
 
     ex = guarded(sub.add_parser("export", help="a portable .dump of each member, at --until or "
                                                "the latest backup (#160)"))
