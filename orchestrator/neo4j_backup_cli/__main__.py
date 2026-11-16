@@ -119,12 +119,12 @@ def cmd_verify(args):
 def cmd_system_backup(args):
     store, runner, layout = env.store(), env.runner(), paths.get_layout()
     out = ops.system_backup(_run_admin(runner), store, runner, layout,
-                            upload=_UPLOAD, staging=_STAGING)
+                            upload=_UPLOAD, staging=_STAGING, cluster=args.cluster)
     return envelope("system-backup", ok=True, result=out), Exit.OK
 
 
 def cmd_metadata_export(args):
-    out = ops.export_metadata(env.neo4j(), env.store(), paths.get_layout())
+    out = ops.export_metadata(env.neo4j(), env.store(), paths.get_layout(), cluster=args.cluster)
     return envelope("metadata-export", ok=True, result=out), Exit.OK
 
 
@@ -258,13 +258,14 @@ def cmd_prune(args):
 
 def cmd_metadata_restore(args):
     store, layout = env.store(), paths.get_layout()
-    key = args.key or store.latest_text_key(layout.metadata_prefix())
+    key = args.key or ops._cluster(store, args.cluster).latest_text_key(
+        layout.metadata_listing(args.cluster))
     if not key:
         raise ops.OpError("no metadata artifact — export first")
     short = _guard("metadata-restore", None, {"key": key}, args.confirm, args.dry_run)
     if short:
         return short
-    out = ops.restore_metadata(env.neo4j(), store, layout, key)
+    out = ops.restore_metadata(env.neo4j(), store, layout, key, cluster=args.cluster)
     return envelope("metadata-restore", ok=True, result=out), Exit.OK
 
 
@@ -333,7 +334,11 @@ def build_parser() -> argparse.ArgumentParser:
     pr = guarded(sub.add_parser("prune", help="delete backups past each group's retention"))
     pr.set_defaults(func=_recorded(cmd_prune))
 
-    sb = sub.add_parser("system-backup", help="binary FULL backup of the system database")
+    def clustered(sp):  # DBMS-wide commands act on one cluster (#106)
+        sp.add_argument("--cluster", default="default", help="the policy cluster (default: default)")
+        return sp
+
+    sb = clustered(sub.add_parser("system-backup", help="binary FULL backup of the system database"))
     sb.set_defaults(func=cmd_system_backup)
 
     t = selectable(sub.add_parser("targets", help="list the policy's group/member targets"))
@@ -358,9 +363,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     m = sub.add_parser("metadata", help="DBMS metadata (users/roles/privileges/aliases)")
     msub = m.add_subparsers(dest="metadata_command", required=True, metavar="<export|restore>")
-    me = msub.add_parser("export", help="export the metadata layer as replayable Cypher")
+    me = clustered(msub.add_parser("export", help="export the metadata layer as replayable Cypher"))
     me.set_defaults(func=cmd_metadata_export)
-    mr = guarded(msub.add_parser("restore", help="replay a metadata export into system"))
+    mr = clustered(guarded(msub.add_parser("restore", help="replay a metadata export into system")))
     mr.add_argument("--key", help="artifact key to replay (default: latest)")
     mr.set_defaults(func=_recorded(cmd_metadata_restore))
 

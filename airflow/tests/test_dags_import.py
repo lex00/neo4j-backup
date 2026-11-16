@@ -74,3 +74,24 @@ def test_policy_crons_drive_every_dag(tmp_path, monkeypatch):
     assert not {"neo4j_verify", "neo4j_aggregate", "neo4j_prune", "neo4j_metadata_backup",
                 "neo4j_system_backup"} & set(bag.dags)
     assert not any(d.endswith("_nightly") for d in bag.dags if not d.startswith("neo4j_backup_"))
+
+
+def test_clusters_get_their_own_dbms_dags_and_pools(tmp_path, monkeypatch):
+    # #106: DBMS DAGs per cluster; backup tasks per cluster in neo4j_<cluster>_<lane> pools
+    import yaml
+    repo = Path(__file__).resolve().parents[2]
+    raw = yaml.safe_load((repo / "policies" / "demo.yaml").read_text())
+    raw["clusters"] = {"eu": {"bolt_uri": "neo4j://eu:7687"}}
+    raw["db_groups"].append({"id": "shop", "aliases": ["shop"], "tier": "gold", "cluster": "eu"})
+    f = tmp_path / "p.yaml"
+    f.write_text(yaml.safe_dump(raw))
+    monkeypatch.setenv("NEO4J_BACKUP_POLICY", str(f))
+    from neo4j_backup_core import policy
+    policy._cache.clear()
+    bag = DagBag(dag_folder=str(repo / "airflow" / "dags"), include_examples=False)
+    assert bag.import_errors == {}, bag.import_errors
+    assert {"neo4j_dbms_metadata_eu", "neo4j_dbms_system_eu",
+            "neo4j_dbms_metadata_default"} <= set(bag.dags)
+    pools = {t.task_id: t.pool for t in bag.dags["neo4j_backup_gold_diff"].tasks}
+    assert pools["backup"] == "neo4j_diff" and pools["backup_full"] == "neo4j_full"
+    assert pools["backup_eu"] == "neo4j_eu_diff" and pools["backup_full_eu"] == "neo4j_eu_full"

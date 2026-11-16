@@ -305,13 +305,24 @@ def import_database(run_admin: RunAdmin, runner, database: str, source_args: lis
     return {"database": database, "argv": cmd}
 
 
+def _cluster(handle, cluster: str):
+    """A handle for one cluster (#106): a Neo4jSet/RunnerSet's `named`, a StoreSet's
+    `for_cluster`; a plain handle as is."""
+    if hasattr(handle, "for_cluster"):
+        return handle.for_cluster(cluster)
+    return handle.named(cluster) if hasattr(handle, "named") else handle
+
+
 def system_backup(run_admin: RunAdmin, store, runner, layout,
-                  *, upload: str = "admin", staging: str | None = None) -> dict:
-    """Binary FULL backup of the `system` database to the reserved `_dbms/system/` prefix (#15)."""
-    prefix = layout.system_prefix()
+                  *, upload: str = "admin", staging: str | None = None,
+                  cluster: str = "default") -> dict:
+    """Binary FULL backup of a cluster's `system` database to its `system_prefix` (#15, #106)."""
+    store, runner = _cluster(store, cluster), _cluster(runner, cluster)
+    upload = _upload(runner, upload)
+    prefix = layout.system_prefix(cluster)
     key = run_backup(run_admin, runner, store, "system", prefix, "FULL",
                      upload=upload, staging=staging)
-    return {"key": key}
+    return {"key": key, "cluster": cluster}
 
 
 # --- retention prune --------------------------------------------------------------------------
@@ -359,7 +370,8 @@ def keep_count(name: str, value) -> int:
 def prune(store, policy, layout, *, keep_system: int | None = None,
           keep_metadata: int | None = None, dry_run: bool = False,
           run_admin: RunAdmin | None = None, runner=None, now: datetime | None = None,
-          log: Log = _NOLOG, groups: list | None = None, dbms: bool = True) -> dict:
+          log: Log = _NOLOG, groups: list | None = None, dbms: bool = True,
+          cluster: str | None = None) -> dict:
     """Delete backups past each group's `retention_days` without breaking a chain (#73): per
     member, whole chains are deleted only when nothing kept depends on them
     (`plan_member_prune`). Full or diff is read from the sidecars (#118). Artifacts with no sidecar
@@ -368,7 +380,8 @@ def prune(store, policy, layout, *, keep_system: int | None = None,
     counted in `unknown_kept`. Also keeps the newest `keep_metadata` DBMS metadata exports and
     `keep_system` system fulls (both integers >= 1, #78; default: the policy's `dbms:` block).
     `dry_run` lists the victims (`keys`) without deleting. `groups` limits the artifact prune to
-    those groups (a tier's, #104); `dbms=False` skips the DBMS sweep (it runs per cluster)."""
+    those groups (a tier's, #104); `dbms=False` skips the DBMS sweep; `cluster` limits the sweep
+    to one cluster (default: every cluster, #106)."""
     pd = getattr(policy, "dbms", None)
     keep_system = keep_system if keep_system is not None else getattr(pd, "keep_system", 14)
     keep_metadata = (keep_metadata if keep_metadata is not None
@@ -406,14 +419,17 @@ def prune(store, policy, layout, *, keep_system: int | None = None,
             unknown_kept.extend(read["unknown"])
             _sweep(keys, f"{g.id}/{a}")
             swept.append((store, prefix))
-    store = base  # DBMS objects live in the default store (per cluster with #106)
-    if dbms:
-        # DBMS metadata: keep the newest N (mirrors metadata.prune, but enumerable for dry-run)
-        marts = sorted(store.list_text_keys(layout.metadata_prefix()), key=lambda t: t[1])
-        _sweep([k for (k, _m) in marts[:-keep_metadata]], "_dbms/metadata")
-        sysarts = sorted(store.list_artifacts(layout.system_prefix()), key=lambda t: t[2])
-        _sweep([k for (k, _s, _m) in sysarts[:-keep_system]], "_dbms/system")
-        swept.append((store, layout.system_prefix()))
+    # DBMS objects: each cluster's, in that cluster's store (#106); exact-prefix listings
+    clusters = ([] if not dbms else [cluster] if cluster
+                else (policy.cluster_names() if hasattr(policy, "cluster_names") else ["default"]))
+    for cl in clusters:
+        store = _cluster(base, cl)
+        tag = "_dbms" if cl == "default" else f"_dbms/{cl}"
+        marts = sorted(store.list_text_keys(layout.metadata_listing(cl)), key=lambda t: t[1])
+        _sweep([k for (k, _m) in marts[:-keep_metadata]], f"{tag}/metadata")
+        sysarts = sorted(store.list_artifacts(layout.system_prefix(cl)), key=lambda t: t[2])
+        _sweep([k for (k, _s, _m) in sysarts[:-keep_system]], f"{tag}/system")
+        swept.append((store, layout.system_prefix(cl)))
     # sidecars (#118) go with their artifacts
     sidecars = 0
     if not dry_run:
@@ -426,18 +442,22 @@ def prune(store, policy, layout, *, keep_system: int | None = None,
 
 # --- DBMS metadata (pure Bolt, no runner) ------------------------------------------------------
 
-def export_metadata(neo4j, store, layout) -> dict:
-    """Capture the DBMS security + alias layer as replayable Cypher under `_dbms/` (#14)."""
+def export_metadata(neo4j, store, layout, cluster: str = "default") -> dict:
+    """Capture a cluster's security + alias layer as replayable Cypher under its `_dbms/` prefix
+    (#14, #106)."""
+    neo4j, store = _cluster(neo4j, cluster), _cluster(store, cluster)
     ts = naming.ts()
-    key = layout.metadata_key(ts)
+    key = layout.metadata_key(ts, cluster)
     cypher = metadata.render(metadata.capture(neo4j), ts=ts)
     store.put_text(key, cypher)
-    return {"key": key, "bytes": len(cypher)}
+    return {"key": key, "bytes": len(cypher), "cluster": cluster}
 
 
-def restore_metadata(neo4j, store, layout, key: str | None = None) -> dict:
-    """Replay a metadata export (latest, or a given `key`) against `system` over Bolt."""
-    key = key or store.latest_text_key(layout.metadata_prefix())
+def restore_metadata(neo4j, store, layout, key: str | None = None,
+                     cluster: str = "default") -> dict:
+    """Replay a cluster's metadata export (latest, or a given `key`) against its `system`."""
+    neo4j, store = _cluster(neo4j, cluster), _cluster(store, cluster)
+    key = key or store.latest_text_key(layout.metadata_listing(cluster))
     if not key:
         raise OpError("no metadata artifact — export first")
     result = metadata.replay(neo4j, store.get_text(key))

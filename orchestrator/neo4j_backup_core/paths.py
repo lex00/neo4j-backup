@@ -23,9 +23,10 @@ class PathLayout(Protocol):
     def alias_prefix(self, group_id: str, alias: str) -> str: ...
     def physical_prefix(self, group_id: str, alias: str, physical: str) -> str: ...
     def physical_of_key(self, group_id: str, alias: str, key: str) -> str: ...
-    def metadata_prefix(self) -> str: ...
-    def metadata_key(self, ts: str) -> str: ...
-    def system_prefix(self) -> str: ...
+    def metadata_prefix(self, cluster: str = "default") -> str: ...
+    def metadata_key(self, ts: str, cluster: str = "default") -> str: ...
+    def metadata_listing(self, cluster: str = "default") -> str: ...
+    def system_prefix(self, cluster: str = "default") -> str: ...
 
 
 class DefaultPathLayout:
@@ -45,14 +46,21 @@ class DefaultPathLayout:
     def physical_of_key(self, group_id: str, alias: str, key: str) -> str:
         return key[len(self.alias_prefix(group_id, alias)):].split("/")[0]
 
-    def metadata_prefix(self) -> str:
-        return "_dbms/"
+    # DBMS objects per cluster (#106): the default cluster keeps the original keys
+    # (`_dbms/metadata-<ts>.cypher`, `_dbms/system/`); a named cluster uses `_dbms/<cluster>/`.
+    # Listings use exact prefixes, so clusters never see each other's objects (the cluster names
+    # `system` and `metadata…` are reserved by the policy).
+    def metadata_prefix(self, cluster: str = "default") -> str:
+        return "_dbms/" if cluster == "default" else f"_dbms/{cluster}/"
 
-    def metadata_key(self, ts: str) -> str:
-        return f"{self.metadata_prefix()}metadata-{ts}.cypher"
+    def metadata_key(self, ts: str, cluster: str = "default") -> str:
+        return f"{self.metadata_prefix(cluster)}metadata-{ts}.cypher"
 
-    def system_prefix(self) -> str:
-        return "_dbms/system/"
+    def metadata_listing(self, cluster: str = "default") -> str:
+        return f"{self.metadata_prefix(cluster)}metadata-"
+
+    def system_prefix(self, cluster: str = "default") -> str:
+        return "_dbms/system/" if cluster == "default" else f"_dbms/{cluster}/system/"
 
 
 def get_layout() -> PathLayout:
@@ -88,6 +96,10 @@ def physical_of_key(group_id: str, alias: str, key: str) -> str:
 
 def metadata_prefix() -> str:
     return _DEFAULT.metadata_prefix()
+
+
+def metadata_listing(cluster: str = "default") -> str:
+    return _DEFAULT.metadata_listing(cluster)
 
 
 def metadata_key(ts: str) -> str:

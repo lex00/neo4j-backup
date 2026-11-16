@@ -28,9 +28,10 @@ def make_metadata_dag(cluster: str, cron: str):
     def _metadata():
         @task
         def export() -> str:
-            key = ops.export_metadata(config.neo4j(), config.store(), _layout)["key"]
+            key = ops.export_metadata(config.neo4j(), config.store(), _layout,
+                                      cluster=cluster)["key"]
             swept = ops.prune(config.store(), load_policy(config.policy_path()), _layout,
-                              groups=[])
+                              groups=[], cluster=cluster)
             print(f"metadata export -> {key}; dbms sweep deleted {swept['deleted']}")
             return key
 
@@ -41,18 +42,22 @@ def make_metadata_dag(cluster: str, cron: str):
 
 _pol = load_policy_at_startup(config.policy_path(), configured="NEO4J_BACKUP_POLICY" in os.environ)
 if _pol is not None:
-    globals()["neo4j_dbms_metadata_default"] = make_metadata_dag("default", _pol.dbms.metadata_cron)
+    for _cl in _pol.cluster_names():  # one per cluster (#106)
+        globals()[f"neo4j_dbms_metadata_{_cl}"] = make_metadata_dag(_cl, _pol.dbms.metadata_cron)
 
 
 @dag(dag_id="neo4j_metadata_restore", schedule=None, start_date=datetime(2025, 1, 1),
-     catchup=False, params={"key": Param(None, type=["null", "string"])},  # default: latest
+     catchup=False, params={"key": Param(None, type=["null", "string"]),  # default: latest
+             "cluster": Param("default", type="string")},  # #106
      tags=["neo4j-backup", "metadata", "restore"])
 def neo4j_metadata_restore():
     @task
     def restore() -> dict:
         try:
+            params = get_current_context()["params"]
             result = ops.restore_metadata(config.neo4j(), config.store(), _layout,
-                                          get_current_context()["params"]["key"] or None)
+                                          params["key"] or None,
+                                          cluster=params.get("cluster") or "default")
         except ops.OpError as e:
             raise RuntimeError(str(e))
         print(f"replayed {result['applied']} statements from {result['key']}; "

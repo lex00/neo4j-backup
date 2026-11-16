@@ -643,7 +643,9 @@ In Dagster this is the `aggregate_chain` and `verify` jobs (validated end-to-end
   user, password reference, backup source, store, default topology, Cypher version, cutover,
   upload mode), a group says `cluster:`, and every op resolves the Neo4j client, runner and store
   from the group. Group ids are unique across the policy, so the storage layout needs no cluster
-  level. Per-cluster concurrency limits and per-cluster DBMS jobs follow in #106's later pieces.
+  level. Runs carry a `neo4j_cluster` tag for per-cluster limits (Airflow: per-cluster pools),
+  and the DBMS jobs run per cluster: the default cluster keeps `_dbms/`, a named one uses
+  `_dbms/<cluster>/`.
 
 ## 10. Neo4j Ops Manager (NOM) evaluation
 

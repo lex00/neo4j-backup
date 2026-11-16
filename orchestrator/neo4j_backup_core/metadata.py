@@ -137,7 +137,7 @@ def prune(store, keep: int = 14) -> int:
     history rather than per-group age (metadata is DBMS-wide and tiny)."""
     if isinstance(keep, bool) or not isinstance(keep, int) or keep < 1:
         raise ValueError(f"keep must be an integer >= 1 (the newest N are kept), got {keep!r}")
-    arts = sorted(store.list_text_keys(paths.metadata_prefix()), key=lambda t: t[1])
+    arts = sorted(store.list_text_keys(paths.metadata_listing()), key=lambda t: t[1])
     return store.delete_keys([k for (k, _m) in arts[:-keep]])
 
 
