@@ -178,6 +178,17 @@ def cmd_import(args):
     # to neo4j-admin (a leading `--` separator, if the operator adds one, is dropped). See IMPORT.md.
     source = args.source_args[1:] if args.source_args[:1] == ["--"] else args.source_args
     runner = env.runner()
+    if args.to_dump:  # import, dump offline, store under the member's _seed/ (#158)
+        group, _, member = args.to_dump.partition("/")
+        pol = load_policy(env.policy_path())
+        if group not in {g.id for g in pol.db_groups} or member not in pol.group(group).names:
+            return envelope("import", ok=False, error=make_error(
+                "usage", f"--to-dump {args.to_dump!r}: not a <group>/<member> in the policy")), \
+                Exit.USAGE
+        out = ops.import_to_dump(_run_admin(runner), runner, env.store(), paths.get_layout(),
+                                 group, member, args.database, source,
+                                 upload=_UPLOAD, staging=_STAGING, log=_log)
+        return envelope("import", ok=True, group=group, result=out), Exit.OK
     out = ops.import_database(_run_admin(runner), runner, args.database, source)
     return envelope("import", ok=True, result=out), Exit.OK
 
@@ -346,6 +357,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     im = sub.add_parser("import", help="bulk-import raw data into an offline store on the loader (#16)")
     im.add_argument("database", help="the physical database name to import into (see IMPORT.md)")
+    im.add_argument("--to-dump", metavar="GROUP/MEMBER",
+                    help="then dump the offline store into that member's load folder (_seed/)")
     im.add_argument("source_args", nargs=argparse.REMAINDER,
                     help="passthrough to neo4j-admin (e.g. --nodes=/path.csv --relationships=/rel.csv)")
     im.set_defaults(func=cmd_import)

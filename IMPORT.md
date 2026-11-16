@@ -12,14 +12,30 @@ team-specific. What this project standardises is the **tail** — turning a buil
 a native `.backup` is an **online** backup of a running server, so this pattern needs a throwaway
 Neo4j on the loader, and provisioning that is yours.
 
-A `.dump` is the other option: `neo4j-admin database dump` works on the imported store offline,
-without ever starting a server, and seed-from-URI accepts a dump when the URI names the file
-(verified on 2026.05; a directory seed only uses backup chains). A dump restores whole only:
-`seedRestoreUntil` is refused for it. This tool doesn't list, prune or restore `.dump` files yet
-([#98](https://github.com/lex00/neo4j-backup/issues/98)), so seed from a dump with the raw Cypher
-in [RECOVERY.md](RECOVERY.md). The raw input is also open and per-dataset — the `--nodes` /
-`--relationships` mapping is your data model. So `neo4j-backup` **structures the calls; it does not
-model your import args.**
+A `.dump` avoids that, and is the default route: `neo4j-admin database dump` works on the imported
+store offline, without ever starting a server, and seed-from-URI accepts a dump when the URI names
+the file (verified on 2026.05; a directory seed only uses backup chains). A dump restores whole
+only: `seedRestoreUntil` is refused for it. The raw input is open and per-dataset — the
+`--nodes` / `--relationships` mapping is your data model. So `neo4j-backup` **structures the calls;
+it does not model your import args.**
+
+## Default route: `import --to-dump`
+
+```bash
+# on the loader (RUNNER_EXEC_PREFIX / a local neo4j-admin), store never started:
+neo4j-backup --json import --to-dump <group>/<member> loaddb \
+  --nodes=Product=/data/products.csv --relationships=IN=/data/in.csv
+# -> result.key: <group>/<slug>/_seed/<ts>/loaddb.dump   (result.uri is the seed URI)
+```
+
+One command imports into `loaddb` on the loader, dumps the offline store, and puts the dump in the
+member's load folder (`_seed/`, #156), where the tool lists it apart from the backup chains
+(`show_chain` returns it under `loads`). With `BACKUP_UPLOAD=pipeline` the dump goes through the
+runner's staging folder and the tool's own upload (SSE headers); otherwise neo4j-admin writes it to
+the store directly. Seed the group from it with `CREATE DATABASE … OPTIONS {seedURI: '<result.uri>'}`
+(RECOVERY.md) until `seed --from-dump` lands (#159), then take a full backup of the seeded database.
+The imported store stays in the loader's data directory; throw the loader away, or remove the
+store, afterwards. The `.backup` route below stays for anyone who wants a native backup.
 
 > **Import into the default database of a *fresh, never-started* loader — not a named/existing db.**
 > On current Neo4j (validated on 2026.05), `neo4j-admin database import full` into an

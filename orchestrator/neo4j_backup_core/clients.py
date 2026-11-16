@@ -580,6 +580,14 @@ class BackupRunner:
             "--format=JSON", "--empty", "--verbose", location,
         ]
 
+    def dump_command(self, database: str, to_path: str) -> list:
+        """`neo4j-admin database dump` of an offline store (#158): one `<database>.dump` in
+        `to_path` (a local folder or a cloud URI), overwriting a file of that name."""
+        return [
+            *self.exec_prefix, self.neo4j_admin, "database", "dump",
+            f"--to-path={to_path}", "--overwrite-destination=true", database,
+        ]
+
     def import_command(self, database: str, source_args: list) -> list:
         """Off-cluster bulk import (#16): `neo4j-admin database import full <database> <source_args…>`.
         `source_args` (the `--nodes`/`--relationships`/options) is a **passthrough** — dataset-specific
