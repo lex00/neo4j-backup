@@ -238,6 +238,18 @@ rename:
 
 Restore, prune, verify and `status` keep reading `shop/orders/`.
 
+**Readable slugs** (#91). By default any alias that isn't already lowercase `[a-z0-9-]` of 3-42
+characters gets a hashed slug: `Orders` becomes `orders-cded0933`. `naming.slug_style:
+readable` lowercases first and hashes only when sanitizing changed characters (`_`, spaces,
+symbols, dots) or the length is out of range, so `Orders` becomes `orders`, in both the
+storage folder and new database names. Two members that end up with the same slug fail policy
+load, pointing at `overrides.prefix`. The default stays `legacy`.
+
+Switching changes the folder of every mixed-case member, so pin existing members first: for
+each one, set `overrides.<alias>.prefix` to its current folder (`neo4j-backup targets` and the
+bucket show it, e.g. `shop/orders-cded0933/`), then set `slug_style: readable`. New members get
+readable folders; pinned ones keep their history. The shell scripts use the legacy style.
+
 ## Field reference
 
 **`db_groups[]`**
@@ -256,7 +268,7 @@ Restore, prune, verify and `status` keep reading `shop/orders/`.
 | `tenant` | string | `null` | used | a label for selecting a customer's groups: `backup`, `verify`, `aggregate` and `targets` take `--tenant <t>` instead of a group, and MCP read and backup tools take `tenant` (#102). **It is a label, not an access control**: the deployment can reach every database in its clusters whatever the tenant. Settable in a profile. `restore` stays per group |
 | `owner` | string | `null` | deprecated | the old name for `tenant`; still read as the tenant, with a warning |
 | `overrides[alias].prefix`, `overrides[alias].physical_base` | string | none | wired | a member's storage folder, used as is, and the base of its database names (#90); see [Database names](#database-names) |
-| `naming` | map | `null` | wired | `physical_template`, `ts_format` for new database names (#88); see [Database names](#database-names). Also settable at the top level and in a profile |
+| `naming` | map | `null` | wired | `physical_template`, `ts_format` for new database names (#88), `slug_style: legacy \| readable` (#91); see [Database names](#database-names). Also settable at the top level and in a profile |
 | `state` | `active` \| `retired` | `active` | wired | offboarding (#124): a retired group has no schedules; its artifacts stay restorable until `retired_on` + `retire_after_days`, then prune deletes them |
 | `retired_on` | date | `null` | wired | required with `state: retired`: the day the retention period starts |
 | `retire_after_days` | int | `retention_days` | wired | how long a retired group's artifacts are kept |

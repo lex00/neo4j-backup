@@ -105,6 +105,17 @@ naming_slug() {
 }
 
 # Unique physical database name for an alias at a timestamp: <slug><join><ts>.
+# slug_style: readable (#91): lowercase first; hash only when that isn't already a clean slug
+naming_slug_readable() {
+  local low
+  low="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  if printf '%s' "$low" | grep -Eq '^[a-z0-9][a-z0-9-]{1,'"$NAMING_SLUG_BASE_MAXLEN"'}[a-z0-9]$'; then
+    printf '%s' "$low"
+  else
+    naming_slug "$1"
+  fi
+}
+
 naming_physical() {
   local slug ts tslen base h
   slug="$(naming_slug "$1")"
