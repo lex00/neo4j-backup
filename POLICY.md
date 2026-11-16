@@ -129,20 +129,29 @@ defines `default` itself. Name more stores for customers whose data must be kept
 | Field | Type | Meaning |
 |---|---|---|
 | `url` | `s3://<bucket>`, `gs://<bucket>`, `azb://<account>/<container>` | the bucket; key prefixes come from the path layout |
-| `region`, `endpoint` | string | for the tool's own reads and writes |
+| `region`, `endpoint` | string | for the tool's reads and writes, and (`region`) neo4j-admin's |
+| `runner_endpoint` | string | the endpoint as neo4j-admin on the runner sees it, when it differs from `endpoint` (default: `endpoint`) |
 | `sse`, `sse_kms_key_id`, `write_args` | string / string / map | encryption and extra arguments on the tool's writes |
-| `credentials_ref` | secret reference | declared; per-store credentials for the tool and neo4j-admin come with #105's second part |
+| `credentials_ref` | secret reference | the store's own S3 key pair, for the tool and neo4j-admin (`s3://` stores only so far) |
 
 A group's backups go to its `storage` (else `default`); a group's precedence over a cluster's
 store arrives with clusters (#106). Each op (backup, verify, aggregate, prune, restore, the MCP
 status tools) resolves the store from the group. The DBMS objects (metadata exports, `system`
 backups) stay in `default`. An unknown store name fails policy load, naming the group.
 
-What the tool can't set for you: neo4j-admin (on the runner) and the Neo4j servers (which fetch
-seeds) use their own cloud configuration. A named store must be reachable with it: the same
-endpoint and credentials as the runner's and servers' environment, or a bucket their IAM role can
-read and write. #105's second part will pass per-store settings to neo4j-admin and add
-`neo4j-backup policy check`.
+neo4j-admin gets a named store's settings: when a backup, aggregate, check or inspect touches
+the store, the runner's environment carries its `AWS_REGION`, `AWS_ENDPOINT_URL_S3`
+(`runner_endpoint`) and key pair. The Neo4j servers don't: they fetch seeds during a restore with
+their own cloud configuration, so every cluster must be able to read each store its groups use
+(an IAM role or bucket policy that covers it). `neo4j-backup policy check` lists, writes and
+deletes a probe object in every store the policy uses, exits 1 if any fails, and names the stores
+the servers must be able to read.
+
+**Secret references** (one syntax for `credentials_ref`, and later cluster `password_ref` and build
+`env`): `<provider>:<ref>`, for example `env:FINANCE_S3` or
+`aws-sm:arn:aws:secretsmanager:eu-west-1:123:secret:finance-s3`, or a bare `<ref>` for the
+configured `SECRET_PROVIDER`. An S3 `credentials_ref` resolves to JSON:
+`{"access_key_id": "…", "secret_access_key": "…", "session_token": "…"}` (token optional).
 
 ## Field reference
 

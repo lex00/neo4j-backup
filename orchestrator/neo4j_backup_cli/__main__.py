@@ -145,6 +145,22 @@ def cmd_policy_show(args):
     return envelope("policy-show", ok=True, group=args.group, result=out), Exit.OK
 
 
+def cmd_policy_check(args):
+    """List, write and delete a probe in every store the policy uses; say which stores the Neo4j
+    servers must be able to read. Exit 1 if any store fails."""
+    policy = load_policy(env.policy_path())
+    rows = env.check_stores(policy, env.store())
+    for r in rows:
+        state = "ok" if r["list"] and r["write"] else "FAILED " + "; ".join(r["errors"])
+        _log(f"{r['store']} {r['url']}: {state}")
+    bad = [r["store"] for r in rows if not (r["list"] and r["write"])]
+    if bad:
+        return envelope("policy-check", ok=False, result={"stores": rows},
+                        error=make_error("store_unreachable",
+                                         f"can't list or write: {', '.join(bad)}")), Exit.FAILURE
+    return envelope("policy-check", ok=True, result={"stores": rows}), Exit.OK
+
+
 def cmd_policy_validate(args):
     """Validate a policy file without touching any cluster or store: exit 0 valid, 2 invalid."""
     errors = policy_mod.validate_file(args.file)
@@ -333,6 +349,8 @@ def build_parser() -> argparse.ArgumentParser:
     ps = posub.add_parser("show", help="a group's effective settings and where each came from")
     ps.add_argument("group")
     ps.set_defaults(func=cmd_policy_show)
+    pc = posub.add_parser("check", help="can the tool list and write each store? (#105)")
+    pc.set_defaults(func=cmd_policy_check)
     pv = posub.add_parser("validate", help="load and validate a policy file; exit 0 or 2")
     pv.add_argument("file")
     pv.set_defaults(func=cmd_policy_validate)

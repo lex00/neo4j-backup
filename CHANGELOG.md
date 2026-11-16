@@ -14,6 +14,11 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Per-store settings for neo4j-admin, secret references, `policy check`** (#105). A named S3
+  store's `credentials_ref` (a key pair) and `region` / `runner_endpoint` reach both the tool and
+  neo4j-admin (`run_admin` takes an `env`; with a `docker … exec` prefix the names are passed as
+  bare `-e NAME`, so values stay out of argv). One secret-reference syntax, `<provider>:<ref>`.
+  `neo4j-backup policy check` probes every store and names those the servers must read.
 - **Named stores** (#105, first part). A `storage:` map names object stores (`url`, `region`,
   `endpoint`, `sse`, `sse_kms_key_id`, `write_args`, `credentials_ref`); a group picks one with
   `storage:`, else `default`, which is the environment's store unless the policy defines it. Every

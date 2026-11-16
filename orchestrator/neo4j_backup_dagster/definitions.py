@@ -65,7 +65,12 @@ def _admin(context, runner, subprocess_client):
     """Bind a `run_admin(cmd) -> str` callable for `neo4j_backup_core.ops`: run one neo4j-admin
     command via Pipes (subprocess or k8s) with the runner's environment. The op bodies live in
     core; this is only the Dagster-specific execution + env binding."""
-    return lambda cmd: _run_admin(context, runner, cmd, subprocess_client, env=runner.env())
+    def run(cmd, env=None):
+        extra = env or {}  # a named store's settings for neo4j-admin (#105)
+        if runner.mode != "k8s":
+            cmd = runner._core().with_env(cmd, extra)
+        return _run_admin(context, runner, cmd, subprocess_client, env={**runner.env(), **extra})
+    return run
 
 
 # --- storage-key layout: an injected PathLayout instance (#21), not module aliases. A

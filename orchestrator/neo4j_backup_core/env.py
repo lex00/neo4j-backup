@@ -18,8 +18,10 @@ def subprocess_admin(runner, stdout=None):
     subprocess with the runner's environment (raises on non-zero) and returns its output (#118).
     Shared by the CLI and the MCP server; both pass `stdout=sys.stderr` so the child's output never
     lands on their own stdout (the CLI's JSON envelope / the MCP stdio protocol)."""
-    def run(cmd):
-        return run_captured(cmd, env=runner.env(), stream=stdout)
+    def run(cmd, env=None):
+        extra = env or {}
+        return run_captured(runner.with_env(cmd, extra), env={**runner.env(), **extra},
+                            stream=stdout)
     return run
 
 
@@ -54,13 +56,32 @@ def env_store() -> ObjectStore:
 
 
 def store_from_config(cfg) -> ObjectStore:
-    """Build an object store from a policy `storage:` entry (#105)."""
+    """Build an object store from a policy `storage:` entry (#105), with its own credentials and
+    the environment neo4j-admin needs for it (`admin_env()`)."""
     if cfg.cloud == "azure" and cfg.account:
         os.environ.setdefault("AZURE_STORAGE_ACCOUNT", cfg.account)
-    return object_store(cfg.bucket, cfg.endpoint, cfg.region or os.environ.get("AWS_REGION",
-                                                                              "us-east-1"),
-                        sse=cfg.sse, sse_kms_key_id=cfg.sse_kms_key_id,
-                        write_args_json=json.dumps(cfg.write_args or {}), cloud=cfg.cloud)
+    region = cfg.region or os.environ.get("AWS_REGION", "us-east-1")
+    st = object_store(cfg.bucket, cfg.endpoint, region, sse=cfg.sse,
+                      sse_kms_key_id=cfg.sse_kms_key_id,
+                      write_args_json=json.dumps(cfg.write_args or {}), cloud=cfg.cloud)
+    if cfg.cloud != "aws":
+        if cfg.credentials_ref:
+            raise RuntimeError(f"store {cfg.url!r}: credentials_ref is supported for s3:// "
+                               f"stores only so far; use the environment's credentials")
+        return st
+    admin = {}
+    if cfg.region:
+        admin["AWS_REGION"] = cfg.region
+    if cfg.runner_endpoint or cfg.endpoint:
+        admin["AWS_ENDPOINT_URL_S3"] = cfg.runner_endpoint or cfg.endpoint
+    if cfg.credentials_ref:
+        st.credentials = secrets.key_pair(cfg.credentials_ref)
+        admin["AWS_ACCESS_KEY_ID"] = st.credentials["access_key_id"]
+        admin["AWS_SECRET_ACCESS_KEY"] = st.credentials["secret_access_key"]
+        if st.credentials.get("session_token"):
+            admin["AWS_SESSION_TOKEN"] = st.credentials["session_token"]
+    st.admin_env_vars = admin
+    return st
 
 
 class StoreSet:
@@ -100,6 +121,45 @@ class StoreSet:
 
     def __getattr__(self, attr):
         return getattr(self.named("default"), attr)
+
+
+def check_stores(policy, stores: "StoreSet") -> list[dict]:
+    """Can the tool list and write each store the policy uses (#105)? Writes and deletes one
+    probe object per store under `_policy_check/`. Also says which stores the Neo4j servers must
+    read (they fetch seeds with their own cloud configuration) and which settings won't reach
+    them."""
+    import time
+
+    used: dict[str, list[str]] = {}
+    for g in policy.db_groups:
+        used.setdefault(policy.store_name(g.id), []).append(g.id)
+        if g.load.source and g.load.source.storage:
+            used.setdefault(g.load.source.storage, [])
+    used.setdefault("default", [])
+    out = []
+    for name in sorted(used):
+        row = {"store": name, "groups": used[name], "list": False, "write": False, "errors": []}
+        cfg = policy.storage.get(name)
+        row["url"] = cfg.url if cfg else "(environment)"
+        try:
+            st = stores.named(name)
+            st.list_text_keys("_policy_check/", ".txt")
+            row["list"] = True
+            key = f"_policy_check/{os.uname().nodename}-{int(time.time())}.txt"
+            st.put_text(key, "neo4j-backup policy check")
+            st.delete_keys([key])
+            row["write"] = True
+        except Exception as e:  # noqa: BLE001 - report every store, don't stop at the first
+            row["errors"].append(f"{type(e).__name__}: {e}")
+        if used[name]:
+            row["servers"] = ("every Neo4j cluster serving these groups must be able to read "
+                              "this store: seeding is done by the servers with their own cloud "
+                              "configuration")
+        if cfg and (cfg.endpoint or cfg.credentials_ref or cfg.region):
+            row["servers_note"] = ("this store's region, endpoint and credentials reach the tool "
+                                   "and neo4j-admin, not the Neo4j servers")
+        out.append(row)
+    return out
 
 
 def store() -> StoreSet:
