@@ -14,17 +14,21 @@
 #                 into. Always a legal Neo4j database name.
 #
 # Neo4j rules enforced here:
-#   database name: [a-z0-9.-], 3-63, lowercase, start/end alphanumeric, NO underscores,
-#                  reserved `_*`/`system*`.
+#   database name: a leading letter, then [a-z0-9.-], 3-63, lowercase, NO underscores,
+#                  reserved `_*`/`system*` (#85).
 #   alias name:    up to 65534 chars, almost any character (backtick-quoted in Cypher),
 #                  cannot end with a dot, reserved `_*`/`system*`. A dot is parsed as a
 #                  composite database delimiter (database.constituent) — allowed, flagged.
 #
-# Override the timestamp format or join character in ONE place here. This module mirrors
-# the orchestrator's NamingPolicy (next layer) so shell and Python designate identically.
+# The timestamp format can be overridden with NAMING_TS_FMT (a strftime format without the join
+# character `-`); naming.py reads the same variable, so shell and Python name identically
+# (#86). The join character is fixed.
 set -euo pipefail
 
 NAMING_TS_FMT="${NAMING_TS_FMT:-%Y%m%dt%H%M%S}"   # dashless on purpose (see parse fn)
+case "$NAMING_TS_FMT" in *-*)
+  echo "!! NAMING_TS_FMT '$NAMING_TS_FMT' contains '-', the join character" >&2; return 1 2>/dev/null || exit 1 ;;
+esac
 NAMING_JOIN="-"                                    # separator between slug and ts
 NAMING_MAXLEN=63                                    # database name ceiling
 NAMING_ALIAS_MAXLEN=65534                           # alias name ceiling

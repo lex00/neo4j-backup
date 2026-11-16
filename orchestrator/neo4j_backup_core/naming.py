@@ -20,6 +20,17 @@ ALIAS_MAXLEN = 65534
 SLUG_BASE_MAXLEN = 40
 TS_FMT = "%Y%m%dt%H%M%S"  # dashless, so slug_of_physical can split on JOIN
 
+
+def ts_format() -> str:
+    """The timestamp format: NAMING_TS_FMT, as in naming.sh (#86), else TS_FMT. A format
+    containing the join character would make names ambiguous, so it is refused."""
+    import os
+
+    fmt = os.environ.get("NAMING_TS_FMT") or TS_FMT
+    if JOIN in fmt:
+        raise NamingError(f"NAMING_TS_FMT {fmt!r} contains {JOIN!r}, the join character")
+    return fmt
+
 # Neo4j database names (Operations Manual, "Database names", 5.x and 2025.x): start with an
 # ASCII letter, then letters, digits, dots and dashes, 3-63 characters; `_` and `system` prefixes
 # are reserved. Names are case-insensitive and stored lowercase.
@@ -35,7 +46,7 @@ class NamingError(ValueError):
 
 def ts(now: datetime | None = None) -> str:
     """Name-safe UTC timestamp, e.g. 20260628t120000."""
-    return (now or datetime.now(timezone.utc)).strftime(TS_FMT)
+    return (now or datetime.now(timezone.utc)).strftime(ts_format())
 
 
 def _hash8(s: str) -> str:
@@ -135,7 +146,7 @@ def owns(a: str, name: str) -> bool:
     """Whether `name` is a physical this tool would have created for alias `a` (#87, #89):
     `<slug or its cut-down form>-<ts>`; for a hashed slug the alias hash must be intact."""
     prefix, sep, t = name.rpartition(JOIN)
-    if not sep or not re.fullmatch(r"\d{8}t\d{6}", t):
+    if not sep or not t or (ts_format() == TS_FMT and not re.fullmatch(r"\d{8}t\d{6}", t)):
         return False
     s = slug(a)
     if not s[:1].isalpha():
