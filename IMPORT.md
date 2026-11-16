@@ -32,8 +32,15 @@ One command imports into `loaddb` on the loader, dumps the offline store, and pu
 member's load folder (`_seed/`, #156), where the tool lists it apart from the backup chains
 (`show_chain` returns it under `loads`). With `BACKUP_UPLOAD=pipeline` the dump goes through the
 runner's staging folder and the tool's own upload (SSE headers); otherwise neo4j-admin writes it to
-the store directly. Seed the group from it with `CREATE DATABASE … OPTIONS {seedURI: '<result.uri>'}`
-(RECOVERY.md) until `seed --from-dump` lands (#159), then take a full backup of the seeded database.
+the store directly. Then seed the group from it:
+
+```bash
+neo4j-backup --json restore <group> --from-dump <member>=<result.key> --dry-run   # then --confirm
+neo4j-backup --json restore <group> --from-load --confirm   # every member's newest load
+```
+
+The restore copies privileges and takes the baseline full backup, as any restore does. A group
+whose members have no `.backup` yet (load-only) seeds from the newest load without either flag.
 The imported store stays in the loader's data directory; throw the loader away, or remove the
 store, afterwards. The `.backup` route below stays for anyone who wants a native backup.
 

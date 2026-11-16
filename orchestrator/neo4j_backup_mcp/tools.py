@@ -202,7 +202,8 @@ def run_aggregate(group: str | None = None, confirm: bool = False, dry_run: bool
 def run_restore(group: str, until: str | None = None, replace: bool = False,
                 confirm: bool = False, dry_run: bool = False, verify_first: bool = True,
                 baseline: bool = True, ticket: str | None = None,
-                reason: str | None = None) -> dict:
+                reason: str | None = None, from_load: bool = False,
+                from_dump: dict[str, str] | None = None) -> dict:
     """Restore a group (alias-swap, or by-name with `replace` to DROP+recreate; `until` = PITR).
     Needs confirm=true; dry_run returns the plan. For a destructive `replace`, runs
     verify-before-drop (skip with verify_first=false). `until` is ISO-8601 (UTC if no offset);
@@ -212,8 +213,9 @@ def run_restore(group: str, until: str | None = None, replace: bool = False,
     until = parse_until(until)
     g = load_policy(env.policy_path()).group(group)
     store, neo, layout = env.store(), env.neo4j(), _layout()
-    plan = ops.plan_restore(neo, store, g, layout, replace=replace,
-                            until=until)  # preconditions first, incl. the chain for `until`
+    loads = from_dump or ("latest" if from_load else None)  # load artifacts (#144, #159)
+    plan = ops.plan_restore(neo, store, g, layout, replace=replace, until=until,
+                            loads=loads)  # preconditions first, incl. the chain for `until`
     plan["baseline"] = baseline
     if dry_run:
         return {"group": group, "dry_run": True, "plan": plan}
@@ -227,7 +229,7 @@ def run_restore(group: str, until: str | None = None, replace: bool = False,
             ops.verify_target(run, store, runner, layout, g.id, m, upload=_UPLOAD, staging=_STAGING)
         verified = True
     out = ops.restore_group(neo, store, g, layout, restore_until=until, replace=replace,
-                            cypher_version=_CYPHER)
+                            cypher_version=_CYPHER, loads=loads)
     result = {"group": group, "verified_before_drop": verified, "restored": out}
     if baseline:
         runner = env.runner()

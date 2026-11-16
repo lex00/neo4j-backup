@@ -293,6 +293,8 @@ class RestoreConfig(dg.Config):
     restore_until: str | None = None  # ISO-8601; needs a differential chain
     replace: bool = False  # by-name mode only: DROP+recreate a target that already exists
     baseline: bool = True  # take a FULL of each restored database afterwards (#97)
+    from_load: bool = False  # seed each member from its newest load artifact (#144)
+    from_dump: dict[str, str] = {}  # member -> load key or external dump URI (#159)
     ticket: str | None = None  # the change ticket; recorded in the log and as run tags (#119)
     reason: str | None = None
 
@@ -318,6 +320,7 @@ def restore_group_op(
         out = ops.restore_group(
             neo4j, store, group, _layout, restore_until=until,
             replace=config.replace, cypher_version=SEED_CYPHER_VERSION, log=context.log.info,
+            loads=config.from_dump or ("latest" if config.from_load else None),
         )
     except ops.OpError as e:
         raise dg.Failure(str(e))

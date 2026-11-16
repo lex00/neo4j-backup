@@ -38,6 +38,8 @@ _SEED_CYPHER_VERSION = os.environ.get("SEED_CYPHER_VERSION") or None
         "restore_until": Param(None, type=["null", "string"]),  # ISO-8601, needs a chain
         "replace": Param(False, type="boolean"),  # by-name only: DROP+recreate an existing target
         "baseline": Param(True, type="boolean"),  # FULL of each restored database afterwards (#97)
+        "from_load": Param(False, type="boolean"),  # newest load artifact per member (#144)
+        "from_dump": Param({}, type="object"),  # member -> load key or external dump URI (#159)
         "ticket": Param(None, type=["null", "string"]),  # change ticket, recorded (#119)
         "reason": Param(None, type=["null", "string"]),
     },
@@ -54,14 +56,17 @@ def neo4j_restore():
         print(record.describe("restore", rec))
         # every member's seed (and the chain covering `until`) is chosen here, so a time no
         # chain covers fails before any seed task runs (#114)
+        loads = ctx["params"].get("from_dump") or ("latest" if ctx["params"].get("from_load")
+                                                   else None)
         ops.choose_seeds(config.store(), _layout, load_policy(config.policy_path()).group(gid),
-                         until)
+                         until, loads)
         return {
             "group_id": gid,
             # ISO-8601, UTC if no offset; a bad value fails here, before any Neo4j call (#77)
             "restore_until": parse_until(ctx["params"]["restore_until"]),
             "replace": bool(ctx["params"].get("replace")),
             "baseline": bool(ctx["params"].get("baseline", True)),
+            "loads": loads,
             **rec,
             "mode": load_policy(config.policy_path()).group(gid).restore_mode,
             "ts": naming.ts(),               # one timestamp for the whole group
@@ -79,7 +84,11 @@ def neo4j_restore():
         # the whole group). One group-wide timestamp (plan["ts"]) keeps alias-swap physicals aligned.
         group = load_policy(config.policy_path()).group(plan["group_id"])
         try:
-            return ops.seed_member(config.neo4j(), config.store(), group, _layout, name,
+            loads = plan.get("loads")
+            seed = ops.choose_seed(config.store(), _layout, group.id, name,
+                                   plan["restore_until"],
+                                   loads.get(name) if isinstance(loads, dict) else loads)
+            return ops.seed_member(config.neo4j(), config.store(), group, _layout, name, seed=seed,
                                    restore_until=plan["restore_until"], replace=plan["replace"],
                                    cypher_version=_SEED_CYPHER_VERSION, ts=plan["ts"], log=print)
         except ops.OpError as e:

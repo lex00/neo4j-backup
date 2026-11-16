@@ -14,6 +14,11 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Restore from load artifacts** (#144, #159, part of #98): `restore --from-load` (every
+  member's newest dump) and `--from-dump MEMBER=KEY_OR_URI` (a key in the member's `_seed/`, or an
+  external dump URI the servers can read); also in MCP, the Dagster restore config and the Airflow
+  restore params. `--until` never picks a dump and is refused with one; a member with no backups
+  seeds from its newest load. Privileges and the baseline apply as for any restore.
 - **`import --to-dump <group>/<member>`** (#158, part of #98): import on the loader, dump the
   offline store (no server start), and put the dump in the member's `_seed/<ts>/` folder;
   `BACKUP_UPLOAD=pipeline` uploads it through the tool. IMPORT.md makes it the default route.
