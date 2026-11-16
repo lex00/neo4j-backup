@@ -15,6 +15,7 @@ class _FakeContainer:
         self.blobs: dict[str, bytes] = {}
         self.uploaded, self.deleted, self.copied = [], [], []
         self.read_whole = []
+        self.copy_states, self.copy_args = {}, []
 
     class _BlobClient:
         def __init__(self, c, key):
@@ -25,7 +26,11 @@ class _FakeContainer:
             return f"az://{self.key}"
 
         def get_blob_properties(self):
-            return types.SimpleNamespace(size=len(self._c.blobs[self.key]))
+            states = self._c.copy_states.get(self.key)
+            status = states.pop(0) if states else None
+            return types.SimpleNamespace(size=len(self._c.blobs.get(self.key, b"")),
+                                         copy=types.SimpleNamespace(status=status,
+                                                                    status_description="x"))
 
         def download_blob(self, **kw):
             data = self._c.blobs[self.key]
@@ -36,10 +41,11 @@ class _FakeContainer:
                 return data
             return types.SimpleNamespace(readall=readall, readinto=lambda f: f.write(data))
 
-        def start_copy_from_url(self, url):
+        def start_copy_from_url(self, url, **kw):
             src = url.split("az://", 1)[1]
             self._c.blobs[self.key] = self._c.blobs[src]
             self._c.copied.append((src, self.key))
+            self._c.copy_args.append(kw)
 
     def list_blobs(self, name_starts_with=""):
         return [types.SimpleNamespace(name=n, size=len(b), last_modified=i)
@@ -109,3 +115,34 @@ def test_download_streams_to_disk(store, tmp_path):
     store._download("g/a/p/x.backup", str(dst))
     assert dst.read_bytes() == b"0123456789" * 1000
     assert store._fake.read_whole == []
+
+
+def test_copy_waits_for_pending_then_success(store):
+    """#80: the copy is only done when Azure says so."""
+    store._fake.blobs["a"] = b"x"
+    store._fake.copy_states["b"] = ["pending", "pending", "success"]
+    naps = []
+    store._copy("a", "b", sleep=naps.append)
+    assert len(naps) == 2 and store._fake.copy_states["b"] == []
+
+
+def test_copy_failed_raises_with_the_names(store):
+    store._fake.blobs["a"] = b"x"
+    store._fake.copy_states["b"] = ["pending", "failed"]
+    with pytest.raises(RuntimeError, match="a -> b failed"):
+        store._copy("a", "b", sleep=lambda s: None)
+
+
+def test_copy_times_out(store, monkeypatch):
+    monkeypatch.setenv("AZURE_COPY_TIMEOUT", "0")
+    store._fake.blobs["a"] = b"x"
+    store._fake.copy_states["b"] = ["pending"] * 5
+    with pytest.raises(TimeoutError, match="still pending"):
+        store._copy("a", "b", sleep=lambda s: None)
+
+
+def test_copy_carries_the_encryption_scope(store):
+    store.write_args = {"encryption_scope": "scope1", "overwrite_conditions": "ignored"}
+    store._fake.blobs["a"] = b"x"
+    store._copy("a", "b")
+    assert store._fake.copy_args == [{"encryption_scope": "scope1"}]

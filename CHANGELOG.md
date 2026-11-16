@@ -208,6 +208,9 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- Azure: a server-side copy waits until Azure reports it finished (#80), so verify never
+  aggregates a partial scratch copy; `failed`, `aborted` or `AZURE_COPY_TIMEOUT` (default 3600 s)
+  raise. Copies keep the store's `encryption_scope` (and tier, metadata, tags).
 - Azure: downloads stream to disk instead of reading the whole blob into memory (#79), so a
   multi-GB backup in `BACKUP_UPLOAD=pipeline` mode doesn't exhaust the worker's memory.
 - `just backup` writes under the physical prefix like the CLI and orchestrators, and

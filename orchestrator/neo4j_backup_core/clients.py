@@ -466,9 +466,36 @@ class AzureObjectStore(_BaseObjectStore):
             c.delete_blob(k)
         return len(keys)
 
-    def _copy(self, src_key: str, dst_key: str) -> None:
+    # write_args that also apply to a server-side copy (#80): the scratch copies verify makes
+    # keep the store's encryption scope, tier, metadata and tags
+    _COPY_ARGS = ("encryption_scope", "standard_blob_tier", "metadata", "tags")
+
+    def _copy(self, src_key: str, dst_key: str, *, sleep=None) -> None:
+        """Server-side copy, waiting until it has finished (#80): `start_copy_from_url` returns
+        while the copy may still be pending, and verify aggregates the copies straight after.
+        `failed`, `aborted` or a timeout (AZURE_COPY_TIMEOUT seconds, default 3600) raise."""
+        import time
+
+        sleep = sleep or time.sleep
         c = self._c()
-        c.get_blob_client(dst_key).start_copy_from_url(c.get_blob_client(src_key).url)
+        dst = c.get_blob_client(dst_key)
+        args = {k: v for k, v in self.write_args.items() if k in self._COPY_ARGS}
+        dst.start_copy_from_url(c.get_blob_client(src_key).url, **args)
+        deadline = time.monotonic() + float(os.environ.get("AZURE_COPY_TIMEOUT", "3600"))
+        delay = 0.2
+        while True:
+            copy = getattr(dst.get_blob_properties(), "copy", None)
+            status = getattr(copy, "status", None)
+            if status in (None, "success"):
+                return
+            if status in ("failed", "aborted"):
+                raise RuntimeError(f"Azure copy {src_key} -> {dst_key} {status}: "
+                                   f"{getattr(copy, 'status_description', '')}")
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"Azure copy {src_key} -> {dst_key} still {status} after "
+                                   f"{os.environ.get('AZURE_COPY_TIMEOUT', '3600')}s")
+            sleep(delay)
+            delay = min(delay * 2, 5.0)
 
     def _download(self, key: str, local_path: str) -> None:
         # streamed to disk in chunks, never the whole blob in memory (#79)
