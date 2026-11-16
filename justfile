@@ -148,4 +148,4 @@ release version:
 
 # validate restore cloud-agnostically via file:// seed (#52) — needs the stack + a backup
 file-restore-smoke:
-    orchestrator/.venv/bin/python orchestrator/smoke_file_restore.py
+    AWS_ENDPOINT_URL_S3=http://localhost:9000 orchestrator/.venv/bin/python orchestrator/smoke_file_restore.py
