@@ -126,13 +126,22 @@ def cmd_restore_points(args):
     return envelope("restore-points", ok=True, group=group.id, result=out), Exit.OK
 
 
+def _group_lock(store, group_id: str, what: str):
+    """The per-group lock the orchestrators take (#252): a CLI backup, verify, aggregate or
+    load never runs at the same time as the group's other work, wherever that was started."""
+    from neo4j_backup_core import locks
+    return locks.group_lock(store, group_id, f"cli {what}",
+                            wait=int(os.environ.get("NEO4J_BACKUP_LOCK_WAIT", "3600")))
+
+
 def cmd_backup(args):
     group = _group(args)
     store, runner, neo, layout = env.store(), env.runner(), env.neo4j(), paths.get_layout()
     run = _run_admin(runner)
-    done = [ops.backup_target(run, neo, store, runner, layout, group.id, name, args.kind,
-                              upload=_UPLOAD, staging=_STAGING, log=_log, group=group)
-            for name in group.names]
+    with _group_lock(store, group.id, "backup"):
+        done = [ops.backup_target(run, neo, store, runner, layout, group.id, name, args.kind,
+                                  upload=_UPLOAD, staging=_STAGING, log=_log, group=group)
+                for name in group.names]
     # a DIFF with no full to diff against is skipped, not failed (#74); the caller runs a FULL
     needs = [d["alias"] for d in done if d.get("needs_full")]
     return envelope("backup", ok=True, group=group.id,
@@ -143,8 +152,9 @@ def cmd_verify(args):
     group = _group(args)
     store, runner, layout = env.store(), env.runner(), paths.get_layout()
     run = _run_admin(runner)
-    done = [ops.verify_target(run, store, runner, layout, group.id, name,
-                              upload=_UPLOAD, staging=_STAGING) for name in group.names]
+    with _group_lock(store, group.id, "verify"):
+        done = [ops.verify_target(run, store, runner, layout, group.id, name,
+                                  upload=_UPLOAD, staging=_STAGING) for name in group.names]
     return envelope("verify", ok=True, group=group.id, result={"verified": done}), Exit.OK
 
 
@@ -260,11 +270,12 @@ def cmd_load(args):
     if short:
         return short
     try:
-        out = load_mod.load_group(_run_admin(runner), runner, neo, store, layout, group,
-                                  replace=args.replace, keep_failed=args.keep_failed,
-                                  baseline=False if args.no_baseline else None,
-                                  upload=_UPLOAD, staging=_STAGING, cypher_version=_CYPHER,
-                                  log=_log)
+        with _group_lock(store, group.id, "load"):
+            out = load_mod.load_group(_run_admin(runner), runner, neo, store, layout, group,
+                                      replace=args.replace, keep_failed=args.keep_failed,
+                                      baseline=False if args.no_baseline else None,
+                                      upload=_UPLOAD, staging=_STAGING, cypher_version=_CYPHER,
+                                      log=_log)
     except load_mod.LoadError as e:
         return envelope("load", ok=False, group=group.id,
                         result={**e.result, "failed_step": e.step},
@@ -432,9 +443,10 @@ def cmd_aggregate(args):
     if short:
         return short
     run = _run_admin(runner)
-    done = [ops.aggregate_target(run, store, runner, layout, group.id, name,
-                                 upload=_UPLOAD, staging=_STAGING, log=_log)
-            for name in group.names]
+    with _group_lock(store, group.id, "aggregate"):
+        done = [ops.aggregate_target(run, store, runner, layout, group.id, name,
+                                     upload=_UPLOAD, staging=_STAGING, log=_log)
+                for name in group.names]
     return envelope("aggregate", ok=True, group=group.id, result={"aggregated": done}), Exit.OK
 
 
@@ -660,6 +672,9 @@ def _emit(result_env: dict, as_json: bool) -> None:
         print(f"error ({err['kind']}): {err['msg']}", file=sys.stderr)
 
 
+from neo4j_backup_core.locks import Locked as _Locked  # noqa: E402
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)  # argparse exits 2 (USAGE) on bad args
     try:
@@ -673,6 +688,9 @@ def main(argv=None) -> int:
         result_env, code = envelope(args.command, ok=False, **extra,
                                     error=make_error(getattr(e, "kind", "op_failed"),
                                                      str(e))), Exit.FAILURE
+    except _Locked as e:  # the group's other work is running (#252)
+        result_env, code = envelope(args.command, ok=False,
+                                    error=make_error("locked", str(e))), Exit.FAILURE
     except subprocess.CalledProcessError as e:
         result_env, code = envelope(args.command, ok=False,
                                     error=make_error("admin_failed",

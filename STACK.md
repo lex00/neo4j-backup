@@ -1,10 +1,9 @@
 # Local Dev Stack
 
-Single-node Neo4j Enterprise + the floci S3/KMS emulator + a node-agentless backup runner,
-driven by `just`. Single node is deliberately the starting point: it exercises the
-whole backup/restore loop (online backup, seed-from-URI restore, PITR). Cluster
-topologies are deferred until source-member selection and placement actually need
-testing; the verified config is parked at the bottom of this file for that day.
+A single Neo4j Enterprise server, the floci S3 and KMS emulator, and a runner container
+with `neo4j-admin`, driven by `just`. That covers the whole loop: online backup, restore by
+seeding from the bucket, and point-in-time restore. Profiles add a three-server cluster
+([below](#a-three-server-cluster)), a second cluster for moves, and Azurite for Azure.
 
 ## Prerequisites
 
@@ -57,7 +56,7 @@ The **runner** is the only component bridging both for *backups*: it pulls over 
 backup port (6362) and writes to object storage. Nothing runs on the database node for
 backup. Note one consequence of seed-from-URI restore: the **Neo4j server itself**
 pulls the seed from object storage, so the DB node is also on `ops` and carries S3
-credentials. In a real cluster every member needs that object-store egress to restore.
+credentials. In a real cluster every server needs that access to the bucket to restore.
 
 ## Demo group
 
@@ -95,7 +94,7 @@ Validated end-to-end on this stack: `just fresh`, `just backup demo`, `just arti
 
 Earlier notes (MinIO, 2026-06-29): seed-from-URI worked over plain HTTP with path-style
 addressing, SSE-KMS objects were read transparently on restore, and the restore drops
-`seedConfig` (CloudSeedProvider rejects it; region and endpoint come from the server's
+`seedConfig` (Neo4j rejects it; region and endpoint come from the server's
 environment).
 
 Remaining notes:

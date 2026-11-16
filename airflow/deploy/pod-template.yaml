@@ -1,0 +1,34 @@
+# KubernetesExecutor pod template: every task pod (and, in Airflow 3, the DAG files it parses)
+# needs the same environment as the scheduler and DAG processor. Point the chart's
+# `podTemplate` (or [kubernetes_executor] pod_template_file) at this, merged with your own.
+#
+# Secrets (create them in the Airflow namespace first):
+#   kubectl -n airflow create secret generic neo4j-backup-env \
+#     --from-literal=NEO4J_PASSWORD='...' \
+#     --from-literal=NEO4J_BACKUP_ALERT_WEBHOOK='https://hooks.slack.com/services/...'
+#   # one per cluster when the policy uses `password_ref: env:NEO4J_PASSWORD_<CLUSTER>`:
+#   kubectl -n airflow create secret generic neo4j-backup-clusters \
+#     --from-literal=NEO4J_PASSWORD_EU='...' --from-literal=NEO4J_PASSWORD_US='...'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: placeholder
+spec:
+  serviceAccountName: airflow-worker      # bound to the Role in rbac.yaml for RUNNER_MODE=k8s
+  containers:
+    - name: base
+      image: registry.example.com/airflow-neo4j-backup:0.7.0
+      envFrom:
+        - secretRef: { name: neo4j-backup-env }
+        - secretRef: { name: neo4j-backup-clusters, optional: true }
+      env:
+        - { name: NEO4J_BACKUP_POLICY, value: "s3://ops-config/neo4j-backup/policy.yaml" }
+        - { name: AWS_REGION, value: eu-west-1 }
+        - { name: RUNNER_MODE, value: k8s }
+        - { name: RUNNER_IMAGE, value: "neo4j:2026.05.0-enterprise" }
+        - { name: RUNNER_NAMESPACE, value: neo4j-backup }
+        - { name: RUNNER_SERVICE_ACCOUNT, value: neo4j-backup-runner }   # IRSA for the bucket
+        - { name: RUNNER_SCRATCH_STORAGE, value: 500Gi }                 # your largest full
+        - { name: RUNNER_MEMORY_LIMIT, value: 8Gi }
+        - { name: RUNNER_PAGECACHE, value: 2G }
+        - { name: RUNNER_HEAP_SIZE, value: 4G }

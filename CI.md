@@ -72,24 +72,25 @@ command on the same cron:
 
 ## Gating and lanes
 
-- **Exit codes gate the job.** The CLI returns non-zero on failure (`1`), bad args (`2`), or a
+- Exit codes gate the job. The CLI returns non-zero on failure (`1`), bad args (`2`), or a
   refused guard (`3`); a scheduled job fails loudly on any of these. Use `--json` for
   machine-readable logs.
-- **Serialize a lane.** Never overlap two backups of one group. GitLab's `resource_group` is the
+- Serialize a lane. The CLI takes the group's lock in the bucket, so two jobs on one group
+  wait for each other (up to `NEO4J_BACKUP_LOCK_WAIT`), but queue them in CI anyway. GitLab's `resource_group` is the
   cleanest fit; GitHub and Forgejo use a `concurrency` group (Forgejo supports workflow-level
   `concurrency` from runner v11.1, late 2025; on an older Forgejo, register the backup runner with
   `capacity: 1` so its jobs run one at a time). Drive full vs differential from separate
   schedules (a `LANE`/`kind` variable), the CI analogue of the orchestrators' full/diff pools.
-- **Destructive commands in automation.** `prune` (and `restore --replace`) require `--confirm`; in
+- Destructive commands in automation. `prune` (and `restore --replace`) require `--confirm`; in
   a scheduled job you pass it because the schedule is the operator's standing approval. Run
   `--dry-run` by hand first to see the blast radius.
 
 ## Caveats (read before relying on this)
 
-- **Scratch and time limits.** Hosted runners cannot stage a multi-TB full; use self-hosted with a
+- Scratch and time limits. Hosted runners cannot stage a multi-TB full; use self-hosted with a
   sized volume. A full backup can exceed a hosted runner's job timeout.
-- **Cron is best-effort.** GitHub/Forgejo scheduled crons drift and occasionally skip under load —
+- Cron is best-effort. GitHub/Forgejo scheduled crons drift and occasionally skip under load:
   fine for backups with slack in the RPO, not for tight windows.
-- **No orchestration.** You get scheduling and serialized lanes, not dynamic partition fan-out,
+- No orchestration. You get scheduling and serialized lanes, not dynamic partition fan-out,
   retries with backoff across a fleet, or the run-level observability the Dagster/Airflow adapters
   give. Verify (`verify`) and prune on their own cadence; watch job outcomes yourself.

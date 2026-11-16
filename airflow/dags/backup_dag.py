@@ -9,9 +9,9 @@ neo4j_backup_airflow.execution). Airflow 3.x Task SDK + dynamic mapping.
 import os
 from datetime import datetime
 
-from airflow.sdk import dag, task
+from airflow.sdk import Param, dag, get_current_context, task
 
-from neo4j_backup_airflow import config, upload
+from neo4j_backup_airflow import alerts, config, upload
 from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import ops, paths
 from neo4j_backup_core.policy import load_policy, load_policy_at_startup
@@ -67,19 +67,25 @@ def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str,
                     clusters: list[str] | None = None):
     clusters = clusters or ["default"]
 
-    @dag(
+    @dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
         dag_id=f"neo4j_backup_{tier_name}_{lane}",
         schedule=cron,
         start_date=datetime(2025, 1, 1),
         catchup=False,
         max_active_runs=1,
         tags=["neo4j-backup", "backup", lane, tier_name],
+        # trigger with {"group_id": "<g>"} to back up one group of the tier (#249)
+        params={"group_id": Param(None, type=["null", "string"])},
     )
     def _backup():
         def _all(cluster: str) -> list[str]:
             pol = load_policy(config.policy_path())
+            only = (get_current_context()["params"] or {}).get("group_id")
+            if only and only not in {g.id for g in pol.groups_for_tier(tier_name)}:
+                raise RuntimeError(f"group {only!r} is not on tier {tier_name!r}")
             return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name)
-                    if (g.cluster or "default") == cluster for a in g.names]
+                    if (g.cluster or "default") == cluster and (not only or g.id == only)
+                    for a in g.names]
 
         for cl in clusters:  # one set of tasks per cluster, in that cluster's pools (#106)
             sfx = "" if cl == "default" else f"_{cl}"

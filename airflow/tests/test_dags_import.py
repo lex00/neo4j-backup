@@ -121,3 +121,35 @@ def test_rebuild_tasks_use_their_clusters_pool(tmp_path, monkeypatch):
     assert bag.import_errors == {}, bag.import_errors
     pools = {t.task_id: t.pool for t in bag.dags["neo4j_rebuild_rebuild_nightly"].tasks}
     assert pools["rebuild_west"] == "neo4j_west_full"
+
+
+def test_verify_runs_in_the_clusters_full_pool(tmp_path, monkeypatch):
+    """#250: verifies (and aggregates) need full-size scratch; they run in the full pool."""
+    import yaml
+    from airflow.models import DagBag
+    repo = Path(__file__).resolve().parents[2]
+    raw = yaml.safe_load((repo / "policies" / "demo.yaml").read_text())
+    raw["clusters"] = {"west": {"bolt_uri": "neo4j://w:7687"}}
+    raw["db_groups"].append({"id": "westg", "tier": "gold", "cluster": "west",
+                             "aliases": ["west-a"]})
+    f = tmp_path / "p.yaml"
+    f.write_text(yaml.safe_dump(raw))
+    monkeypatch.setenv("NEO4J_BACKUP_POLICY", str(f))
+    from neo4j_backup_core import policy
+    policy._cache.clear()
+    bag = DagBag(dag_folder=str(repo / "airflow" / "dags"), include_examples=False)
+    assert bag.import_errors == {}, bag.import_errors
+    pools = {t.task_id: t.pool for t in bag.dags["neo4j_verify_gold"].tasks}
+    assert pools["verify_default"] == "neo4j_full" and pools["verify_west"] == "neo4j_west_full"
+    single = {t.task_id: t.pool for t in bag.dags["neo4j_verify_silver"].tasks}
+    assert single.get("verify") == "neo4j_full", single
+
+
+def test_restore_dry_run_and_backup_group_params():
+    """#249: preview and one-group backups without a CLI host."""
+    from airflow.models import DagBag
+    repo = Path(__file__).resolve().parents[2]
+    bag = DagBag(dag_folder=str(repo / "airflow" / "dags"), include_examples=False)
+    assert "dry_run" in bag.dags["neo4j_restore"].params
+    assert "group_id" in bag.dags["neo4j_backup_gold_full"].params
+    assert "group_id" in bag.dags["neo4j_backup_gold_diff"].params

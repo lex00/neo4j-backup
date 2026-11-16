@@ -12,7 +12,7 @@ from datetime import datetime
 
 from airflow.sdk import Param, dag, get_current_context, task
 
-from neo4j_backup_airflow import config
+from neo4j_backup_airflow import alerts, config
 from neo4j_backup_core import ops, paths
 from neo4j_backup_core.policy import load_policy, load_policy_at_startup
 
@@ -23,7 +23,8 @@ _layout = paths.get_layout()
 def make_metadata_dag(cluster: str, cron: str):
     """`neo4j_dbms_metadata_<cluster>` on the policy's `dbms.metadata_cron` (#104); then the
     DBMS sweep keeps `dbms.keep_metadata` / `keep_system`."""
-    @dag(dag_id=f"neo4j_dbms_metadata_{cluster}", schedule=cron, start_date=datetime(2025, 1, 1),
+    @dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id=f"neo4j_dbms_metadata_{cluster}", schedule=cron, start_date=datetime(2025, 1, 1),
          catchup=False, max_active_runs=1, tags=["neo4j-backup", "metadata", cluster])
     def _metadata():
         @task
@@ -42,11 +43,12 @@ def make_metadata_dag(cluster: str, cron: str):
 
 _pol = load_policy_at_startup(config.policy_path(), configured="NEO4J_BACKUP_POLICY" in os.environ)
 if _pol is not None:
-    for _cl in _pol.cluster_names():  # one per cluster (#106)
+    for _cl in _pol.dbms_cluster_names():  # one per cluster in use (#106, #251)
         globals()[f"neo4j_dbms_metadata_{_cl}"] = make_metadata_dag(_cl, _pol.dbms.metadata_cron)
 
 
-@dag(dag_id="neo4j_metadata_restore", schedule=None, start_date=datetime(2025, 1, 1),
+@dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id="neo4j_metadata_restore", schedule=None, start_date=datetime(2025, 1, 1),
      catchup=False, params={"key": Param(None, type=["null", "string"]),  # default: latest
              "cluster": Param("default", type="string")},  # #106
      tags=["neo4j-backup", "metadata", "restore"])

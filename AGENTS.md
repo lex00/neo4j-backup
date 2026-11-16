@@ -10,11 +10,11 @@ the CLI. Follow the safety rules below without exception.
 
 ## Safety posture
 
-- **Read-only by default.** `targets`, `verify`, and any `--dry-run` are safe to run on your own.
-- **Never mutate production without an explicit human go-ahead.** The mutating commands (`restore`,
+- Read-only by default. `targets`, `verify`, and any `--dry-run` are safe to run on your own.
+- Never mutate production without an explicit human go-ahead. The mutating commands (`restore`,
   `prune`, `aggregate`, `metadata restore`) refuse to run unless you pass `--confirm`. Do not pass
   `--confirm` until a human has approved the specific action.
-- **Always `--dry-run` a destructive command first**, show the human the blast radius it reports
+- Always `--dry-run` a destructive command first, show the human the blast radius it reports
   (databases to be dropped, artifact keys to be deleted, the restore plan), and only then propose
   the same command with `--confirm`.
 

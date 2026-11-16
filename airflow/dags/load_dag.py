@@ -16,7 +16,7 @@ from datetime import datetime
 
 from airflow.sdk import Param, dag, get_current_context, task
 
-from neo4j_backup_airflow import config, upload
+from neo4j_backup_airflow import alerts, config, upload
 from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import load as load_mod
 from neo4j_backup_core import locks, paths, record
@@ -42,7 +42,8 @@ def load_one(group_id: str, replace: bool = False, keep_failed: bool = False,
             raise RuntimeError(f"[{e.step}] {e}")
 
 
-@dag(dag_id="neo4j_load", schedule=None, start_date=datetime(2025, 1, 1), catchup=False,
+@dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id="neo4j_load", schedule=None, start_date=datetime(2025, 1, 1), catchup=False,
      params={"group_id": Param("demo", type="string"),
              "replace": Param(False, type="boolean"),
              "keep_failed": Param(False, type="boolean"),
@@ -75,7 +76,8 @@ def make_rebuild_dag(tier: str, cron: str, clusters: list[str] | None = None):
 
     clusters = clusters or ["default"]
 
-    @dag(dag_id=f"neo4j_rebuild_{tier}", schedule=cron, start_date=datetime(2025, 1, 1),
+    @dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id=f"neo4j_rebuild_{tier}", schedule=cron, start_date=datetime(2025, 1, 1),
          catchup=False, max_active_runs=1, tags=["neo4j-backup", "rebuild", tier])
     def _rebuild():
         @task

@@ -68,7 +68,7 @@ The Neo4j servers fetch seeds with their own cloud settings, so they need read a
 |---|---|---|
 | `RUNNER_MODE` | `subprocess` | `subprocess`: neo4j-admin runs on the worker (or CLI host). `k8s`: each command runs in its own pod. |
 | `RUNNER_NEO4J_ADMIN` | `neo4j-admin` | Path to the binary (subprocess mode). |
-| `RUNNER_EXEC_PREFIX` | `[]` | JSON argv put in front of every command, e.g. `["docker","exec","-T","runner"]`. CLI and Airflow only; Dagster takes `RunnerResource.exec_prefix`. |
+| `RUNNER_EXEC_PREFIX` | `[]` | JSON argv put in front of every command, e.g. `["docker","exec","-T","runner"]` to run neo4j-admin in a container (all front-ends). |
 | `SCRATCH_PATH` | `/scratch` | Scratch directory: room for the largest full backup. |
 | `RUNNER_PAGECACHE` | `512M` | neo4j-admin `--pagecache`. |
 | `RUNNER_HEAP_SIZE` | `2G` | neo4j-admin heap (passed as `HEAP_SIZE`). |
@@ -84,12 +84,42 @@ The Neo4j servers fetch seeds with their own cloud settings, so they need read a
 | `RUNNER_SECRET_ENV` | `{}` | k8s: JSON `{"ENV_NAME": "<secret>:<key>"}`. Credentials the tool passes to a pod (a named store's keys, a build's `secret:` env) come from these Secrets; a credential with no entry here is refused rather than written into the pod spec. |
 | `RUNNER_EXTRA_ENV` | `{}` | JSON env added to every pod as plain values (visible to anyone who can read pods). |
 
+## Choosing a runner mode
+
+Subprocess mode is the simpler start: `neo4j-admin` runs where the job runs, so the Dagster image
+(`orchestrator/deploy/Dockerfile`) or the Airflow worker image (`airflow/deploy/Dockerfile
+--target subprocess`) carries it. Every run that backs up needs scratch space as large as its
+backup; on Kubernetes that means one ReadWriteMany volume (EFS, Filestore, Azure Files) mounted
+in every run pod, sized for the fulls that can run at once (the full lane's limit times your
+largest full).
+
+k8s mode starts a pod from `RUNNER_IMAGE` for each `neo4j-admin` command, with its own
+ephemeral scratch volume (`RUNNER_SCRATCH_STORAGE`), so nothing is shared and the worker image
+stays small. It needs RBAC to create pods (`airflow/deploy/rbac.yaml`; Dagster's run pods need
+the same in their namespace) and a storage class that provisions ephemeral volumes. It can't be
+combined with `BACKUP_UPLOAD=pipeline`.
+
+Memory, both modes: `RUNNER_HEAP_SIZE` plus `RUNNER_PAGECACHE` plus about 1 GiB for the JVM and
+Python. In subprocess mode that is the run pod's (or worker's) limit; in k8s mode
+`RUNNER_MEMORY_LIMIT`.
+
+## Permissions
+
+| Who | Needs |
+|---|---|
+| Dagster code server, Airflow scheduler and DAG processor | read the policy (file or `s3://` object); the secrets in the environment |
+| Dagster run pods, Airflow workers or task pods | the bucket: list, read, write, delete (prune, verify scratch, locks); `kms:GenerateDataKey` and `kms:Decrypt` on an encrypted bucket; Secrets Manager read with `SECRET_PROVIDER`; Bolt (7687) to every server; in subprocess mode, the backup port (6362) |
+| k8s runner pods (`RUNNER_SERVICE_ACCOUNT`) | the bucket and KMS as above; the backup port (6362) |
+| Neo4j servers | the bucket: read and list; `kms:Decrypt` (they fetch seeds themselves) |
+
 ## Behaviour
 
 | Variable | Default | What it does |
 |---|---|---|
 | `NEO4J_BACKUP_REQUIRE_TICKET` | unset | `true`: every applied change needs `--ticket` (CLI), `ticket` (MCP, Dagster config, Airflow params). |
-| `NEO4J_BACKUP_LOCK_WAIT` | `3600` | Seconds a backup, verify, aggregate or load waits for its group's lock (another of them running) before failing. |
+| `NEO4J_BACKUP_LOCK_WAIT` | `3600` | Seconds a backup, verify, aggregate or load (from any front-end, the CLI included) waits for its group's lock before failing with `locked`. The lock, `_locks/<group>.lock` in the default store, expires 6 hours after it was taken, so a crashed run holds it at most that long; delete the object to clear it sooner. |
+| `NEO4J_BACKUP_ALERT_WEBHOOK` | unset | A URL that failed runs are posted to as JSON `{"text": …}` (Slack, Teams, Mattermost and most chat webhooks accept it). Dagster: the `alert_on_failure` sensor, on when this is set. Airflow: every DAG's failure callback. |
+| `DAGSTER_BASE_URL` | unset | Dagster: the UI's URL, so alerts link to the failed run. |
 | `NEO4J_BACKUP_MCP_MODE` | `read-only` | MCP server: `read-write` enables the guarded write tools. |
 | `NEO4J_BACKUP_DEBUG` | unset | CLI: print the traceback of an unexpected error to stderr. |
 | `CUTOVER_STRATEGY` / `CUTOVER_HOOK` | `alias-swap` / none | `external` calls `CUTOVER_HOOK` (an http(s) URL or a command) instead of `ALTER ALIAS`. |

@@ -1,0 +1,38 @@
+# RUNNER_MODE=k8s: Airflow tasks start a pod per neo4j-admin command (KubernetesPodOperator,
+# from inside the task) and read its output. Bind this Role to the service account the Airflow
+# worker / task pods run as. Change the namespace to RUNNER_NAMESPACE.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: neo4j-backup-runner
+  namespace: neo4j-backup
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, get, list, watch, delete, patch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [pods/exec]          # the XCom sidecar that returns neo4j-admin's output
+    verbs: [create, get]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]   # each pod's ephemeral scratch volume
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: neo4j-backup-runner
+  namespace: neo4j-backup
+subjects:
+  - kind: ServiceAccount
+    name: airflow-worker            # your Airflow worker / task pods' service account
+    namespace: airflow
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: neo4j-backup-runner

@@ -32,6 +32,7 @@ nav:
     - Operator MCP: MCP.md
     - Agent guide: AGENTS.md
     - Environment variables: ENVIRONMENT.md
+    - Glossary: GLOSSARY.md
   - Orchestrators:
     - Dagster: orchestrator/README.md
     - Airflow: airflow/README.md
@@ -43,4 +44,5 @@ nav:
 markdown_extensions:
   - admonition
   - tables
+  - def_list
   - pymdownx.superfences

@@ -7,7 +7,38 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
-Fixes from the v0.6.0 operator docs audit (#216).
+Fixes from the novice adoption audits (#244), then from the v0.6.0 operator docs audit (#216).
+
+### Adoption (#244)
+
+**Upgrading.**
+- A tier can set `rpo_minutes`, the default for its groups (#253). The demo and example
+  policies set it per tier (gold 90, silver 420, bronze 1500); before, every group defaulted to
+  60 and groups on slower tiers were reported stale between backups.
+- No `default` metadata, `system` backup or DBMS sweep jobs when the policy has named clusters
+  and no group uses `default` (#251). They pointed at `neo4j://localhost:7687`.
+- The CLI's `backup`, `verify`, `aggregate` and `load` take the group lock, like the
+  orchestrators (#252); a held lock fails with error kind `locked` after
+  `NEO4J_BACKUP_LOCK_WAIT`.
+- Airflow: `neo4j_verify_<tier>` and `neo4j_aggregate_<tier>` run in the cluster's full pool
+  (#250), with one task per cluster (`verify_<cluster>`) when the tier spans named clusters.
+
+**Added.**
+- Failure alerts (#246): `NEO4J_BACKUP_ALERT_WEBHOOK` gets a JSON post for every failed run,
+  from Dagster's `alert_on_failure` sensor and every Airflow DAG's failure callback.
+- Restore previews in the orchestrators (#249): `dry_run` on Airflow's `neo4j_restore` and
+  Dagster's `restore_group`. The Airflow backup DAGs take `group_id` to back up one group.
+- Deploy kits: the Dagster image includes `dagster-postgres` and takes `DAGSTER_VERSION`;
+  `orchestrator/deploy/helm-values.yaml` for the Dagster chart (#247);
+  `airflow/deploy/` with a worker Dockerfile, RBAC and a pod template (#248).
+- Dagster reads `RUNNER_EXEC_PREFIX`; `just dagster-dev` runs the UI on the local stack (#254).
+- `policies/example.yaml`, a production starting point; GLOSSARY.md.
+
+**Docs.** Prepare your Neo4j servers (#245); choosing a runner mode, permissions per component
+(#255); alerts, a test group and the CLI on Kubernetes; choosing tiers, retention and rpo;
+RECOVERY's users-and-roles section rewritten (#257).
+
+### Operator docs audit (#216)
 
 **Upgrading.**
 - No default `aggregate_cron` (#219): a tier aggregates only if it sets one. Before, every

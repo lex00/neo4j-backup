@@ -12,7 +12,7 @@ from datetime import datetime
 
 from airflow.sdk import dag, task
 
-from neo4j_backup_airflow import config, upload
+from neo4j_backup_airflow import alerts, config, upload
 from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import ops, paths
 from neo4j_backup_core.policy import load_policy, load_policy_at_startup
@@ -56,34 +56,42 @@ def prune_tier(tier: str) -> int:
                      run_admin=run_admin, runner=config.runner(), log=print)["deleted"]
 
 
-def _tier_targets(tier: str) -> list[str]:
+def _tier_targets(tier: str, cluster: str | None = None) -> list[str]:
     pol = load_policy(config.policy_path())
-    return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier) for a in g.names]
+    return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier) for a in g.names
+            if cluster is None or (g.cluster or "default") == cluster]
 
 
-def make_member_dag(tier: str, lane: str, cron: str):
-    """`neo4j_verify_<tier>` / `neo4j_aggregate_<tier>`: one mapped task per member (#104)."""
+def make_member_dag(tier: str, lane: str, cron: str, clusters: list[str] | None = None):
+    """`neo4j_verify_<tier>` / `neo4j_aggregate_<tier>`: one mapped task per member (#104), per
+    cluster in that cluster's full pool (#250): each needs scratch the size of a full."""
     one = verify_one if lane == "verify" else aggregate_one
+    clusters = clusters or ["default"]
 
-    @dag(dag_id=f"neo4j_{lane}_{tier}", schedule=cron, start_date=datetime(2025, 1, 1),
+    @dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id=f"neo4j_{lane}_{tier}", schedule=cron, start_date=datetime(2025, 1, 1),
          catchup=False, max_active_runs=1,
          tags=["neo4j-backup", "verify" if lane == "verify" else "retention", tier])
     def _member():
         @task
-        def targets() -> list[str]:
-            return _tier_targets(tier)
+        def targets(cluster: str) -> list[str]:
+            return _tier_targets(tier, cluster)
 
-        @task(task_id=lane)
+        @task
         def run(group_alias: str) -> dict:
             return one(group_alias)
 
-        run.expand(group_alias=targets())
+        for cluster in clusters:
+            suffix = "" if clusters == ["default"] else f"_{cluster}"
+            run.override(task_id=f"{lane}{suffix}", pool=config.pool_for(cluster, "full")).expand(
+                group_alias=targets.override(task_id=f"targets{suffix}")(cluster))
 
     return _member()
 
 
 def make_prune_dag(tier: str, cron: str):
-    @dag(dag_id=f"neo4j_prune_{tier}", schedule=cron, start_date=datetime(2025, 1, 1),
+    @dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id=f"neo4j_prune_{tier}", schedule=cron, start_date=datetime(2025, 1, 1),
          catchup=False, max_active_runs=1, tags=["neo4j-backup", "retention", tier])
     def _prune():
         @task
@@ -97,7 +105,8 @@ def make_prune_dag(tier: str, cron: str):
 
 def make_cleanup_dag(tier: str, cron: str):
     """`neo4j_cleanup_<tier>` on the tier's `cleanup_cron` (#93): drop superseded databases."""
-    @dag(dag_id=f"neo4j_cleanup_{tier}", schedule=cron, start_date=datetime(2025, 1, 1),
+    @dag(default_args=dict(alerts.DEFAULT_ARGS),  # failure alerts (#246)
+     dag_id=f"neo4j_cleanup_{tier}", schedule=cron, start_date=datetime(2025, 1, 1),
          catchup=False, max_active_runs=1, tags=["neo4j-backup", "cleanup", tier])
     def _cleanup():
         @task
@@ -119,11 +128,13 @@ def make_cleanup_dag(tier: str, cron: str):
 _pol = load_policy_at_startup(config.policy_path(), configured="NEO4J_BACKUP_POLICY" in os.environ)
 if _pol is not None:
     for _tier, _t in _pol.tiers.items():
+        _cls = sorted({g.cluster or "default" for g in _pol.groups_for_tier(_tier)}) or ["default"]
         if _t.verify_cron:
-            globals()[f"neo4j_verify_{_tier}"] = make_member_dag(_tier, "verify", _t.verify_cron)
+            globals()[f"neo4j_verify_{_tier}"] = make_member_dag(_tier, "verify", _t.verify_cron,
+                                                                 _cls)
         if _t.aggregate_cron:
             globals()[f"neo4j_aggregate_{_tier}"] = make_member_dag(_tier, "aggregate",
-                                                                    _t.aggregate_cron)
+                                                                    _t.aggregate_cron, _cls)
         if _t.prune_cron:
             globals()[f"neo4j_prune_{_tier}"] = make_prune_dag(_tier, _t.prune_cron)
         if _t.cleanup_cron:

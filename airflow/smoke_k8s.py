@@ -60,7 +60,9 @@ os.environ.update({
     "RUNNER_HEAP_SIZE": "512M",
     "RUNNER_MEMORY_LIMIT": "1Gi",
     "RUNNER_SCRATCH_STORAGE": "1Gi",
-    "RUNNER_EXTRA_ENV": json.dumps({                 # pod -> host MinIO
+    # the local emulator's fixed keys, as plain env for brevity. Real credentials go through
+    # RUNNER_SECRET_ENV (a Kubernetes Secret) or IRSA; see orchestrator/smoke_k8s_secret.py.
+    "RUNNER_EXTRA_ENV": json.dumps({                 # pod -> host S3 emulator
         "AWS_ACCESS_KEY_ID": "minioadmin", "AWS_SECRET_ACCESS_KEY": "minioadmin",
         "AWS_REGION": "us-east-1", "AWS_ENDPOINT_URL_S3": f"http://{HOST_IP}:9000",
     }),

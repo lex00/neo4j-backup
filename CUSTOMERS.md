@@ -28,8 +28,8 @@ backup schedule. The example tiers:
 
 You can ask for your databases back as they were at the latest backup, or at any point in time
 covered by backups that are still kept (your group's retention, 7 days unless your platform team
-set otherwise). A point in time needs a differential backup after it; between backups, the
-restore lands on the exact time you ask for, as long as a later differential backup exists.
+set otherwise). Any time with a differential backup after it can be restored exactly, to the
+second.
 
 All databases in a group are restored together, to the same instant, so data that refers across
 them stays consistent. If you need only one of them back, say so: the platform team can restore
@@ -51,9 +51,8 @@ with the time restored to and the new database names.
 
 - Your data goes back to the chosen time. Anything written after it is gone. If you need some
   of those writes, export them before the restore.
-- Running transactions are cancelled at the switch. Queries and writes in flight when the
-  alias moves are rolled back. Make sure your applications retry; on a cluster, servers may briefly
-  disagree about where the alias points.
+- Queries and writes in flight when the alias moves are rolled back, so make sure your
+  applications retry. On a cluster, servers may briefly disagree about where the alias points.
 - Your users keep their access. Privileges granted on your database (directly or through the
   alias) are copied to the restored database before the switch. If your users get "Access denied"
   through the alias after a restore, tell the platform team.
