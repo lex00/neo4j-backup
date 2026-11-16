@@ -14,6 +14,7 @@ from datetime import datetime
 from airflow.sdk import dag, task
 
 from neo4j_backup_airflow import config, upload
+from neo4j_backup_airflow.execution import run_admin
 from neo4j_backup_core import ops, paths
 from neo4j_backup_core.policy import load_policy, load_policy_at_startup
 
@@ -29,11 +30,13 @@ def make_system_dag(cluster: str, cron: str):
     def _system():
         @task
         def backup() -> str:
-            store, runner = config.store(), config.runner()
-            prefix = _layout.system_prefix()
-            # admin (direct s3://) or pipeline (local + boto3 upload) per BACKUP_UPLOAD.
-            key = upload.run_backup(runner, store, "system", prefix, "FULL")
-            swept = ops.prune(store, load_policy(config.policy_path()), _layout, groups=[])
+            store = config.store()
+            # admin (direct s3://) or pipeline (local + boto3 upload) per BACKUP_UPLOAD
+            key = ops.system_backup(run_admin, store, config.runner(), _layout,
+                                    upload=upload.BACKUP_UPLOAD, staging=upload.STAGING,
+                                    cluster=cluster)["key"]
+            swept = ops.prune(store, load_policy(config.policy_path()), _layout, groups=[],
+                              cluster=cluster)
             print(f"system backup -> {key}; dbms sweep deleted {swept['deleted']}")
             return key
 
@@ -44,5 +47,5 @@ def make_system_dag(cluster: str, cron: str):
 
 _pol = load_policy_at_startup(config.policy_path(), configured="NEO4J_BACKUP_POLICY" in os.environ)
 if _pol is not None:
-    globals()["neo4j_dbms_system_default"] = make_system_dag("default",
-                                                             _pol.dbms.system_backup_cron)
+    for _cl in _pol.cluster_names():  # one per cluster (#106)
+        globals()[f"neo4j_dbms_system_{_cl}"] = make_system_dag(_cl, _pol.dbms.system_backup_cron)

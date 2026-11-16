@@ -119,6 +119,14 @@ class StoreSet:
             name = "default"
         return self.named(name)
 
+    def for_cluster(self, cluster: str) -> ObjectStore:
+        """The store a cluster's DBMS objects live in (#106)."""
+        try:
+            name = self._pol().cluster_store_name(cluster)
+        except Exception:  # noqa: BLE001
+            name = "default"
+        return self.named(name)
+
     def __getattr__(self, attr):
         return getattr(self.named("default"), attr)
 

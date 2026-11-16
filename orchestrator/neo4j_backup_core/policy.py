@@ -394,8 +394,10 @@ class Policy(BaseModel):
 
     @model_validator(mode="after")
     def _tiers_resolve(self) -> "Policy":
-        if "system" in self.clusters:
-            raise ValueError("cluster name 'system' is reserved")
+        for name in self.clusters:
+            if name == "system" or name.startswith("metadata"):
+                raise ValueError(f"cluster name {name!r} is reserved ('system', 'metadata…': "
+                                 f"they would collide with the default cluster's _dbms/ keys)")
         for name, c in self.clusters.items():
             if c.storage and c.storage != "default" and c.storage not in self.storage:
                 raise ValueError(f"cluster {name!r}: storage {c.storage!r} is not a store")
@@ -469,6 +471,11 @@ class Policy(BaseModel):
         g = self.group(group_id)
         c = self.clusters.get(g.cluster or "default")
         return g.storage or (c.storage if c else None) or "default"
+
+    def cluster_store_name(self, cluster: str) -> str:
+        """The store a cluster's DBMS objects (metadata exports, system backups) go to."""
+        c = self.clusters.get(cluster)
+        return (c.storage if c else None) or "default"
 
     def cluster_name(self, group_id: str) -> str:
         return self.group(group_id).cluster or "default"

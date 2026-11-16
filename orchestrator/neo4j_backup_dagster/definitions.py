@@ -12,6 +12,7 @@ import tempfile
 import dagster as dg
 
 from neo4j_backup_core import capture, ops, paths, record
+from neo4j_backup_core.env import Neo4jSet, RunnerSet, StoreSet
 from neo4j_backup_core.policy import load_policy, load_policy_at_startup, parse_partition_key
 from neo4j_backup_core.until import UntilError, parse_until
 from .resources import Neo4jResource, ObjectStoreResource, RunnerResource
@@ -209,43 +210,58 @@ def prune(
 
 
 # --- System-database binary backup (#15): exact metadata restore (native passwords) ----
+class DbmsConfig(dg.Config):
+    cluster: str = "default"  # which cluster's DBMS (#106)
+
+
 @dg.asset(group_name="neo4j_backup")
 def system_backup(
     context: dg.AssetExecutionContext,
+    config: DbmsConfig,
     store: ObjectStoreResource,
     runner: RunnerResource,
     pipes_subprocess_client: dg.PipesSubprocessClient,
 ) -> dg.MaterializeResult:
-    """Binary backup of the `system` database to the reserved `_dbms/system/` prefix (FULL).
+    """Binary backup of a cluster's `system` database to its `_dbms/` system prefix (FULL).
     Restore is offline + node-local (path B) — see bootstrap/restore_system.sh, not a job."""
-    out = ops.system_backup(_admin(context, runner, pipes_subprocess_client), store, runner,
-                            _layout, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH)
-    context.log.info(f"system backup -> {out['key']}")
-    # DBMS sweep (#104): keep the policy's dbms.keep_system / keep_metadata
-    swept = ops.prune(store, load_policy(POLICY_PATH), _layout, groups=[])
+    stores = StoreSet(store._core(), policy_source=POLICY_PATH)
+    runners = RunnerSet(runner._core(), policy_source=POLICY_PATH)
+    out = ops.system_backup(_admin(context, runner, pipes_subprocess_client), stores, runners,
+                            _layout, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
+                            cluster=config.cluster)
+    context.log.info(f"system backup ({config.cluster}) -> {out['key']}")
+    # DBMS sweep (#104): keep the policy's dbms.keep_system / keep_metadata, this cluster only
+    swept = ops.prune(stores, load_policy(POLICY_PATH), _layout, groups=[],
+                      cluster=config.cluster)
     context.log.info(f"dbms sweep deleted {swept['deleted']}")
-    return dg.MaterializeResult(metadata={"key": out["key"] or ""})
+    return dg.MaterializeResult(metadata={"key": out["key"] or "", "cluster": config.cluster})
 
 
 # --- DBMS metadata export (#14): agentless users/roles/privileges/aliases ---------
 @dg.asset(group_name="neo4j_backup")
 def metadata_export(
     context: dg.AssetExecutionContext,
+    config: DbmsConfig,
     neo4j: Neo4jResource,
     store: ObjectStoreResource,
 ) -> dg.MaterializeResult:
-    """Capture the DBMS metadata layer as replayable Cypher (pure Bolt, no runner) and
-    store it under the reserved `_dbms/` prefix. Restore is `metadata_restore`."""
-    out = ops.export_metadata(neo4j, store, _layout)
-    context.log.info(f"metadata export -> {out['key']} ({out['bytes']} bytes)")
-    swept = ops.prune(store, load_policy(POLICY_PATH), _layout, groups=[])  # DBMS sweep (#104)
+    """Capture a cluster's DBMS metadata layer as replayable Cypher (pure Bolt, no runner) and
+    store it under its `_dbms/` prefix. Restore is `metadata_restore`."""
+    stores = StoreSet(store._core(), policy_source=POLICY_PATH)
+    neos = Neo4jSet(neo4j._core(), policy_source=POLICY_PATH)
+    out = ops.export_metadata(neos, stores, _layout, cluster=config.cluster)
+    context.log.info(f"metadata export ({config.cluster}) -> {out['key']} ({out['bytes']} bytes)")
+    swept = ops.prune(stores, load_policy(POLICY_PATH), _layout, groups=[],
+                      cluster=config.cluster)  # DBMS sweep (#104), this cluster (#106)
     context.log.info(f"dbms sweep deleted {swept['deleted']}")
     return dg.MaterializeResult(
-        metadata={"key": out["key"], "bytes": dg.MetadataValue.int(out["bytes"])})
+        metadata={"key": out["key"], "bytes": dg.MetadataValue.int(out["bytes"]),
+                  "cluster": config.cluster})
 
 
 class MetadataRestoreConfig(dg.Config):
-    key: str | None = None  # default: the latest _dbms/ artifact
+    key: str | None = None  # default: the cluster's latest export
+    cluster: str = "default"  # #106
 
 
 @dg.op
@@ -256,7 +272,9 @@ def metadata_restore_op(
     store: ObjectStoreResource,
 ):
     try:
-        result = ops.restore_metadata(neo4j, store, _layout, config.key)
+        result = ops.restore_metadata(Neo4jSet(neo4j._core(), policy_source=POLICY_PATH),
+                                      StoreSet(store._core(), policy_source=POLICY_PATH),
+                                      _layout, config.key, cluster=config.cluster)
     except ops.OpError as e:
         raise dg.Failure(str(e))
     context.log.info(f"replayed {result['applied']} statements from {result['key']}; "
@@ -359,6 +377,14 @@ def reconcile_registry(context: dg.SensorEvaluationContext):
     return dg.SensorResult(dynamic_partitions_requests=reqs)
 
 
+def _cluster_of(key: str) -> str:
+    """The cluster of a `group/member` partition key (#106), for the `neo4j_cluster` tag."""
+    try:
+        return load_policy(POLICY_PATH).cluster_name(parse_partition_key(key)[0])
+    except Exception:  # noqa: BLE001 - an unknown group still runs, under `default`
+        return "default"
+
+
 def _lane_request(key: str, lane: str, tick: str = "") -> dg.RunRequest:
     kind = "FULL" if lane == "full" else "DIFF"
     return dg.RunRequest(
@@ -366,7 +392,8 @@ def _lane_request(key: str, lane: str, tick: str = "") -> dg.RunRequest:
         # member, lane and tick
         run_key=f"{key}:{lane}:{tick}",
         partition_key=key,
-        tags={"backup_kind": lane},  # tag concurrency limits keep the lanes apart (#6)
+        # tag concurrency limits keep the lanes apart (#6) and cap work per cluster (#106)
+        tags={"backup_kind": lane, "neo4j_cluster": _cluster_of(key)},
         run_config=dg.RunConfig(ops={"backup": BackupConfig(kind=kind)}),
     )
 
@@ -433,20 +460,25 @@ def _make_maintenance_schedule(tier_name: str, lane: str, cron: str, status):
 
     @dg.schedule(job=job, cron_schedule=cron, name=f"{tier_name}_{lane}", default_status=status)
     def _members(context):
-        return [dg.RunRequest(run_key=f"{k}:{lane}:{_tick(context)}", partition_key=k)
+        return [dg.RunRequest(run_key=f"{k}:{lane}:{_tick(context)}", partition_key=k,
+                              tags={"neo4j_cluster": _cluster_of(k)})
                 for k in _tier_keys(context, load_policy(POLICY_PATH), tier_name)]
     return _members
 
 
-def _make_dbms_schedules(policy, status, cluster: str = "default") -> list:
-    """`{cluster}_dbms_metadata` and `{cluster}_dbms_system` from the policy's `dbms:` block
-    (#104); one `default` cluster until #106."""
-    return [
-        dg.ScheduleDefinition(name=f"{cluster}_dbms_metadata", job=dbms_metadata_job,
-                              cron_schedule=policy.dbms.metadata_cron, default_status=status),
-        dg.ScheduleDefinition(name=f"{cluster}_dbms_system", job=dbms_system_job,
-                              cron_schedule=policy.dbms.system_backup_cron, default_status=status),
-    ]
+def _make_dbms_schedules(policy, status) -> list:
+    """`{cluster}_dbms_metadata` and `{cluster}_dbms_system` for every cluster (#106), from the
+    policy's `dbms:` crons (#104); each run is tagged with its cluster."""
+    out = []
+    for cluster in policy.cluster_names():
+        for kind, job, cron, asset in (
+                ("metadata", dbms_metadata_job, policy.dbms.metadata_cron, "metadata_export"),
+                ("system", dbms_system_job, policy.dbms.system_backup_cron, "system_backup")):
+            out.append(dg.ScheduleDefinition(
+                name=f"{cluster}_dbms_{kind}", job=job, cron_schedule=cron,
+                default_status=status, tags={"neo4j_cluster": cluster},
+                run_config={"ops": {asset: {"config": {"cluster": cluster}}}}))
+    return out
 
 
 def _make_schedule(tier_name: str, lane: str, cron: str,

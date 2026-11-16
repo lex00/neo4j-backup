@@ -14,6 +14,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **DBMS jobs and concurrency per cluster** (#106). The metadata export, `system` backup,
+  metadata restore and DBMS sweep run per cluster (CLI `--cluster`; Dagster
+  `<cluster>_dbms_*` schedules; Airflow `neo4j_dbms_*_<cluster>` DAGs). The default cluster keeps
+  `_dbms/`; a named cluster writes under `_dbms/<cluster>/`; metadata listings now use the exact
+  prefix `_dbms/metadata-`. Dagster runs carry a `neo4j_cluster` tag (the sample `dagster.yaml`
+  limits it per cluster); Airflow backup DAGs use per-cluster pools `neo4j_<cluster>_<lane>`
+  (default cluster unchanged). Cluster names `system` and `metadata…` are reserved.
 - **Several clusters in one policy** (#106, first part). `clusters:` names each Neo4j DBMS
   (`bolt_uri`, `user`, `password_ref`, `backup_source` (one or a list), `storage`, `topology`,
   `cypher_version`, `cutover`, `backup_upload`); a group sets `cluster:` (else `default`, from the

@@ -48,7 +48,16 @@ def split_by_base(keys: list[str]) -> dict:
     return out
 
 
-def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str):
+def pool_for(cluster: str, lane: str) -> str:
+    """The Airflow pool for a cluster's lane (#106): `neo4j_<lane>` for the default cluster (as
+    before), `neo4j_<cluster>_<lane>` for a named one."""
+    return f"neo4j_{lane}" if cluster == "default" else f"neo4j_{cluster}_{lane}"
+
+
+def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str,
+                    clusters: list[str] | None = None):
+    clusters = clusters or ["default"]
+
     @dag(
         dag_id=f"neo4j_backup_{tier_name}_{lane}",
         schedule=cron,
@@ -58,47 +67,51 @@ def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str):
         tags=["neo4j-backup", "backup", lane, tier_name],
     )
     def _backup():
-        def _all() -> list[str]:
+        def _all(cluster: str) -> list[str]:
             pol = load_policy(config.policy_path())
-            return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name) for a in g.names]
+            return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name)
+                    if (g.cluster or "default") == cluster for a in g.names]
 
-        if lane == "full":
-            @task
-            def targets() -> list[str]:
-                return _all()
+        for cl in clusters:  # one set of tasks per cluster, in that cluster's pools (#106)
+            sfx = "" if cl == "default" else f"_{cl}"
 
-            @task(pool="neo4j_full")  # lanes: pool neo4j_full (1) / neo4j_diff (N)
-            def backup(group_alias: str) -> dict:
+            if lane == "full":
+                @task(task_id=f"targets{sfx}")
+                def targets(cl=cl) -> list[str]:
+                    return _all(cl)
+
+                @task(task_id=f"backup{sfx}", pool=pool_for(cl, "full"))
+                def backup(group_alias: str) -> dict:
+                    return backup_one(group_alias, "FULL")
+
+                backup.expand(group_alias=targets())
+                continue
+
+            # diff lane (#74): members whose current database has no full to diff against
+            # (just seeded, or recreated by a by-name restore) get a FULL in the full pool instead
+            @task(task_id=f"split{sfx}")
+            def split(cl=cl) -> dict:
+                return split_by_base(_all(cl))
+
+            @task(task_id=f"diff_targets{sfx}")
+            def diff_targets(s: dict) -> list[str]:
+                return s["diff"]
+
+            @task(task_id=f"full_targets{sfx}")
+            def full_targets(s: dict) -> list[str]:
+                return s["full"]
+
+            @task(task_id=f"backup{sfx}", pool=pool_for(cl, "diff"))
+            def backup_diff(group_alias: str) -> dict:
+                return backup_one(group_alias, kind)
+
+            @task(task_id=f"backup_full{sfx}", pool=pool_for(cl, "full"))
+            def backup_full(group_alias: str) -> dict:
                 return backup_one(group_alias, "FULL")
 
-            backup.expand(group_alias=targets())
-            return
-
-        # diff lane (#74): members whose current database has no full to diff against (just
-        # seeded, or recreated by a by-name restore) get a FULL in the full pool instead
-        @task
-        def split() -> dict:
-            return split_by_base(_all())
-
-        @task
-        def diff_targets(s: dict) -> list[str]:
-            return s["diff"]
-
-        @task
-        def full_targets(s: dict) -> list[str]:
-            return s["full"]
-
-        @task(pool="neo4j_diff")
-        def backup(group_alias: str) -> dict:
-            return backup_one(group_alias, kind)
-
-        @task(pool="neo4j_full")
-        def backup_full(group_alias: str) -> dict:
-            return backup_one(group_alias, "FULL")
-
-        s = split()
-        backup.expand(group_alias=diff_targets(s))
-        backup_full.expand(group_alias=full_targets(s))
+            sp = split()
+            backup_diff.expand(group_alias=diff_targets(sp))
+            backup_full.expand(group_alias=full_targets(sp))
 
     return _backup()
 
@@ -112,7 +125,10 @@ _pol = load_policy_at_startup(config.policy_path(),
 if _pol is not None:
     for _tier, _t in _pol.tiers.items():
         # a load-only tier may have neither cron (#103)
+        _cls = sorted({g.cluster or "default" for g in _pol.groups_for_tier(_tier)}) or ["default"]
         if _t.full_cron:
-            globals()[f"neo4j_backup_{_tier}_full"] = make_backup_dag(_tier, "full", _t.full_cron, "FULL")
+            globals()[f"neo4j_backup_{_tier}_full"] = make_backup_dag(
+                _tier, "full", _t.full_cron, "FULL", _cls)
         if _t.diff_cron:
-            globals()[f"neo4j_backup_{_tier}_diff"] = make_backup_dag(_tier, "diff", _t.diff_cron, "DIFF")
+            globals()[f"neo4j_backup_{_tier}_diff"] = make_backup_dag(
+                _tier, "diff", _t.diff_cron, "DIFF", _cls)

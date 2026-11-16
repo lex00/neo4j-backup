@@ -14,6 +14,13 @@ concurrency:
       - key: backup_kind
         value: diff
         limit: 6
+      # Per cluster (#106): at most this many backup runs against any one Neo4j cluster at once,
+      # on top of the lane limits above. Every backup, verify, aggregate and DBMS run carries a
+      # `neo4j_cluster` tag.
+      - key: neo4j_cluster
+        value:
+          applyLimitPerUniqueValue: true
+        limit: 4
   pools:
     # Protect the Neo4j source member: the `backup` asset declares pool="neo4j".
     default_limit: 2

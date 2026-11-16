@@ -48,6 +48,10 @@ class MemStore:
     def list_text_keys(self, prefix, suffix=".cypher"):
         return [(k, T) for k in sorted(self.objects) if k.startswith(prefix) and k.endswith(suffix)]
 
+    def latest_text_key(self, prefix, suffix=".cypher"):
+        keys = [k for (k, _m) in self.list_text_keys(prefix, suffix)]
+        return keys[-1] if keys else None
+
     def put_text(self, key, text):
         self.objects[key] = text
 

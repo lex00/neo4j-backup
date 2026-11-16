@@ -38,6 +38,10 @@ runner command-building + pod spec); each adapter is a thin binding. Architectur
 | `neo4j_metadata_restore` | manual | replay the latest (or a given `key`) against `system` over Bolt. |
 | `neo4j_dbms_system_default` | `dbms.system_backup_cron` (default daily 01:00) | binary `system` backup (exact metadata, native passwords) to `_dbms/system/`, then the same sweep. Restore is offline — `just restore-system`. |
 
+Each backup DAG runs a named cluster's members in the pools `neo4j_<cluster>_full` /
+`neo4j_<cluster>_diff` (the default cluster keeps `neo4j_full` / `neo4j_diff`), and the DBMS
+DAGs exist once per cluster (#106); create the extra pools when you add a cluster.
+
 Every scheduled DAG is generated from the policy at parse time (#104), so adding a tier or
 changing a cron is a policy edit, with no DAG code changes. The fixed `neo4j_verify`,
 `neo4j_aggregate`, `neo4j_prune`, `neo4j_metadata_backup` and `neo4j_system_backup` DAGs of

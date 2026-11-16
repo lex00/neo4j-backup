@@ -146,9 +146,21 @@ db_groups:
 ```
 
 Group ids are unique across the policy, and an alias or database belongs to one group per
-cluster (the same name on two clusters is fine). The cluster name `system` is reserved. Store
-precedence: the group's `storage`, then its cluster's, then `default`. `targets` and the MCP
-status show each group's cluster.
+cluster (the same name on two clusters is fine). Store precedence: the group's `storage`, then
+its cluster's, then `default`. `targets` and the MCP status show each group's cluster.
+
+DBMS-wide jobs run per cluster, on the `dbms:` crons: the metadata export and the `system`
+backup (Dagster `<cluster>_dbms_metadata` / `<cluster>_dbms_system`, Airflow
+`neo4j_dbms_metadata_<cluster>` / `neo4j_dbms_system_<cluster>`, CLI `metadata export|restore
+--cluster` and `system-backup --cluster`). The default cluster keeps the original keys
+(`_dbms/metadata-<ts>.cypher`, `_dbms/system/`); a named cluster writes under `_dbms/<cluster>/`
+in its store. Listings use exact prefixes, so no cluster sees another's exports; the cluster
+names `system` and `metadata…` are reserved for that reason.
+
+Concurrency per cluster: every Dagster run carries a `neo4j_cluster` tag (limit it in
+`dagster.yaml` with `applyLimitPerUniqueValue`, as the sample does), alongside `backup_kind`.
+Airflow backup DAGs run each cluster's members in its own pools: `neo4j_<lane>` for the default
+cluster (unchanged) and `neo4j_<cluster>_<lane>` for a named one; create those pools.
 
 ## Storage
 
