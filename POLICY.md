@@ -35,7 +35,7 @@ db_groups:
 
     tenant: acme-corp               # [used] label for selecting a customer's groups (--tenant)
     storage: finance                # [used] the named store for this group's backups
-    rpo_minutes: 60                 # [decl] target, not enforced
+    rpo_minutes: 60                 # freshness: `status` reports a target stale past it (#123)
     rto_minutes: 120                # [decl] target, not enforced
     encryption:                     # [decl] recorded intent; SSE-KMS is applied by your bucket
       mode: sse-kms                 #        one of: sse-kms | client-side | none
@@ -212,7 +212,7 @@ configured `SECRET_PROVIDER`. An S3 `credentials_ref` resolves to JSON:
 | `s3_prefix` | string | `null` | deprecated | never read; logs a warning. Use `storage` |
 | `tenant` | string | `null` | used | a label for selecting a customer's groups: `backup`, `verify`, `aggregate` and `targets` take `--tenant <t>` instead of a group, and MCP read and backup tools take `tenant` (#102). **It is a label, not an access control**: the deployment can reach every database in its clusters whatever the tenant. Settable in a profile. `restore` stays per group |
 | `owner` | string | `null` | deprecated | the old name for `tenant`; still read as the tenant, with a warning |
-| `rpo_minutes` | int | `60` | decl | target, not enforced |
+| `rpo_minutes` | int | `60` | wired | how old a member's newest backup or load may be before `status` (CLI) and `backup_status` (MCP) report it `stale` (#123); policy load warns when the tier's `diff_cron` (or `rebuild_cron`, for a group not backed up by design) runs further apart. A profile can set it |
 | `rto_minutes` | int | `120` | decl | target, not enforced |
 | `encryption` | object | `{mode: sse-kms}` | decl | recorded intent; SSE-KMS applied by your bucket |
 | `topology` | object | `null` | used | cluster shape seeded on restore/import; omit for standalone |

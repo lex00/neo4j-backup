@@ -36,7 +36,7 @@ Read-only (always available):
 | `list_targets(group, tenant)` | every group/member the policy covers (or one group's or tenant's), with each group's tenant |
 | `latest_artifact(group, member)` | the chain head for one member |
 | `show_chain(group, member)` | the member's artifacts, oldest first, and its chains (full then diffs, per database folder) with the time window each covers, read from the artifact sidecars, and its load artifacts (`loads`, under `_seed/`) |
-| `backup_status(tenant)` | every target's (or one tenant's) latest artifact, its age in hours, its tenant and cluster, and its latest load artifact |
+| `backup_status(tenant)` | every target's (or one tenant's) latest artifact and load, its age, tenant and cluster, and its state against `rpo_minutes`: `ok`, `stale` or `by_design` (#123); `stale` lists the stale targets |
 | `restore_points(group, tenant)` | per member: the current database, each chain's point-in-time window, load artifacts, gaps, and the restore command for each (#113) |
 | `preview_restore(group, replace)` | the restore plan / blast radius, without mutating |
 | `preview_prune` | the artifacts retention would delete, without deleting (whole chains only; `kept_for_chains`, `unknown_kept`) |

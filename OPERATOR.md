@@ -99,8 +99,12 @@ adopted target is recorded for `rollback` and `cleanup`. MCP has `run_adopt`.
 
 - Runs: failed backups show as failed runs in Dagster or Airflow, or as a non-zero exit from
   the CLI in CI or cron.
-- Freshness: the MCP tool `backup_status` lists every target's newest backup and its age in
-  hours ([MCP.md](MCP.md)).
+- Freshness: `neo4j-backup status` (or `--tenant <t>`, or one group) gives each target's newest
+  restorable point (backup or load) and a state against the group's `rpo_minutes`: `ok`,
+  `stale`, or `by_design` for members not backed up by design (#112). `status --stale` exits 1
+  when any target is stale, so cron or CI can alert on it. The MCP tool `backup_status` returns
+  the same ([MCP.md](MCP.md)). Policy load warns when a tier's cadence can't meet a group's
+  `rpo_minutes` (#123).
 - Restorability: `neo4j-backup verify <group>` copies the latest backups aside, combines them
   into a full backup and runs a consistency check, without touching the cluster. It runs on each
   tier's `verify_cron` (default daily 06:00): Dagster's `<tier>_verify` schedule, Airflow's
@@ -109,9 +113,6 @@ adopted target is recorded for `rollback` and `cleanup`. MCP has `run_adopt`.
 
 - Restore points: `neo4j-backup restore-points <group>` (or `--tenant <t>`) shows what each member
   can be restored to, and any gaps.
-
-**Planned:** freshness checked against each group's `rpo_minutes`
-([#123](https://github.com/lex00/neo4j-backup/issues/123)).
 
 ## Restore on a customer's request
 

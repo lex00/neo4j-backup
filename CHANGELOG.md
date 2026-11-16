@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Freshness against `rpo_minutes`** (#123): CLI `status [group|--tenant t] [--stale]` and MCP
+  `backup_status` give each target's newest restorable point (backup or load) and a state:
+  `ok`, `stale` or `by_design` (#112). `--stale` exits 1 when any target is stale. Policy load
+  warns when a tier's cadence is longer than a group's `rpo_minutes`.
 - **`adopt <group>`** (#92; MCP `run_adopt`): puts existing databases behind the group's
   aliases from `overrides.<alias>.adopt_from` (create, skip or conflict per member; any
   conflict stops it). `--migrate --replace` handles a database with the alias's own name: back
