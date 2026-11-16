@@ -5,9 +5,24 @@ up, on what schedule, and how long to keep it**. Everything else (env vars, the 
 the schedules) just serves the policy. It is the one file you must author.
 
 - Loaded from the path in the `NEO4J_BACKUP_POLICY` env var (default `policies/demo.yaml`).
-- Schema (authoritative): `orchestrator/neo4j_backup_dagster/policy.py`.
+- Schema (authoritative): `orchestrator/neo4j_backup_core/policy.py`.
 - Validated on load: aliases must be legal Neo4j aliases, and every group's `tier` must
   exist under `tiers`.
+
+## Policy or environment
+
+The policy says what each customer gets; the deployment's environment says how this
+installation reaches things. As a rule of thumb:
+
+| In the policy | In the environment |
+|---|---|
+| groups, members, tiers and schedules, retention, `rpo_minutes` | the policy's location (`NEO4J_BACKUP_POLICY`, `POLICY_CACHE_TTL`, `POLICY_LOADER`) |
+| profiles, tenants, `load:` (mode, writes, build, checks) | the `default` cluster and store when the policy doesn't define them (`NEO4J_BOLT_URI`, `NEO4J_BACKUP_SOURCE`, `BACKUP_BUCKET`, `CLOUD`, `AWS_REGION`, ...) |
+| named `clusters:` and `storage:` with secret references | secrets themselves (`NEO4J_PASSWORD`, `SECRET_PROVIDER`, cloud credentials) |
+| `naming:` and per-member `overrides` | runner settings (`RUNNER_PAGECACHE`, `SCRATCH_PATH`, `RUNNER_EXEC_PREFIX`), `BACKUP_UPLOAD` |
+| `dbms:` crons, `schedules: running` | hooks (`PATH_LAYOUT`, `NAMING`, `CUTOVER_STRATEGY`), `NEO4J_BACKUP_REQUIRE_TICKET` |
+
+The full environment list is in [orchestrator/README.md](orchestrator/README.md).
 
 ## A complete policy
 

@@ -25,6 +25,23 @@ recovery. In practice the same seed-and-cutover is driven for a whole group by a
 `--confirm` (add `--until <iso>` for PITR). An operator can also drive it through an agent via the
 [MCP server](MCP.md). All of these run the exact commands below; see [CLI-CONTRACT.md](CLI-CONTRACT.md).
 
+## A customer's request, in short
+
+The full runbook is in [OPERATOR.md](OPERATOR.md#restore-on-a-customers-request). The steps:
+
+1. Agree the group (or members), the time in UTC or "latest", and the ticket.
+2. `neo4j-backup --json restore-points <group>`: what each member can be restored to, and gaps.
+3. `neo4j-backup restore <group> --until <T> --dry-run`: the backups chosen per member, the
+   privileges carried over, anything dropped.
+4. `neo4j-backup --json restore <group> --until <T> --confirm --ticket <ref> --reason "..."`
+   (#119). The ticket and reason go to the log and the result.
+5. The restore takes a full backup of each new database (the baseline, #97), so the next
+   differential has a base. Check `result.baseline`.
+6. Report back: the time restored to, the new database names, the baseline, and that writes
+   after the time are gone.
+7. To undo: `neo4j-backup rollback <group> --confirm` points every alias back at the database it
+   served before (#122), as long as cleanup hasn't dropped it.
+
 ## The three recovery modes
 
 All three are the same `CREATE DATABASE … seedURI` command; they differ only in which

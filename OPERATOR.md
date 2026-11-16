@@ -119,8 +119,9 @@ adopted target is recorded for `rollback` and `cleanup`. MCP has `run_adopt`.
 ### 1. Get the request straight
 
 Ask the customer for the group or alias, the point in time in UTC (or "latest"), and your ticket
-reference. Check that they understand a restore covers every database in the group: they all go
-back to the same instant.
+reference. Check that they understand a restore covers every database in the group, so they all
+go back to the same instant. If they want only some of them, `--member <alias>` restores those
+alone (#121), and the dry-run warns that they will no longer line up in time with the rest.
 
 ### 2. See what can be restored
 
