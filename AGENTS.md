@@ -50,6 +50,7 @@ Configuration is environment + policy (`NEO4J_PASSWORD`, `NEO4J_BOLT_URI`, `BACK
 | `policy validate <file>` | Validate a policy file (no cluster or store); exit `2` if invalid | no | |
 | `policy check` | List, write and delete a probe in every store the policy uses; exit `1` if any fails | probe only | |
 | `backup <group>` | Back up every database in a group | writes artifacts | `--kind AUTO\|FULL\|DIFF`, `--tenant <t>` instead of a group |
+| `restore-points <group>` | What each member can be restored to: chains and windows, loads, gaps, commands (read-only) | no | `--tenant <t>` |
 | `verify <group>` | Consistency-check the latest backups (non-destructive) | no | `--tenant <t>` instead of a group |
 | `aggregate <group>` | Collapse each chain into one recovered full, in place | **yes** | `--dry-run`, `--confirm`, `--ticket`, `--reason`, `--tenant <t>` instead of a group |
 | `restore <group>` | Restore a group (alias-swap or by-name) | **yes** | `--until <iso>`, `--from-load`, `--from-dump M=K`, `--replace`, `--no-baseline`, `--dry-run`, `--confirm`, `--ticket`, `--reason` |
