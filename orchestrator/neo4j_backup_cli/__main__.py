@@ -256,6 +256,18 @@ def cmd_load(args):
     return envelope("load", ok=True, group=group.id, result=out), Exit.OK
 
 
+def cmd_rollback(args):
+    """Point each alias back at its previous database (#122)."""
+    group = _group(args)
+    store, neo = env.store(), env.neo4j()
+    plan = ops.rollback(neo, store, group, members=args.member, dry_run=True)
+    short = _guard("rollback", group.id, {"plan": plan}, args.confirm, args.dry_run)
+    if short:
+        return short
+    out = ops.rollback(neo, store, group, members=args.member, log=_log)
+    return envelope("rollback", ok=True, group=group.id, result=out), Exit.OK
+
+
 def cmd_export(args):
     """A portable dump per member, at --until or the latest backup (#160). Writes to `_seed/`;
     never touches the cluster. Guarded like the other writes that act on a whole group."""
@@ -448,6 +460,13 @@ def build_parser() -> argparse.ArgumentParser:
     ld.add_argument("--reapply-access", action="store_true",
                     help="only apply the policy's `writes` to the current databases (#112)")
     ld.set_defaults(func=_recorded(cmd_load))
+
+    rb = guarded(sub.add_parser("rollback", help="point each alias back at the database it "
+                                                 "targeted before the last swap (#122)"))
+    rb.add_argument("group")
+    rb.add_argument("--member", action="append", metavar="ALIAS",
+                    help="only this member (repeatable)")
+    rb.set_defaults(func=_recorded(cmd_rollback))
 
     ex = guarded(sub.add_parser("export", help="a portable .dump of each member, at --until or "
                                                "the latest backup (#160)"))

@@ -308,6 +308,23 @@ def run_load(group: str, confirm: bool = False, dry_run: bool = False, replace: 
                 "failed_step": e.step, **e.result}
 
 
+@_recorded
+def run_rollback(group: str, members: list[str] | None = None, confirm: bool = False,
+                 dry_run: bool = False, ticket: str | None = None,
+                 reason: str | None = None) -> dict:
+    """Point each alias back at the database it targeted before the most recent swap (#122).
+    Needs confirm=true; dry_run returns the plan. Refuses if the previous database is gone."""
+    g = load_policy(env.policy_path()).group(group)
+    store, neo = env.store(), env.neo4j()
+    plan = ops.rollback(neo, store, g, members=members, dry_run=True)
+    if dry_run:
+        return plan
+    if not confirm:
+        return _needs_confirmation("rollback", {"plan": plan})
+    return ops.rollback(neo, store, g, members=members, log=_log)
+
+
 READ_TOOLS = [list_targets, latest_artifact, show_chain, backup_status, restore_points,
               preview_restore, preview_prune]
-WRITE_TOOLS = [run_backup, run_verify, run_aggregate, run_restore, run_prune, run_load]
+WRITE_TOOLS = [run_backup, run_verify, run_aggregate, run_restore, run_prune, run_load,
+               run_rollback]

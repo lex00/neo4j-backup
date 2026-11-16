@@ -101,7 +101,7 @@ def neo4j_restore():
     @task
     def swap(seeded: list[dict]) -> list[dict]:  # barrier: runs once, after every seed completes
         seeded = list(seeded)
-        ops.cutover_seeded(config.neo4j(), seeded, log=print)
+        ops.cutover_seeded(config.neo4j(), seeded, log=print, store=config.store())
         return seeded
 
     @task(pool="neo4j_full")  # a full backup: the full lane's pool (#97)
@@ -125,3 +125,28 @@ def neo4j_restore():
 
 
 neo4j_restore_dag = neo4j_restore()  # the DAG object (Airflow discovers it in globals)
+
+
+@dag(dag_id="neo4j_rollback", schedule=None, start_date=datetime(2025, 1, 1), catchup=False,
+     params={"group_id": Param("demo", type="string"), "members": Param([], type="array"),
+             "ticket": Param(None, type=["null", "string"]),
+             "reason": Param(None, type=["null", "string"])},
+     tags=["neo4j-backup", "restore", "rollback"])
+def neo4j_rollback():
+    @task
+    def rollback() -> dict:
+        p = get_current_context()["params"]
+        rec = record.fields(p.get("ticket"), p.get("reason"), applying=True)
+        print(record.describe("rollback", rec))
+        group = load_policy(config.policy_path()).group(p["group_id"])
+        try:
+            out = ops.rollback(config.neo4j(), config.store(), group,
+                               members=list(p.get("members") or []) or None, log=print)
+        except ops.OpError as e:
+            raise RuntimeError(str(e))
+        return {**out, **rec}
+
+    rollback()
+
+
+neo4j_rollback_dag = neo4j_rollback()

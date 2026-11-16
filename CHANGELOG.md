@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **`rollback <group>`** (#122; MCP `run_rollback`, Dagster `rollback_job`, Airflow
+  `neo4j_rollback`): points each alias back at its database before the most recent swap, from
+  `_state/<group>.json`, which every restore, load and rebuild now writes. Refuses if the previous
+  database is gone; copies privileges granted since the swap; no baseline.
 - **Restore some members of a group** (#121): `restore --member <alias>` (repeatable; MCP
   `members`, Dagster config `members`, Airflow param `members`). The dry-run warns that they will
   no longer be aligned in time with the rest; privileges, baseline and chain choice apply per
