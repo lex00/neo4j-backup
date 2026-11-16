@@ -111,5 +111,8 @@ _pol = load_policy_at_startup(config.policy_path(),
                               configured="NEO4J_BACKUP_POLICY" in os.environ)
 if _pol is not None:
     for _tier, _t in _pol.tiers.items():
-        globals()[f"neo4j_backup_{_tier}_full"] = make_backup_dag(_tier, "full", _t.full_cron, "FULL")
-        globals()[f"neo4j_backup_{_tier}_diff"] = make_backup_dag(_tier, "diff", _t.diff_cron, "DIFF")
+        # a load-only tier may have neither cron (#103)
+        if _t.full_cron:
+            globals()[f"neo4j_backup_{_tier}_full"] = make_backup_dag(_tier, "full", _t.full_cron, "FULL")
+        if _t.diff_cron:
+            globals()[f"neo4j_backup_{_tier}_diff"] = make_backup_dag(_tier, "diff", _t.diff_cron, "DIFF")

@@ -8,6 +8,12 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 ## [Unreleased]
 
 ### Added
+- **`load:` block in the policy** (#103): `mode` (live, once, rebuild), `writes`, `protect_writes`,
+  `keep_loads`, `baseline`, `source` and `build`, with validation of the combinations (errors name
+  the group). Groups without it behave as before. Tiers gain `rebuild_cron`; `full_cron` and
+  `diff_cron` become optional, so a tier for load-only groups can have only `rebuild_cron` (no
+  backup schedules are built for a missing cron). Schema only: loads and rebuilds come with #107
+  and #108.
 - **`--ticket` and `--reason`** (#119) on every mutating CLI command (`restore`, `aggregate`,
   `prune`, `metadata restore`), the MCP write tools, the Dagster restore job (config, plus run tags
   `neo4j_backup/ticket` / `neo4j_backup/reason`) and the Airflow restore DAG (params). Logged and
