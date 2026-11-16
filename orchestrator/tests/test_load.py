@@ -251,9 +251,12 @@ def test_image_build_writes_to_output_uri_then_imports(monkeypatch):
     def run(cmd, env=None, image=None):
         seen.append((cmd, env, image))
         return IMPORT_OUT
+    logged = []
     L.load_group(run, BackupRunner(), Neo(), MemStore(), LAYOUT,
-                 cmd_group(command=[], image="registry/rdf:1"))
+                 cmd_group(command=[], image="registry/rdf:1"), log=logged.append)
     assert seen[0][2] == "registry/rdf:1" and seen[0][0] == ["--in", "src"]
+    # the build pod's output goes to the run's log (#109; seen missing on k3d)
+    assert any(x.startswith("build: ") for x in logged), logged
     out_uri = seen[0][1]["OUTPUT_URI"]
     assert f"--nodes={out_uri}nodes.csv" in seen[1][0][2]  # the import reads what it wrote
 

@@ -128,7 +128,7 @@ def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool 
             prefix = f"{layout.load_prefix(group.id, name)}{ts}/"
             if load.build.kind == "command":
                 out = _command_build(run_admin, runner, store, src_store, group, name, local,
-                                     sp, prefix, ts)
+                                     sp, prefix, ts, log=log)
             else:
                 args = resolve_args(load.build.args, lambda p, sp=sp: src_store.uri(sp + p))
                 if load.build.input_type == "parquet":
@@ -232,7 +232,8 @@ def build_env(build) -> dict:
             for k, v in build.env.items()}
 
 
-def _command_build(run_admin, runner, store, src_store, group, name, local, sp, prefix, ts):
+def _command_build(run_admin, runner, store, src_store, group, name, local, sp, prefix, ts,
+                   log=_NOLOG):
     """A `kind: command` build (#109). `command` runs in the runner in one step with the import
     and dump (its work dir lives only as long as that step). `image` runs as its own pod (k8s
     runner modes) and must write its output to OUTPUT_URI in the store; then the built-in
@@ -245,7 +246,9 @@ def _command_build(run_admin, runner, store, src_store, group, name, local, sp, 
            **build_env(b)}
     env.update(store.admin_env() if hasattr(store, "admin_env") else {})
     if b.image:
-        run_admin([*b.command, *b.args], env=env, image=b.image)  # writes to OUTPUT_URI
+        built = run_admin([*b.command, *b.args], env=env, image=b.image)  # writes OUTPUT_URI
+        for line in (built or "").splitlines():  # the build's own log, in the run's log (#109)
+            log(f"build: {line}")
         if b.output == "dump":
             raise OpError("an image build with output 'dump' is not supported yet: write CSV or "
                           "Parquet to OUTPUT_URI with output 'import'")

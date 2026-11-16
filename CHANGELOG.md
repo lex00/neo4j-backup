@@ -219,6 +219,8 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- An `image` build's output (k8s runner) is written to the run's log, as a `command` build's
+  already was (#109; found on k3d).
 - Azure downloads read 4 MiB at a time, one request at a time (#79): with the SDK defaults a
   64 MiB blob held ~288 MiB; now the peak stays ~40 MiB at any size (measured on Azurite).
 - Mixed-case aliases (#206): Neo4j stores alias names lowercase, so `alias_target` and
