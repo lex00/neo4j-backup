@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Policy `naming:` block** (#88): `physical_template` (`{alias}`, `{slug}`, `{group}`,
+  `{ts}`) and `ts_format`, at the top level, in a profile or per group. Defaults reproduce
+  today's names; every member's name is checked at policy load. Used by restore, load, adopt,
+  restore into another cluster, the Airflow restore DAG and cleanup.
 - **Offboarding: retired groups** (#124): `state: retired` with `retired_on` and
   `retire_after_days` stops a group's schedules; its artifacts stay restorable until the period
   ends, then prune deletes them. `status` lists retired groups with `deletes_on`, and store

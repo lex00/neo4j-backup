@@ -837,7 +837,7 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
                                uri=seed.get("uri"))
         return {**out, "seed": seed}
     old = neo4j.alias_target(name)  # captured before cutover (for external routing #17)
-    newdb = naming.scheme().physical(name, ts or naming.ts(), old)  # (#89)
+    newdb = naming.for_group(group).physical(name, ts or naming.ts_for(group), old)  # #88, #89
     if newdb == old or (hasattr(neo4j, "database_exists") and neo4j.database_exists(newdb)):
         # a name-reusing scheme (blue/green) must not seed over a database in use (#89)
         raise OpError(f"{group.id}/{name}: the new physical name {newdb!r} is already taken"
@@ -896,7 +896,7 @@ def plan_cleanup(neo4j, group, *, keep: int = 1, older_than_days: float | None =
         if group.restore_mode == "by-name":
             continue  # restored in place: no superseded physicals
         current = neo4j.alias_target(name)
-        mine = [d for d in all_dbs if naming.scheme().owns(name, d) and d != current]
+        mine = [d for d in all_dbs if naming.for_group(group).owns(name, d) and d != current]
         created = {d: neo4j.database_created(d) for d in mine}
         newest_first = sorted(mine, key=lambda d: created[d] or now, reverse=True)
         kept = newest_first[:keep]
@@ -1089,7 +1089,7 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
                                    uri=seeds[name].get("uri"))
             members.append({**out, "seed": seeds[name]})
         return {"mode": "by-name", "members": members}
-    ts = naming.ts()  # one timestamp for every physical seeded in this group restore
+    ts = naming.ts_for(group)  # one timestamp for every physical seeded in this restore
     members = seed_all(neo4j, group, group.names, lambda name: seed_member(
         neo4j, store, group, layout, name, restore_until=restore_until,
         cypher_version=cypher_version, ts=ts, log=log, seed=seeds[name]), log=log)

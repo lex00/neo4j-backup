@@ -417,7 +417,9 @@ Everything below is optional and defaults to the tested behaviour. The full list
 - Cutover: the default moves the alias; `CUTOVER_STRATEGY=external` calls your hook to repoint
   a router or proxy instead.
 - Storage layout: `PATH_LAYOUT` brings your own bucket key scheme.
-- Database names: `NAMING=module.Class` brings your own scheme (#89). For example, two fixed
+- Database names: the policy's `naming:` block sets a template such as `prod-{slug}-{ts}`
+  ([POLICY.md](POLICY.md#database-names), #88). For schemes a template can't express,
+  `NAMING=module.Class` brings your own (#89). For example, two fixed
   names per alias that a restore flips between:
 
   ```python

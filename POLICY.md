@@ -195,6 +195,26 @@ the servers must be able to read.
 configured `SECRET_PROVIDER`. An S3 `credentials_ref` resolves to JSON:
 `{"access_key_id": "…", "secret_access_key": "…", "session_token": "…"}` (token optional).
 
+## Database names
+
+Each alias-swap restore, load or adopt migration creates a new database. By default it's named
+`<slug>-<ts>` (`orders-20261116t120000`). A `naming:` block changes that (#88), for the whole
+policy, in a profile, or on one group (the most specific wins):
+
+```yaml
+naming:
+  physical_template: "prod-{slug}-{ts}"   # default "{slug}-{ts}"
+  ts_format: "%Y%m%dt%H%M"                # default NAMING_TS_FMT, else %Y%m%dt%H%M%S
+```
+
+Fields: `{alias}` (the alias, lowercased and sanitized), `{slug}`, `{group}`, `{ts}`. The
+template must contain `{ts}`, so each restore gets a new name, and `ts_format` can't contain `-`.
+When the policy loads, every member's name is rendered with a sample timestamp and checked
+against Neo4j's rules (a leading letter, `[a-z0-9.-]`, at most 63 characters), so a bad
+template fails there rather than at a restore. `cleanup` recognises names made from the
+template. A `NAMING=module.Class` hook (#89) takes precedence over the block. The shell
+scripts under `bootstrap/` use the default names only.
+
 ## Field reference
 
 **`db_groups[]`**
@@ -212,6 +232,7 @@ configured `SECRET_PROVIDER`. An S3 `credentials_ref` resolves to JSON:
 | `s3_prefix` | string | `null` | deprecated | never read; logs a warning. Use `storage` |
 | `tenant` | string | `null` | used | a label for selecting a customer's groups: `backup`, `verify`, `aggregate` and `targets` take `--tenant <t>` instead of a group, and MCP read and backup tools take `tenant` (#102). **It is a label, not an access control**: the deployment can reach every database in its clusters whatever the tenant. Settable in a profile. `restore` stays per group |
 | `owner` | string | `null` | deprecated | the old name for `tenant`; still read as the tenant, with a warning |
+| `naming` | map | `null` | wired | `physical_template`, `ts_format` for new database names (#88); see [Database names](#database-names). Also settable at the top level and in a profile |
 | `state` | `active` \| `retired` | `active` | wired | offboarding (#124): a retired group has no schedules; its artifacts stay restorable until `retired_on` + `retire_after_days`, then prune deletes them |
 | `retired_on` | date | `null` | wired | required with `state: retired`: the day the retention period starts |
 | `retire_after_days` | int | `retention_days` | wired | how long a retired group's artifacts are kept |

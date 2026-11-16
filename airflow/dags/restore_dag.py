@@ -72,7 +72,7 @@ def neo4j_restore():
             "members": list(ctx["params"].get("members") or []),
             **rec,
             "mode": load_policy(config.policy_path()).group(gid).restore_mode,
-            "ts": naming.ts(),               # one timestamp for the whole group
+            "ts": naming.ts_for(load_policy(config.policy_path()).group(gid)),  # #88
         }
 
     @task
