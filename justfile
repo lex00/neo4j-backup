@@ -90,6 +90,11 @@ sidecar-smoke:
 load-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_load.py
 
+# Rebuild lane (#108): the Dagster `<tier>_rebuild` schedule and the Airflow `neo4j_rebuild_<tier>` DAG
+rebuild-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_rebuild_dagster.py
+    airflow/.venv/bin/python airflow/smoke_rebuild.py
+
 # Dump path (#161): import -> dump -> seed -> baseline -> diff -> point-in-time -> export
 dump-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_dump.py
