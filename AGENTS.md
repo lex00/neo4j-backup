@@ -92,7 +92,7 @@ after the human approves what the dry-run showed.
 
 If you would rather call typed tools than compose shell commands, an optional MCP server exposes the
 same operations — read-only by default, with the same confirm / dry-run / verify-before-drop guards.
-It is an ergonomic wrapper over this same contract, not a different interface. See [MCP.md](MCP.md).
+It returns the same results as the CLI; see [MCP.md](MCP.md).
 
 ## More
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from contextlib import contextmanager
 from typing import Protocol, runtime_checkable
 
@@ -24,17 +25,46 @@ class Neo4jClient:
         # A callable is invoked per connect in _driver(), so a rotated secret is picked up on
         # the next connection.
         self.uri, self.user, self.password = uri, user, password
+        self._drv, self._drv_at = None, 0.0
+
+    # One driver per client, reused across statements (#230): a driver per statement meant a
+    # new connection pool and, with a secret provider, a secret fetch for every Cypher statement.
+    # Rotation still works: any failure drops the driver, so the retry connects again and
+    # re-resolves the secret, and a driver older than NEO4J_DRIVER_MAX_AGE seconds (default 600)
+    # is replaced.
+    def _get_driver(self):
+        import time
+
+        from neo4j import GraphDatabase
+
+        max_age = float(os.environ.get("NEO4J_DRIVER_MAX_AGE", "600"))
+        if self._drv is not None and time.monotonic() - self._drv_at > max_age:
+            self._drop_driver()
+        if self._drv is None:
+            pw = self.password() if callable(self.password) else self.password
+            self._drv = GraphDatabase.driver(self.uri, auth=(self.user, pw))
+            self._drv_at = time.monotonic()
+        return self._drv
+
+    def _drop_driver(self):
+        drv, self._drv = self._drv, None
+        if drv is not None:
+            try:
+                drv.close()
+            except Exception:  # noqa: BLE001 - already broken
+                pass
 
     @contextmanager
     def _driver(self):
-        from neo4j import GraphDatabase
-
-        pw = self.password() if callable(self.password) else self.password
-        driver = GraphDatabase.driver(self.uri, auth=(self.user, pw))
+        """The shared driver; dropped (and rebuilt on next use) if the block raises."""
         try:
-            yield driver
-        finally:
-            driver.close()
+            yield self._get_driver()
+        except BaseException:
+            self._drop_driver()
+            raise
+
+    def close(self):
+        self._drop_driver()
 
     def run_on(self, database: str, cypher: str, **params):
         """Run Cypher against `database`, returning row dicts, with the transient-retry
@@ -60,7 +90,7 @@ class Neo4jClient:
     # the clustered `TOPOLOGY n PRIMARIES m SECONDARIES` clause; omit for standalone.
     def seed_database(self, name: str, seed_uri: str, restore_until: str | None = None,
                       topology=None, cypher_version: str | None = None,
-                      store_base: str | None = None):
+                      store_base: str | None = None, wait_seconds: int | None = None):
         # `store_base` (the store's `uri("")`): the seed URI must be inside it (#77)
         if store_base is not None and not seed_uri.startswith(store_base):
             raise ValueError(f"seed URI {seed_uri!r} is not in the backup store {store_base!r}")
@@ -76,7 +106,22 @@ class Neo4jClient:
             from .until import parse_until  # normalised here too: never the raw input (#77)
 
             opts += f", seedRestoreUntil: datetime('{parse_until(restore_until)}')"
-        self.run_system(f"{prefix}CREATE DATABASE {quote(name)}{topo} OPTIONS {{ {opts} }} WAIT")
+        # A plain WAIT gives up after 300 s and returns a row with success=false instead of
+        # raising (#221), so wait as long as the group allows and check every row.
+        wait = int(wait_seconds or os.environ.get("NEO4J_SEED_WAIT_SECONDS", "3600"))
+        rows = self.run_system(f"{prefix}CREATE DATABASE {quote(name)}{topo} OPTIONS {{ {opts} }} "
+                               f"WAIT {wait} SECONDS")
+        failed = [r for r in rows or [] if r.get("success") is False]
+        if failed:
+            raise RuntimeError(f"CREATE DATABASE {name} didn't finish within {wait}s: "
+                               + "; ".join(f"{r.get('address')}: {r.get('state')} "
+                                           f"{r.get('message') or ''}".strip() for r in failed))
+
+    def database_online(self, name: str) -> bool:
+        """Every server hosting `name` reports it online (#221)."""
+        rows = self.run_system(
+            f"SHOW DATABASE {quote(name)} YIELD currentStatus RETURN currentStatus")
+        return bool(rows) and all(r["currentStatus"] == "online" for r in rows)
 
     def alter_alias(self, alias: str, target: str):
         self.run_system(f"ALTER ALIAS {quote(alias)} SET DATABASE TARGET {quote(target)}")
@@ -651,6 +696,11 @@ class GcsObjectStore(_BaseObjectStore):
                 for b in self._b().list_blobs(prefix=prefix) if b.name.endswith(suffix)]
 
 
+# env names that carry credentials (#229)
+_SENSITIVE = re.compile(r"(SECRET|PASSWORD|TOKEN|SESSION|CONNECTION_STRING|ACCESS_KEY|"
+                        r"CREDENTIAL|PRIVATE)", re.IGNORECASE)
+
+
 class BackupRunner:
     """neo4j-admin command building + the validated memory/scratch caps (DESIGN.md §5.5)
     and the k8s pod spec. Execution (subprocess vs pod) is the adapter's job."""
@@ -660,7 +710,9 @@ class BackupRunner:
                  neo4j_admin: str = "neo4j-admin", exec_prefix: list | None = None,
                  mode: str = "subprocess", image: str = "", node_selector_json: str = "{}",
                  memory_limit: str = "4Gi", scratch_storage: str = "6Ti",
-                 service_account: str = "", extra_env_json: str = "{}"):
+                 service_account: str = "", extra_env_json: str = "{}",
+                 namespace: str = "", cpu_request: str = "", memory_request: str = "",
+                 tolerations_json: str = "[]", secret_env_json: str = "{}"):
         self.backup_source, self.scratch_path = backup_source, scratch_path
         self.pagecache, self.heap_size = pagecache, heap_size
         self.neo4j_admin, self.exec_prefix = neo4j_admin, list(exec_prefix or [])
@@ -668,6 +720,10 @@ class BackupRunner:
         self.node_selector_json, self.memory_limit = node_selector_json, memory_limit
         self.scratch_storage, self.service_account = scratch_storage, service_account
         self.extra_env_json = extra_env_json
+        # k8s pods (#229): namespace, requests, tolerations, and env from k8s Secrets
+        self.namespace, self.cpu_request, self.memory_request = namespace, cpu_request, \
+            memory_request
+        self.tolerations_json, self.secret_env_json = tolerations_json, secret_env_json
 
     def backup_command(self, database: str, to_path: str, kind: str = "AUTO") -> list:
         return [
@@ -801,14 +857,51 @@ class BackupRunner:
         flags = [x for name in names for x in ("-e", name)]
         return [*cmd[:i], *flags, *cmd[i:]]
 
+    def pod_env(self, env: dict) -> tuple[dict, dict]:
+        """(literal values, {name: (secret, key)}) for a pod (#229). Runtime values that look
+        like credentials (a named store's keys, a build's `secret:` env) never go into the pod
+        spec as text: each must be mapped to a k8s Secret in RUNNER_SECRET_ENV
+        (`{"AWS_SECRET_ACCESS_KEY": "backup-creds:secret-key"}`), or the run is refused.
+        RUNNER_EXTRA_ENV is the operator's own literal env and is passed as given."""
+        refs = {}
+        for name, ref in json.loads(self.secret_env_json or "{}").items():
+            secret, _, key = ref.partition(":")
+            refs[name] = (secret, key or name)
+        literal = dict(json.loads(self.extra_env_json or "{}"))
+        unmapped = []
+        for k, v in env.items():
+            if _SENSITIVE.search(k):
+                if k not in refs:
+                    unmapped.append(k)
+                continue
+            literal[k] = v
+        if unmapped:
+            raise RuntimeError(
+                f"{', '.join(sorted(unmapped))} would go into the pod spec as plain text; map "
+                f"each to a k8s Secret in RUNNER_SECRET_ENV (e.g. "
+                f"{{\"{unmapped[0]}\": \"<secret>:<key>\"}}), or use workload identity")
+        for k in refs:
+            literal.pop(k, None)
+        return literal, refs
+
+    def k8s_resources(self) -> dict:
+        res = {"limits": {"memory": self.memory_limit}}
+        req = {k: v for k, v in (("cpu", self.cpu_request), ("memory", self.memory_request))
+               if v}
+        if req:
+            res["requests"] = req
+        return res
+
     def k8s_pod_spec(self, env: dict) -> dict:
-        env = {**json.loads(self.extra_env_json or "{}"), **env}
+        literal, refs = self.pod_env(env)
         spec = {
             "containers": [{
                 "name": "neo4j-admin",
                 "imagePullPolicy": "IfNotPresent",
-                "env": [{"name": k, "value": v} for k, v in env.items()],
-                "resources": {"limits": {"memory": self.memory_limit}},
+                "env": [{"name": k, "value": v} for k, v in literal.items()] + [
+                    {"name": k, "valueFrom": {"secretKeyRef": {"name": s, "key": key}}}
+                    for k, (s, key) in refs.items()],
+                "resources": self.k8s_resources(),
                 "volumeMounts": [{"name": "scratch", "mountPath": self.scratch_path}],
             }],
             "volumes": [{"name": "scratch", "ephemeral": {"volumeClaimTemplate": {
@@ -820,4 +913,7 @@ class BackupRunner:
             spec["nodeSelector"] = ns
         if self.service_account:
             spec["serviceAccountName"] = self.service_account
+        tol = json.loads(self.tolerations_json or "[]")
+        if tol:
+            spec["tolerations"] = tol
         return spec

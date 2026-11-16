@@ -36,8 +36,9 @@ def test_aws_sm_needs_ref():
         secrets.AwsSmSecretProvider().resolve(None)
 
 
-def test_client_reresolves_callable_password_each_connect(monkeypatch):
-    """Rotation: a callable password is re-invoked on every _driver() (connect)."""
+def test_client_reuses_its_driver_and_reresolves_after_a_failure(monkeypatch):
+    """#230: one driver per client; rotation: a failure drops it, so the next connect
+    re-resolves the callable password."""
     import neo4j
 
     captured = []
@@ -58,7 +59,31 @@ def test_client_reresolves_callable_password_each_connect(monkeypatch):
         pass
     with client._driver():
         pass
-    assert captured == ["pw1", "pw2"]  # re-resolved each connect
+    assert captured == ["pw1"]  # reused, not re-resolved per statement
+    with pytest.raises(RuntimeError):
+        with client._driver():
+            raise RuntimeError("auth expired")
+    with client._driver():
+        pass
+    assert captured == ["pw1", "pw2"]  # the failure dropped it; the next connect re-resolved
+
+
+def test_client_replaces_an_old_driver(monkeypatch):
+    import neo4j
+    captured = []
+
+    class _FakeDriver:
+        def close(self):
+            pass
+    monkeypatch.setattr(neo4j.GraphDatabase, "driver",
+                        staticmethod(lambda uri, auth=None: (captured.append(1), _FakeDriver())[1]))
+    monkeypatch.setenv("NEO4J_DRIVER_MAX_AGE", "0")
+    client = Neo4jClient("neo4j://x", "neo4j", "p")
+    with client._driver():
+        pass
+    with client._driver():
+        pass
+    assert len(captured) == 2
 
 
 def test_client_plain_string_password_still_works(monkeypatch):

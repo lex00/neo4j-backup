@@ -32,8 +32,8 @@ set otherwise). A point in time needs a differential backup after it; between ba
 restore lands on the exact time you ask for, as long as a later differential backup exists.
 
 All databases in a group are restored together, to the same instant, so data that refers across
-them stays consistent. If you need only one of them back, say so; today that means the whole group
-([#121](https://github.com/lex00/neo4j-backup/issues/121)).
+them stays consistent. If you need only one of them back, say so: the platform team can restore
+just that one, and it will then no longer line up in time with the others.
 
 ## Ask for a restore
 
@@ -78,18 +78,7 @@ Some teams can run administration commands on the cluster. Please don't:
 Backups follow your alias. If it is moved to a database the platform team doesn't know about,
 backups of it can fail or protect the wrong data. Ask the platform team instead.
 
-## Coming later
+## Not available yet
 
-The platform team is adding other ways to run a database; when they exist, your team will be told
-which applies to you ([#100](https://github.com/lex00/neo4j-backup/issues/100)):
-
-- Loaded on a schedule, read-only: your graph is rebuilt from your source data on a schedule
-  and can't be written to between loads. Writes fail with `42N18 … The database is in read-only
-  mode.` You can ask for any recent load back.
-- Loaded on a schedule, writes allowed but not kept: you can write, but each load (and any
-  restore) replaces everything you wrote since the previous one.
-- Loaded once, then live: the first data comes from a bulk load, after which your database
-  is backed up like any other.
-- A notice before a scheduled load replaces your database
-  ([#126](https://github.com/lex00/neo4j-backup/issues/126)), and later a page where you can see
-  your own backup status without asking ([#125](https://github.com/lex00/neo4j-backup/issues/125)).
+A page where you can see your own backup status without asking. Until then, ask the platform
+team: they can tell you when each database was last backed up and how far back you can restore.

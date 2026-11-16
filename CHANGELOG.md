@@ -7,6 +7,64 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+Fixes from the v0.6.0 operator docs audit (#216).
+
+**Upgrading.**
+- No default `aggregate_cron` (#219): a tier aggregates only if it sets one. Before, every
+  backed-up tier aggregated weekly, which removed point-in-time restore inside the week. Set
+  `aggregate_cron` on a tier to keep the old schedule.
+- Unknown keys in the policy are refused (#222). Run `neo4j-backup policy validate` on your
+  policy before upgrading; a misspelled key used to fall back silently to its default.
+- `BACKUP_UPLOAD=pipeline` with `RUNNER_MODE=k8s` is refused at startup (#218); it never wrote
+  backups to the bucket.
+- With `RUNNER_MODE=k8s`, credentials the tool passes to pods must be mapped to Kubernetes
+  Secrets in `RUNNER_SECRET_ENV`, or come from workload identity (#229).
+- Dagster: the sample `dagster.yaml` no longer sets `max_concurrent_runs` or a pool
+  `default_limit`; set the `neo4j` pool with `dagster instance concurrency set neo4j <n>` (#224).
+  Restores and moves no longer carry the `backup_kind: full` tag; only their baseline step
+  waits for the pool. Minimum Dagster is 1.10.
+- Airflow: `neo4j_restore` and `neo4j_rollback` have no default `group_id`.
+- The demo policy's rebuild-only tier is `rebuild_nightly` (was `nightly`).
+
+### Fixed
+- Dagster's backup asset and restore job ignored the fence left by `restore --to-cluster`
+  (#217).
+- A cutover that failed part-way left no record, so `rollback` went two generations back; each
+  alias move is now recorded as it happens, and the error (`cutover_partial`) lists what moved
+  (#220). Same for `adopt`.
+- A seed slower than 300 s could be swapped in before it was online: the seed waits up to the
+  group's `rto_minutes` (`NEO4J_SEED_WAIT_SECONDS` otherwise), checks every server's result,
+  and every new database must be online before any alias moves (#221). Dagster and Airflow
+  restores take `check` and `keep_failed`.
+- A "latest" group restore went back to each member's own newest backup, possibly hours apart;
+  it now goes to the newest instant every member covers (#225).
+- A store-id change (an incremental import) made scheduled diffs skip until the next full
+  schedule; the next tick now takes a full, and skips show as a warning (Dagster asset check
+  `backup_taken`) or a skipped task (Airflow) (#226).
+- `adopt --migrate` makes the original read-only before its backup, so no write is lost (#227).
+- Dagster: aggregate and verify runs carry `neo4j_group` and the full lane's tag, and every
+  member op takes the per-group lock Airflow uses, so manual and backfill runs can't overlap a
+  group's other work (#223). Airflow's verify and aggregate DAGs take the lock too.
+- Dagster: with `schedules: running` the `reconcile_registry` sensor starts too; a tick with no
+  partitions says so (#228).
+- One Bolt driver per client instead of one per statement (#230).
+- Scheduled cleanup keeps a soak period: tier `cleanup_keep` (1) and `cleanup_older_than_days`
+  (7) (#231).
+- Airflow rebuilds of a named cluster's groups run in its pool (#232).
+- A backup that produced no artifact fails instead of reporting success (#218).
+
+### Added
+- Freshness alerting in the orchestrators: Dagster `status_job` and `status_check` schedule,
+  Airflow `neo4j_status` DAG, on `dbms.status_cron` (#233).
+- k8s runner settings: `RUNNER_NAMESPACE` (Dagster too), `RUNNER_CPU_REQUEST`,
+  `RUNNER_MEMORY_REQUEST`, `RUNNER_TOLERATIONS`, `RUNNER_SECRET_ENV` (#229).
+- Docs: ENVIRONMENT.md (every variable), a Dagster deployment page with an image recipe
+  (`orchestrator/deploy/Dockerfile`), Helm and Dagster+ examples and a concurrency worked
+  example (#236), an Airflow production section (#235), the README's validation matrix (#234);
+  POLICY.md, OPERATOR.md, RECOVERY.md and the reference pages corrected (#237, #238, #239);
+  DESIGN.md marked as design notes and history (#240); product description and issue numbers
+  cut from the reference pages (#241).
+
 ## [0.6.0] — 2026-11-16
 
 **Upgrading (Airflow).** The fixed `neo4j_verify`, `neo4j_aggregate`, `neo4j_prune`,

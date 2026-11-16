@@ -19,7 +19,7 @@ def _seed(**kw) -> str:
 
 def test_default_no_prefix_no_existing_data():
     s = _seed()
-    assert s == "CREATE DATABASE `orders-t1` OPTIONS { seedURI: 's3://b/k.backup' } WAIT"
+    assert s == "CREATE DATABASE `orders-t1` OPTIONS { seedURI: 's3://b/k.backup' } WAIT 3600 SECONDS"
     assert "existingData" not in s and "CYPHER" not in s
 
 

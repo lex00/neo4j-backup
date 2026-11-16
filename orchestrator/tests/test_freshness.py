@@ -133,3 +133,17 @@ def test_status_lists_retired_groups_and_unmanaged_prefixes():
     assert out["retired"] == [{"group": "gone", "retired_on": "2026-11-01",
                                "deletes_on": "2026-11-11"}]
     assert out["unmanaged"] == ["old-customer/"] and s.deleted == []
+
+
+def test_dagster_status_job_fails_on_stale(monkeypatch):
+    """#233: the status job fails its run when a target is past rpo_minutes."""
+    import pytest
+    dg = pytest.importorskip("dagster")
+    from neo4j_backup_dagster import definitions as D
+    from neo4j_backup_dagster.resources import ObjectStoreResource
+    monkeypatch.setattr(freshness, "status",
+                        lambda *a, **k: {"targets": [{}], "stale": ["demo/acme-orders"]})
+    res = D.status_job.execute_in_process(resources={"store": ObjectStoreResource(bucket="b")},
+                                          raise_on_error=False)
+    assert not res.success
+    assert any(s.name == "status_check" for s in D.defs.schedules)

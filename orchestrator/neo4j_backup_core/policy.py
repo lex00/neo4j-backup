@@ -44,6 +44,7 @@ class Naming(BaseModel):
 
 
 class Encryption(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # a misspelled key fails (#222)
     mode: Literal["sse-kms", "client-side", "none"] = "sse-kms"
     kms_key_ref: str | None = None
 
@@ -54,6 +55,7 @@ class Topology(BaseModel):
     restored physical keeps its redundancy instead of the DBMS default. Omitted entirely
     when a group declares no topology — required for standalone/single-instance DBMS,
     where the clause is illegal."""
+    model_config = ConfigDict(extra="forbid")  # a misspelled key fails (#222)
 
     primaries: int = Field(default=1, ge=1)
     secondaries: int = Field(default=0, ge=0)
@@ -259,6 +261,7 @@ class Load(BaseModel):
 
 
 class DbGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # a misspelled key fails (#222)
     id: str
     profile: str | None = None  # the profile its settings came from (#101), for reporting
     # A label for selecting a customer's groups (#102). NOT an access boundary: the deployment
@@ -386,17 +389,24 @@ class DbGroup(BaseModel):
 
 
 class Tier(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # a misspelled key fails (#222)
     # Each optional (#103): a tier for load-only groups (read-only, or protect_writes: false)
     # may have only rebuild_cron. Groups that back up their writes need full_cron and diff_cron.
     full_cron: str | None = None
     diff_cron: str | None = None
     rebuild_cron: str | None = None
-    # Maintenance (#104). On a tier that takes backups (has full_cron) an unset value means
-    # today's fixed schedule, so behaviour is unchanged; a rebuild-only tier gets none unless set.
+    # Maintenance (#104). On a tier that takes backups (has full_cron) an unset verify_cron or
+    # prune_cron gets a default; a rebuild-only tier gets none unless set. aggregate_cron has no
+    # default (#219): aggregating collapses the chain in place, which removes point-in-time
+    # restore between its full and its last diff, so it runs only when a tier asks for it.
     verify_cron: str | None = None
     aggregate_cron: str | None = None
     prune_cron: str | None = None
     cleanup_cron: str | None = None  # for cleanup of superseded databases (#93)
+    # what the scheduled cleanup keeps (#231): the `cleanup_keep` newest databases before the
+    # current one, and anything younger than `cleanup_older_than_days` (the soak period)
+    cleanup_keep: int = 1
+    cleanup_older_than_days: float | None = 7
 
     @model_validator(mode="after")
     def _some_cron(self) -> "Tier":
@@ -414,9 +424,8 @@ class Tier(BaseModel):
         return {n: getattr(self, f"{n}_cron") for n in names if getattr(self, f"{n}_cron")}
 
 
-# Today's fixed Airflow schedules (avp_dags.py before #104): the defaults, so nothing moves.
-MAINTENANCE_DEFAULTS = {"verify_cron": "0 6 * * *", "aggregate_cron": "0 5 * * 0",
-                        "prune_cron": "0 7 * * 0"}
+# Defaults for a tier that takes backups. No aggregate (#219): see Tier.aggregate_cron.
+MAINTENANCE_DEFAULTS = {"verify_cron": "0 6 * * *", "prune_cron": "0 7 * * 0"}
 
 
 class Dbms(BaseModel):
@@ -427,6 +436,9 @@ class Dbms(BaseModel):
     system_backup_cron: str = "0 1 * * *"
     keep_metadata: int = Field(default=14, ge=1)
     keep_system: int = Field(default=14, ge=1)
+    # freshness against rpo_minutes (#233): Dagster's `status_check` schedule and Airflow's
+    # `neo4j_status` DAG fail their run when a target is stale
+    status_cron: str | None = "*/15 * * * *"
 
 
 class SelectionError(ValueError):
@@ -490,6 +502,7 @@ def resolve_profiles(raw: dict) -> tuple[dict, dict[str, dict[str, str]]]:
 
 
 class Policy(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # a misspelled key fails (#222)
     db_groups: list[DbGroup]
     tiers: dict[str, Tier]
     profiles: dict[str, dict] = Field(default_factory=dict)  # #101; resolved before validation
@@ -755,6 +768,19 @@ def explain(source: str | Path, group_id: str) -> dict:
     return {"group": dumped, "from": origin}
 
 
+def _where(raw, loc) -> str:
+    """`db_groups.0.retension_days` as `group 'shop': retension_days` (#222)."""
+    parts = [str(x) for x in loc]
+    if len(parts) >= 2 and parts[0] == "db_groups" and parts[1].isdigit():
+        try:
+            gid = raw["db_groups"][int(parts[1])].get("id")
+        except (KeyError, IndexError, TypeError, AttributeError):
+            gid = None
+        if gid:
+            return f"group {gid!r}: " + (".".join(parts[2:]) or "group")
+    return ".".join(parts) or "policy"
+
+
 def validate_file(source: str | Path) -> list[str]:
     """Every problem with a policy file, as messages (empty = valid). Reads only the file (#101):
     no cluster, no store, so it can run as a pull-request check on the policy repo."""
@@ -767,8 +793,8 @@ def validate_file(source: str | Path) -> list[str]:
     try:
         Policy.model_validate(raw)
     except ValidationError as e:
-        return [f"{'.'.join(str(x) for x in err['loc']) or 'policy'}: "
-                f"{err['msg'].removeprefix('Value error, ')}" for err in e.errors()]
+        return [f"{_where(raw, err['loc'])}: {err['msg'].removeprefix('Value error, ')}"
+                for err in e.errors()]
     except ValueError as e:
         return [str(e)]
     return []
@@ -822,6 +848,26 @@ def _transient(e: Exception) -> bool:
     return True
 
 
+PIPELINE_ON_K8S = ("BACKUP_UPLOAD=pipeline doesn't work with RUNNER_MODE=k8s: neo4j-admin runs in "
+                   "a pod with its own disk, so nothing reaches the bucket. On k8s, an SSE-KMS "
+                   "bucket needs bucket-default encryption, or use the subprocess runner (#218)")
+
+
+def check_upload_mode(policy: "Policy | None" = None, environ=None) -> None:
+    """Refuse `pipeline` uploads with the k8s runner (#218): from the environment, or a
+    cluster's `backup_upload` in the policy."""
+    environ = os.environ if environ is None else environ
+    if environ.get("RUNNER_MODE", "subprocess") != "k8s":
+        return
+    bad = ["BACKUP_UPLOAD=pipeline"] if environ.get("BACKUP_UPLOAD", "admin") == "pipeline" \
+        else []
+    if policy is not None:
+        bad += [f"cluster {n!r} sets backup_upload: pipeline" for n, c in policy.clusters.items()
+                if c.backup_upload == "pipeline"]
+    if bad:
+        raise ValueError(f"{'; '.join(bad)}. {PIPELINE_ON_K8S}")
+
+
 def load_policy_at_startup(source: str | Path, *, configured: bool, attempts: int = 4,
                            delay: float = 1.0, sleep=time.sleep) -> Policy | None:
     """Load the policy when an orchestrator builds its schedules or DAGs (#75).
@@ -834,6 +880,7 @@ def load_policy_at_startup(source: str | Path, *, configured: bool, attempts: in
       exponential backoff (`delay`, 2*`delay`, …) for `attempts` tries, then raised.
     """
     src = str(source)
+    check_upload_mode()  # #218: refuse at startup, not at the first backup
     if not configured and not src.startswith(("s3://", "file://")) and not Path(src).exists() \
             and not os.environ.get("POLICY_LOADER"):
         _log.info("no policy configured (NEO4J_BACKUP_POLICY unset, %s absent); "
@@ -841,7 +888,9 @@ def load_policy_at_startup(source: str | Path, *, configured: bool, attempts: in
         return None
     for i in range(attempts):
         try:
-            return load_policy(src)
+            policy = load_policy(src)
+            check_upload_mode(policy)
+            return policy
         except Exception as e:  # noqa: BLE001
             if not _transient(e) or i == attempts - 1:
                 _log.error("policy from %s failed to load: %s", src, e)

@@ -36,8 +36,13 @@ def _run_pod(runner, command: list, env: dict, image: str | None = None) -> str:
     from airflow.sdk import get_current_context
     from kubernetes.client import models as k8s
 
-    env = {**json.loads(runner.extra_env_json or "{}"), **env}
+    literal, refs = runner.pod_env(env)  # credentials come from k8s Secrets (#229)
+    env_vars = [k8s.V1EnvVar(name=k, value=v) for k, v in literal.items()] + [
+        k8s.V1EnvVar(name=k, value_from=k8s.V1EnvVarSource(
+            secret_key_ref=k8s.V1SecretKeySelector(name=s, key=key)))
+        for k, (s, key) in refs.items()]
     node_selector = json.loads(runner.node_selector_json or "{}")
+    res = runner.k8s_resources()
     # k8s client >=27 split PVC requests into V1VolumeResourceRequirements; fall back for older.
     vol_reqs = getattr(k8s, "V1VolumeResourceRequirements", k8s.V1ResourceRequirements)
     scratch = k8s.V1Volume(
@@ -52,14 +57,17 @@ def _run_pod(runner, command: list, env: dict, image: str | None = None) -> str:
     op = KubernetesPodOperator(
         task_id="neo4j_admin_pod",
         name="neo4j-admin",
-        namespace=os.environ.get("RUNNER_NAMESPACE", "default"),
+        namespace=runner.namespace or os.environ.get("RUNNER_NAMESPACE") or "default",
         image=image or runner.image,  # a build image (#109), else the neo4j runner image
         image_pull_policy="IfNotPresent",
         # wrapped so the output comes back through the XCom sidecar (#118)
         cmds=capture.wrap_for_xcom(command)[:1],
         arguments=capture.wrap_for_xcom(command)[1:],
-        env_vars=[k8s.V1EnvVar(name=k, value=v) for k, v in env.items()],
-        container_resources=k8s.V1ResourceRequirements(limits={"memory": runner.memory_limit}),
+        env_vars=env_vars,
+        container_resources=k8s.V1ResourceRequirements(limits=res["limits"],
+                                                        requests=res.get("requests")),
+        tolerations=[k8s.V1Toleration(**t) for t in json.loads(runner.tolerations_json or "[]")]
+        or None,
         volumes=[scratch],
         volume_mounts=[k8s.V1VolumeMount(name="scratch", mount_path=runner.scratch_path)],
         node_selector=node_selector or None,

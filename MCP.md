@@ -1,17 +1,14 @@
 # Operator MCP server
 
 `neo4j-backup-mcp` exposes the backup/restore operations as [MCP](https://modelcontextprotocol.io)
-tools, so an operator drives them through an agent. Schedulers (Dagster/Airflow, or the
-[CLI in CI](CI.md)) own the cadence; this server owns the **exceptions** — the disaster-recovery and
-status questions you ask by hand: "what's the freshest backup for orders?", "restore orders to just
-before 14:32, but show me the blast radius first."
-
-It is thin over the same core as the [CLI](CLI-CONTRACT.md), and optional — install it only if you
-want agent tool-calling on top of the CLI.
+tools, so an operator can drive them through an agent: status questions and one-off restores
+("what's the freshest backup for orders?", "restore orders to just before 14:32, preview
+first"). Schedules belong to Dagster, Airflow or CI. It runs the same core as the
+[CLI](CLI-CONTRACT.md); install it only if you want this.
 
 ## Safety model
 
-Three independent layers, so no single mistake mutates production:
+Changes need the server started in read-write mode and `confirm=true` on the call:
 
 1. **Scope.** The server starts **read-only** — only status and preview tools are exposed. Mutating
    tools appear only when you start it with `NEO4J_BACKUP_MCP_MODE=read-write`. Enabling mutation is
@@ -36,8 +33,8 @@ Read-only (always available):
 | `list_targets(group, tenant)` | every group/member the policy covers (or one group's or tenant's), with each group's tenant |
 | `latest_artifact(group, member)` | the chain head for one member |
 | `show_chain(group, member)` | the member's artifacts, oldest first, and its chains (full then diffs, per database folder) with the time window each covers, read from the artifact sidecars, and its load artifacts (`loads`, under `_seed/`) |
-| `backup_status(tenant)` | every target's (or one tenant's) latest artifact and load, its age, tenant and cluster, and its state against `rpo_minutes`: `ok`, `stale` or `by_design` (#123); `stale` lists the stale targets |
-| `restore_points(group, tenant)` | per member: the current database, each chain's point-in-time window, load artifacts, gaps, and the restore command for each (#113) |
+| `backup_status(tenant)` | every target's (or one tenant's) latest artifact and load, its age, tenant and cluster, and its state against `rpo_minutes`: `ok`, `stale` or `by_design`; `stale` lists the stale targets |
+| `restore_points(group, tenant)` | per member: the current database, each chain's point-in-time window, load artifacts, gaps, and the restore command for each |
 | `preview_restore(group, replace)` | the restore plan / blast radius, without mutating |
 | `preview_prune` | the artifacts retention would delete, without deleting (whole chains only; `kept_for_chains`, `unknown_kept`) |
 
@@ -50,11 +47,11 @@ Mutating (only with `NEO4J_BACKUP_MCP_MODE=read-write`; each needs `confirm=true
 | `run_aggregate(group, confirm, dry_run, ticket, reason, tenant)` | collapse chains to a recovered full, in place |
 | `run_restore(group, until, replace, confirm, dry_run, verify_first, baseline, ticket, reason, from_load, from_dump, members)` | restore (alias-swap / by-name, PITR), then a full backup of each restored database unless `baseline=false` |
 | `run_prune(confirm, dry_run, ticket, reason)` | delete backups past retention |
-| `run_rollback(group, members, confirm, dry_run, ticket, reason)` | point each alias back at its previous database (#122) |
-| `run_adopt(group, migrate, replace, confirm, dry_run, ticket, reason)` | bring existing databases under the alias model from `overrides.<alias>.adopt_from` (#92) |
-| `run_cleanup(group, keep, older_than_days, confirm, dry_run, ticket, reason)` | drop superseded databases the tool created, keeping the current one and `keep` before it (#93) |
-| `run_restore_to_cluster(to_cluster, group, from_cluster, until, fence_source, skip_metadata, baseline, confirm, dry_run, ticket, reason)` | restore a group, or every group of a cluster, into another cluster (#115) |
-| `run_load(group, confirm, dry_run, replace, keep_failed, baseline, reapply_access, ticket, reason)` | load or rebuild a group from its policy build: build, dump, seed, check, swap, baseline (#107) |
+| `run_rollback(group, members, confirm, dry_run, ticket, reason)` | point each alias back at its previous database |
+| `run_adopt(group, migrate, replace, confirm, dry_run, ticket, reason)` | bring existing databases under the alias model from `overrides.<alias>.adopt_from` |
+| `run_cleanup(group, keep, older_than_days, confirm, dry_run, ticket, reason)` | drop superseded databases the tool created, keeping the current one and `keep` before it |
+| `run_restore_to_cluster(to_cluster, group, from_cluster, until, fence_source, skip_metadata, baseline, confirm, dry_run, ticket, reason)` | restore a group, or every group of a cluster, into another cluster |
+| `run_load(group, confirm, dry_run, replace, keep_failed, baseline, reapply_access, ticket, reason)` | load or rebuild a group from its policy build: build, dump, seed, check, swap, baseline |
 
 ## Run it
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 
 from . import checks, naming
-from .ops import (OpError, _NOLOG, _admin, _per, _privileges_of, _store, _upload, apply_access,
+from .ops import (OpError, _NOLOG, _admin, _per, _seed_wait, _privileges_of, _store, _upload, apply_access,
                   backs_up, baseline_after_restore, check_seeded, cutover_seeded, _topology)
 
 _PATH_FLAGS = ("--nodes", "--relationships")
@@ -151,6 +151,7 @@ def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool 
                 raise OpError(f"{group.id}/{name}: the new physical name {newdb!r} is taken")
             entry.update(alias=name, newdb=newdb, old=old)
             neo4j.seed_database(newdb, store.uri(key), topology=_topology(neo4j, group, name),
+                                wait_seconds=_seed_wait(group),
                                 cypher_version=cypher_version, store_base=store.uri(""))
             seeded.append(entry)
             step = f"access {name}"

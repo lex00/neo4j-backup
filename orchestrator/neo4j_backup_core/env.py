@@ -197,6 +197,11 @@ def env_runner(exec_prefix=None) -> BackupRunner:
         scratch_storage=os.environ.get("RUNNER_SCRATCH_STORAGE", "6Ti"),
         service_account=os.environ.get("RUNNER_SERVICE_ACCOUNT", ""),
         extra_env_json=os.environ.get("RUNNER_EXTRA_ENV", "{}"),
+        namespace=os.environ.get("RUNNER_NAMESPACE", ""),
+        cpu_request=os.environ.get("RUNNER_CPU_REQUEST", ""),
+        memory_request=os.environ.get("RUNNER_MEMORY_REQUEST", ""),
+        tolerations_json=os.environ.get("RUNNER_TOLERATIONS", "[]"),
+        secret_env_json=os.environ.get("RUNNER_SECRET_ENV", "{}"),
     )
 
 

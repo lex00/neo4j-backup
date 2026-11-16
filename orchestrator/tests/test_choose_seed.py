@@ -246,3 +246,76 @@ def test_diff_after_a_store_id_change_needs_a_full():
     assert out["skipped"] and out["needs_full"] and out["reason"] == "store id changed"
     with pytest.raises(sp.CalledProcessError):  # a FULL failing the same way is a real failure
         ops.backup_target(run, N(), s, BackupRunner(), LAYOUT, "g", "orders", "FULL")
+
+
+# --- #225: "latest" restores the group to one instant ------------------------------------------
+
+def aligned_group():
+    """orders: full 08:00, diff 10:30. graph: full 08:00, diff 11:00 (backed up later)."""
+    s = MemStore()
+    put(s, "g/orders/orders-1/", "1-full.backup", True, "2026-11-15T08:00:00", "A")
+    o = put(s, "g/orders/orders-1/", "2-diff.backup", False, "2026-11-15T10:30:00", "A")
+    put(s, "g/graph/graph-1/", "1-full.backup", True, "2026-11-15T08:00:00", "B")
+    g = put(s, "g/graph/graph-1/", "2-diff.backup", False, "2026-11-15T11:00:00", "B")
+    return s, o, g
+
+
+class Two:
+    id, restore_mode, names = "g", "alias-swap", ["orders", "graph"]
+
+    def topology_for(self, n):
+        return None
+
+
+def test_latest_is_the_newest_common_point():
+    s, o, g = aligned_group()
+    seeds = ops.choose_seeds(s, LAYOUT, Two())
+    assert seeds["orders"]["key"] == o and seeds["orders"]["whole"]
+    assert seeds["graph"]["key"] == g and seeds["graph"]["until"] == "2026-11-15T10:30:00+00:00"
+    assert seeds["graph"]["point"] == {"aligned": True, "at": "2026-11-15T10:30:00",
+                                       "limited_by": "orders"}
+
+
+def test_dry_run_shows_the_point():
+    s, _, _ = aligned_group()
+    plan = ops.plan_restore(Neo(), s, Two(), LAYOUT)
+    assert plan["point"]["at"] == "2026-11-15T10:30:00" and "alignment_warning" not in plan
+
+
+def test_falls_back_to_each_members_latest_and_says_why():
+    s, o, _ = aligned_group()
+    s.add("g/graph/graph-1/3-nometa.backup")  # a backup without a sidecar
+    seeds = ops.choose_seeds(s, LAYOUT, Two())
+    assert seeds["orders"]["key"] == o and seeds["graph"]["until"] is None
+    plan = ops.plan_restore(Neo(), s, Two(), LAYOUT)
+    assert "without metadata" in plan["alignment_warning"]
+
+
+def test_a_store_id_change_makes_the_next_tick_ask_for_a_full():
+    """#226: the skip is remembered; needs_full stays true until a full is taken."""
+    import subprocess as sp
+    from neo4j_backup_core.clients import BackupRunner
+    s = MemStore()
+    put(s, "g/orders/orders-2/", "1-full.backup", True, "2026-11-15T08:00:00", "A")
+
+    class N(Neo):
+        def resolve_physical(self, a):
+            return "orders-2"
+
+        def database_created(self, d):
+            return None
+
+    def fail(cmd, env=None):
+        if "inspect" in cmd:
+            return "[]"
+        raise sp.CalledProcessError(1, cmd, output="have different store ids")
+    assert not ops.needs_full(N(), s, LAYOUT, "g", "orders")
+    ops.backup_target(fail, N(), s, BackupRunner(), LAYOUT, "g", "orders", "DIFF")
+    assert ops.needs_full(N(), s, LAYOUT, "g", "orders")  # the next tick asks for a full
+
+    def full(cmd, env=None):
+        if "backup" in cmd and "inspect" not in cmd:
+            put(s, "g/orders/orders-2/", "2-full.backup", True, "2026-11-15T09:00:00", "C")
+        return "[]"
+    ops.backup_target(full, N(), s, BackupRunner(), LAYOUT, "g", "orders", "FULL")
+    assert not ops.needs_full(N(), s, LAYOUT, "g", "orders")  # the full cleared the mark

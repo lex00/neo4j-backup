@@ -1,10 +1,9 @@
 # Bulk import: seed a database from raw data off-cluster
 
-Sometimes the data doesn't exist in Neo4j yet — it's CSV (or Parquet) you need to load and then hand
-to the fleet as a restorable backup. This is **episodic provisioning**, not a policy-driven cadence:
-you run it by hand (or from an external pipeline) on **ephemeral hardware**, and most of it is
-team-specific. What this project standardises is the **tail** — turning a built store into a native
-`.backup` that the ordinary [restore path](RECOVERY.md) can seed anywhere.
+For data that isn't in Neo4j yet (CSV or Parquet): run the import by hand, or from your own
+pipeline, on a throwaway loader host, and turn the result into a dump that the ordinary
+[restore](RECOVERY.md) can seed. For loads on a schedule, use a group's `load:` block instead
+([OPERATOR.md](OPERATOR.md#load-a-customers-data-in-bulk)).
 
 ## Why it's a runbook plus one thin command
 
@@ -15,9 +14,8 @@ Neo4j on the loader, and provisioning that is yours.
 A `.dump` avoids that, and is the default route: `neo4j-admin database dump` works on the imported
 store offline, without ever starting a server, and seed-from-URI accepts a dump when the URI names
 the file (verified on 2026.05; a directory seed only uses backup chains). A dump restores whole
-only: `seedRestoreUntil` is refused for it. The raw input is open and per-dataset — the
-`--nodes` / `--relationships` mapping is your data model. So `neo4j-backup` **structures the calls;
-it does not model your import args.**
+only: `seedRestoreUntil` is refused for it. You supply the `--nodes` / `--relationships`
+arguments; the tool passes them through.
 
 ## Default route: `import --to-dump`
 
@@ -29,7 +27,7 @@ neo4j-backup --json import --to-dump <group>/<member> loaddb \
 ```
 
 One command imports into `loaddb` on the loader, dumps the offline store, and puts the dump in the
-member's load folder (`_seed/`, #156), where the tool lists it apart from the backup chains
+member's load folder (`_seed/`), where the tool lists it apart from the backup chains
 (`show_chain` returns it under `loads`). With `BACKUP_UPLOAD=pipeline` the dump goes through the
 runner's staging folder and the tool's own upload (SSE headers); otherwise neo4j-admin writes it to
 the store directly. Then seed the group from it:
@@ -45,7 +43,7 @@ The restore copies privileges and takes the baseline full backup, as any restore
 each member at any point a backup chain covers (or the latest backup), for a customer who wants
 their data out, or a copy to load elsewhere. In the runner it restores the chain into a throwaway
 local store (`neo4j-admin database restore --restore-until`), dumps it to the member's `_seed/`
-folder and removes the store; the cluster is never touched (#160). `--restore-until` works to the
+folder and removes the store; the cluster is never touched. `--restore-until` works to the
 second. A group
 whose members have no `.backup` yet (load-only) seeds from the newest load without either flag.
 The imported store stays in the loader's data directory; throw the loader away, or remove the
@@ -126,7 +124,7 @@ not a production or backup mutation.
 Verify the exact `--nodes`/`--relationships`/option surface against your deployed Neo4j version's
 `neo4j-admin database import full` docs. The local check is `just import-smoke`.
 
-## Incremental import and the backup chain (#99)
+## Incremental import and the backup chain
 
 `neo4j-admin database import incremental` adds bulk data to an existing database. Tested on
 Neo4j **2026.05.0 Enterprise**, single server, block format, with
@@ -142,7 +140,7 @@ Neo4j **2026.05.0 Enterprise**, single server, block format, with
 | aggregate a copy of the folder, `database check` | aggregates the newest chain; check passes |
 | seed the old chain until a time before the import | correct (the state at that time) |
 | seed the new chain, newest or until a time after its full | correct |
-| a time between the import and the new full | no chain covers it; `restore --until` refuses and lists the nearest windows (#114) |
+| a time between the import and the new full | no chain covers it; `restore --until` refuses and lists the nearest windows |
 
 So the merge rewrites the store and changes its store id, and the chain can't continue: **after
 an incremental import, take a full backup** (`neo4j-backup backup <group> --kind FULL`). The

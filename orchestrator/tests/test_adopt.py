@@ -50,6 +50,12 @@ class Neo:
         self.log.append(("drop", n))
         self.dbs.discard(n)
 
+    def set_read_only(self, n, ro):
+        self.log.append(("access", n, "read-only" if ro else "read-write"))
+
+    def database_access(self, n):
+        return "read-write"
+
 
 def test_plan_create_skip_conflict():
     g = G(["orders", "graph", "audit"], {"orders": {"adopt_from": "legacy-orders"},
@@ -85,14 +91,16 @@ def test_same_name_needs_migrate_and_replace():
 def test_migrate_backs_up_verifies_then_drops(monkeypatch):
     neo, s = Neo(dbs={"orders"}), MemStore()
     steps = []
-    monkeypatch.setattr(ops, "backup_target", lambda *a, **k: steps.append("backup") or
-                        {"artifact": "g/orders/orders/full.backup"})
+    monkeypatch.setattr(ops, "backup_target", lambda *a, **k: steps.append(
+        ("backup", ("access", "orders", "read-only") in neo.log)) or
+        {"artifact": "g/orders/orders/full.backup"})
     monkeypatch.setattr(ops, "verify_target", lambda *a, **k: steps.append("verify") or
                         {"consistent": True})
     monkeypatch.setattr(ops, "check_seeded", lambda *a, **k: steps.append("check"))
     out = adopt.adopt(None, neo, s, None, L, G(["orders"]), migrate=True, replace=True)
     new = out["members"][0]["newdb"]
-    assert steps == ["backup", "verify", "check"]
+    # the original is read-only before its backup (#227)
+    assert steps == [("backup", True), "verify", "check"]
     kinds = [e[0] for e in neo.log]
     assert kinds.index("seed") < kinds.index("drop") < kinds.index("alias")
     assert ("cypher", f"GRANT ACCESS ON DATABASE `{new}` TO `app`") in neo.log  # before drop
@@ -106,6 +114,8 @@ def test_migrate_stops_if_the_backup_does_not_verify(monkeypatch):
     with pytest.raises(ops.OpError, match="didn't verify"):
         adopt.adopt(None, neo, MemStore(), None, L, G(["orders"]), migrate=True, replace=True)
     assert "orders" in neo.dbs and not any(e[0] == "drop" for e in neo.log)
+    # a failure before the drop puts the original back to read-write (#227)
+    assert neo.log[-1] == ("access", "orders", "read-write")
 
 
 def test_by_name_groups_are_refused():

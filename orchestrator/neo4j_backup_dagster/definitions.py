@@ -11,7 +11,7 @@ import tempfile
 
 import dagster as dg
 
-from neo4j_backup_core import capture, ops, paths, record
+from neo4j_backup_core import capture, locks, ops, paths, record
 from neo4j_backup_core.env import Neo4jSet, RunnerSet, StoreSet
 from neo4j_backup_core.policy import load_policy, load_policy_at_startup, parse_partition_key
 from neo4j_backup_core.until import UntilError, parse_until
@@ -53,6 +53,7 @@ def _run_admin(context, runner, command, subprocess_client, env=None, image=None
             ) from e
         done = PipesK8sClient().run(
             context=context, image=image or runner.image,  # a build image (#109) or neo4j
+            namespace=runner.namespace or None,  # #229
             command=capture.wrap_for_pipes(command),
             base_pod_spec=runner.k8s_pod_spec(env),
         )
@@ -88,12 +89,23 @@ def _admin(context, runner, subprocess_client):
 _layout = paths.get_layout()
 
 
+LOCK_WAIT = int(os.environ.get("NEO4J_BACKUP_LOCK_WAIT", "3600"))  # seconds
+
+
+def _group_lock(store, group_id: str, what: str):
+    """The per-group lock Airflow also takes (#108, #223): a member's backup, aggregate, verify
+    and its group's load never overlap, whatever launched the run (schedule, manual, backfill)."""
+    return locks.group_lock(store, group_id, what, wait=LOCK_WAIT)
+
+
 # --- Backup ----------------------------------------------------------------------
 class BackupConfig(dg.Config):
     kind: str = "AUTO"  # AUTO | FULL | DIFF — set by the full/diff schedules
 
 
-@dg.asset(partitions_def=targets, pool="neo4j", group_name="neo4j_backup")
+@dg.asset(partitions_def=targets, pool="neo4j", group_name="neo4j_backup",
+          check_specs=[dg.AssetCheckSpec("backup_taken", asset="backup",
+                                         description="a backup was written (#226)")])
 def backup(
     context: dg.AssetExecutionContext,
     config: BackupConfig,
@@ -106,16 +118,26 @@ def backup(
     own prefix — so repeated backups of the alias form a real chain (same store)."""
     group_id, alias = parse_partition_key(context.partition_key)
     try:
-        out = ops.backup_target(
-            _admin(context, runner, pipes_subprocess_client), neo4j, store, runner, _layout,
-            group_id, alias, config.kind, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
-            log=context.log.info, group=load_policy(POLICY_PATH).group(group_id),
-        )
-    except ops.OpError as e:
+        with _group_lock(store, group_id, f"backup {alias}"):
+            out = ops.backup_target(
+                _admin(context, runner, pipes_subprocess_client), neo4j, store, runner,
+                _layout, group_id, alias, config.kind, upload=BACKUP_UPLOAD,
+                staging=UPLOAD_STAGING_PATH, log=context.log.info,
+                group=load_policy(POLICY_PATH).group(group_id),
+            )
+    except (ops.OpError, locks.Locked) as e:
         raise dg.Failure(str(e))
     artifact = out["artifact"]
     size = store.object_size(artifact) if artifact else 0
+    skipped = out["skipped"] and not out.get("by_design")
+    if skipped:
+        context.log.warning(f"{group_id}/{alias}: no backup taken "
+                            f"({out.get('reason') or 'a full is needed first'})")
     return dg.MaterializeResult(
+        check_results=[dg.AssetCheckResult(
+            check_name="backup_taken", passed=not skipped,
+            severity=dg.AssetCheckSeverity.WARN,
+            metadata={"reason": out.get("reason") or ("needs a full" if skipped else "")})],
         metadata={
             "group": group_id, "alias": alias, "physical": out["physical"],
             "kind": config.kind, "artifact": artifact or "",
@@ -146,12 +168,13 @@ def aggregate(
     and retention — trades intra-chain PITR, so run on a retention cadence."""
     group_id, alias = parse_partition_key(context.partition_key)
     try:
-        out = ops.aggregate_target(
-            _admin(context, runner, pipes_subprocess_client), store, runner, _layout,
-            group_id, alias, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
-            log=context.log.info, skip_missing=True,
-        )
-    except ops.OpError as e:
+        with _group_lock(store, group_id, f"aggregate {alias}"):
+            out = ops.aggregate_target(
+                _admin(context, runner, pipes_subprocess_client), store, runner, _layout,
+                group_id, alias, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
+                log=context.log.info, skip_missing=True,
+            )
+    except (ops.OpError, locks.Locked) as e:
         raise dg.Failure(str(e))
     return dg.MaterializeResult(metadata={"physical": out["physical"] or "",
                                           "full": out["full"] or "",
@@ -171,12 +194,13 @@ def verify(
     `database check` it. Non-zero exit raises (fail). Cleans up the copy."""
     group_id, alias = parse_partition_key(context.partition_key)
     try:
-        out = ops.verify_target(
-            _admin(context, runner, pipes_subprocess_client), store, runner, _layout,
-            group_id, alias, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
-            skip_missing=True, log=context.log.info,
-        )
-    except ops.OpError as e:
+        with _group_lock(store, group_id, f"verify {alias}"):
+            out = ops.verify_target(
+                _admin(context, runner, pipes_subprocess_client), store, runner, _layout,
+                group_id, alias, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
+                skip_missing=True, log=context.log.info,
+            )
+    except (ops.OpError, locks.Locked) as e:
         raise dg.Failure(str(e))
     if out.get("skipped"):  # no backups of this member yet (#104)
         return dg.MaterializeResult(metadata={"alias": alias, "skipped": True})
@@ -306,6 +330,8 @@ class RestoreConfig(dg.Config):
     from_load: bool = False  # seed each member from its newest load artifact (#144)
     from_dump: dict[str, str] = {}  # member -> load key or external dump URI (#159)
     members: list[str] = []  # restore only these members (#121); empty: the whole group
+    check: bool = False  # run the group's load.checks on the new databases before the swap (#221)
+    keep_failed: bool = False  # with check: keep the new databases when a check fails
     ticket: str | None = None  # the change ticket; recorded in the log and as run tags (#119)
     reason: str | None = None
 
@@ -332,6 +358,7 @@ def restore_group_op(
             neo4j, store, group, _layout, restore_until=until,
             replace=config.replace, cypher_version=SEED_CYPHER_VERSION, log=context.log.info,
             loads=config.from_dump or ("latest" if config.from_load else None),
+            check=config.check, keep_failed=config.keep_failed,
         )
     except ops.OpError as e:
         raise dg.Failure(str(e))
@@ -411,7 +438,7 @@ def move_op(context: dg.OpExecutionContext, config: MoveConfig, neo4j: Neo4jReso
     return {**out, **rec}
 
 
-@dg.job(tags={"backup_kind": "full"})
+@dg.job  # its baseline step waits for the neo4j pool, not the whole move (#224)
 def move_job():
     move_op()
 
@@ -446,18 +473,19 @@ def load_group_op(
         raise dg.Failure(str(e))
     context.log.info(record.describe("load", rec))
     try:
-        out = load_mod.load_group(
-            _admin(context, runner, pipes_subprocess_client),
-            RunnerSet(runner._core(), policy_source=POLICY_PATH),
-            Neo4jSet(neo4j._core(), policy_source=POLICY_PATH),
-            StoreSet(store._core(), policy_source=POLICY_PATH), _layout, group,
-            replace=config.replace, keep_failed=config.keep_failed,
-            baseline=None if config.baseline else False, upload=BACKUP_UPLOAD,
-            staging=UPLOAD_STAGING_PATH, cypher_version=SEED_CYPHER_VERSION,
-            log=context.log.info)
+        with _group_lock(store, config.group_id, "load"):
+            out = load_mod.load_group(
+                _admin(context, runner, pipes_subprocess_client),
+                RunnerSet(runner._core(), policy_source=POLICY_PATH),
+                Neo4jSet(neo4j._core(), policy_source=POLICY_PATH),
+                StoreSet(store._core(), policy_source=POLICY_PATH), _layout, group,
+                replace=config.replace, keep_failed=config.keep_failed,
+                baseline=None if config.baseline else False, upload=BACKUP_UPLOAD,
+                staging=UPLOAD_STAGING_PATH, cypher_version=SEED_CYPHER_VERSION,
+                log=context.log.info)
     except load_mod.LoadError as e:
         raise dg.Failure(str(e), metadata={"failed_step": e.step})
-    except ops.OpError as e:
+    except (ops.OpError, locks.Locked) as e:
         raise dg.Failure(str(e))
     return {**out, **rec}
 
@@ -498,7 +526,8 @@ def rollback_job():
 class CleanupConfig(dg.Config):
     tier: str | None = None    # every group of the tier (its cleanup_cron schedule)
     group_id: str | None = None
-    keep: int = 1
+    keep: int | None = None             # default: the tier's cleanup_keep (#231)
+    older_than_days: float | None = None  # default: the tier's cleanup_older_than_days
 
 
 @dg.op
@@ -508,7 +537,13 @@ def cleanup_op(context: dg.OpExecutionContext, config: CleanupConfig, neo4j: Neo
     groups = ([pol.group(config.group_id)] if config.group_id
               else pol.groups_for_tier(config.tier) if config.tier else pol.db_groups)
     neos = Neo4jSet(neo4j._core(), policy_source=POLICY_PATH)
-    out = [ops.cleanup(neos, g, keep=config.keep, log=context.log.info) for g in groups]
+    out = []
+    for g in groups:
+        t = pol.tiers[g.tier]
+        out.append(ops.cleanup(
+            neos, g, keep=config.keep if config.keep is not None else t.cleanup_keep,
+            older_than_days=(config.older_than_days if config.older_than_days is not None
+                             else t.cleanup_older_than_days), log=context.log.info))
     context.log.info(f"dropped {sum(len(o['drops']) for o in out)} databases")
     return out
 
@@ -520,13 +555,24 @@ def cleanup_job():
 
 # The full-lane tag: the baseline step is a full backup, so the job queues behind the full lane's
 # tag concurrency limit like a scheduled full does (#97).
-@dg.job(tags={"backup_kind": "full"})
+@dg.job  # its baseline_op waits for the neo4j pool, not the whole restore (#224)
 def restore_group():
     baseline_op(restore_group_op())
 
 
 # --- Sensor + schedules ----------------------------------------------------------
-@dg.sensor(job=backup_job, minimum_interval_seconds=300)
+def _sensor_status() -> dg.DefaultSensorStatus:
+    """Running when the policy says `schedules: running` (#228): the schedules request only
+    partitions this sensor has created, so running schedules with it stopped do nothing."""
+    try:
+        pol = load_policy_at_startup(POLICY_PATH, configured="NEO4J_BACKUP_POLICY" in os.environ)
+    except Exception:  # noqa: BLE001 - _build_schedules reports a bad policy
+        pol = None
+    return (dg.DefaultSensorStatus.RUNNING if getattr(pol, "schedules", "stopped") == "running"
+            else dg.DefaultSensorStatus.STOPPED)
+
+
+@dg.sensor(job=backup_job, minimum_interval_seconds=300, default_status=_sensor_status())
 def reconcile_registry(context: dg.SensorEvaluationContext):
     # Force a fresh read — the sensor gates whether a new database gets a partition, so its
     # freshness sets churn latency (#43).
@@ -611,8 +657,13 @@ def _tier_keys(context, pol, tier_name: str) -> list[str]:
     # Only request partitions that currently exist — a policy read that's ahead of
     # (or behind) the reconcile sensor must not request a non-existent partition (#43).
     existing = set(context.instance.get_dynamic_partitions(targets.name))
-    return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name) for a in g.names
-            if f"{g.id}/{a}" in existing]
+    wanted = [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name) for a in g.names]
+    missing = [k for k in wanted if k not in existing]
+    if missing:  # a schedule running with the sensor stopped does nothing (#228)
+        context.log.warning(f"tier {tier_name!r}: {len(missing)} of {len(wanted)} members have no "
+                            f"partition yet (e.g. {missing[0]}); is the reconcile_registry "
+                            f"sensor running?")
+    return [k for k in wanted if k in existing]
 
 
 def _make_maintenance_schedule(tier_name: str, lane: str, cron: str, status):
@@ -636,10 +687,36 @@ def _make_maintenance_schedule(tier_name: str, lane: str, cron: str, status):
 
     @dg.schedule(job=job, cron_schedule=cron, name=f"{tier_name}_{lane}", default_status=status)
     def _members(context):
-        return [dg.RunRequest(run_key=f"{k}:{lane}:{_tick(context)}", partition_key=k,
-                              tags={"neo4j_cluster": _cluster_of(k)})
+        # full-size scratch, and in place for aggregate: the full lane, and never with the
+        # group's own backups (#223)
+        reqs = [dg.RunRequest(run_key=f"{k}:{lane}:{_tick(context)}", partition_key=k,
+                              tags={"neo4j_cluster": _cluster_of(k), "backup_kind": "full",
+                                    "neo4j_group": parse_partition_key(k)[0]})
                 for k in _tier_keys(context, load_policy(POLICY_PATH), tier_name)]
+        return reqs or dg.SkipReason(f"no partitions for tier {tier_name!r}")
     return _members
+
+
+@dg.op
+def status_op(context: dg.OpExecutionContext, store: ObjectStoreResource):
+    """Freshness of every active target against its group's `rpo_minutes` (#123, #233). Fails
+    the run when any is stale, so Dagster's run-failure alerting covers it."""
+    from neo4j_backup_core import freshness
+
+    pol = load_policy(POLICY_PATH)
+    groups = [g for g in pol.db_groups if not g.retired]
+    out = freshness.status(StoreSet(store._core(), policy_source=POLICY_PATH), _layout, groups)
+    context.log.info(f"{len(out['targets'])} targets, {len(out['stale'])} stale")
+    if out["stale"]:
+        raise dg.Failure(f"{len(out['stale'])} target(s) past rpo_minutes: "
+                         f"{', '.join(out['stale'])}",
+                         metadata={"stale": ", ".join(out["stale"])})
+    return out
+
+
+@dg.job
+def status_job():
+    status_op()
 
 
 def _make_dbms_schedules(policy, status) -> list:
@@ -666,15 +743,17 @@ def _make_schedule(tier_name: str, lane: str, cron: str,
         @dg.schedule(job=backup_job, cron_schedule=cron, name=f"{tier_name}_{lane}",
                      default_status=status)
         def _full(context):
-            return [_lane_request(k, "full", _tick(context))
+            reqs = [_lane_request(k, "full", _tick(context))
                     for k in _keys(context, load_policy(POLICY_PATH))]
+            return reqs or dg.SkipReason(f"no partitions for tier {tier_name!r}")
         return _full
 
     @dg.schedule(job=backup_job, cron_schedule=cron, name=f"{tier_name}_{lane}",
                  default_status=status)
     def _diff(context, neo4j: Neo4jResource, store: ObjectStoreResource):
-        return diff_lane_requests(_keys(context, load_policy(POLICY_PATH)), neo4j, store,
+        reqs = diff_lane_requests(_keys(context, load_policy(POLICY_PATH)), neo4j, store,
                                   log=context.log.warning, tick=_tick(context))
+        return reqs or dg.SkipReason(f"no partitions for tier {tier_name!r}")
     return _diff
 
 
@@ -712,13 +791,19 @@ def _build_schedules() -> list:
             for lane, cron in (("verify", tier.verify_cron), ("aggregate", tier.aggregate_cron),
                                ("prune", tier.prune_cron), ("cleanup", tier.cleanup_cron))
             if cron]
-    return out + _make_dbms_schedules(policy, status)
+    out += _make_dbms_schedules(policy, status)
+    if policy.dbms.status_cron:  # #233
+        out.append(dg.ScheduleDefinition(name="status_check", job=status_job,
+                                         cron_schedule=policy.dbms.status_cron,
+                                         default_status=status))
+    return out
 
 
 defs = dg.Definitions(
     assets=[backup, aggregate, verify, prune, metadata_export, system_backup],
     jobs=[backup_job, verify_job, aggregate_job, prune_job, dbms_metadata_job, dbms_system_job,
-          restore_group, metadata_restore, load_job, rollback_job, cleanup_job, move_job],
+          restore_group, metadata_restore, load_job, rollback_job, cleanup_job, move_job,
+          status_job],
     schedules=_build_schedules(),
     sensors=[reconcile_registry],
     resources={
@@ -756,6 +841,11 @@ defs = dg.Definitions(
             scratch_storage=os.environ.get("RUNNER_SCRATCH_STORAGE", "6Ti"),
             service_account=os.environ.get("RUNNER_SERVICE_ACCOUNT", ""),
             extra_env_json=os.environ.get("RUNNER_EXTRA_ENV", "{}"),
+            namespace=os.environ.get("RUNNER_NAMESPACE", ""),
+            cpu_request=os.environ.get("RUNNER_CPU_REQUEST", ""),
+            memory_request=os.environ.get("RUNNER_MEMORY_REQUEST", ""),
+            tolerations_json=os.environ.get("RUNNER_TOLERATIONS", "[]"),
+            secret_env_json=os.environ.get("RUNNER_SECRET_ENV", "{}"),
         ),
         "pipes_subprocess_client": dg.PipesSubprocessClient(),
     },

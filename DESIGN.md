@@ -1,7 +1,11 @@
 # Neo4j Backup/Restore: Policy-Based Design for Self-Hosted Enterprise
 
-Status: draft, 2026-06-28. All sections verified against the current Neo4j operations
-manual and Dagster docs.
+Design notes and history, written from 2026-06 as the tool was designed. Some sections
+describe plans that changed or weren't built (the sensor reconciling against `SHOW DATABASES`,
+the Definitions sketch in §6, per-group `encryption` keys, the example policy in §11). What the
+tool does today is on the reference pages: [POLICY.md](POLICY.md), [OPERATOR.md](OPERATOR.md),
+[RECOVERY.md](RECOVERY.md), [ENVIRONMENT.md](ENVIRONMENT.md) and the
+[Dagster](orchestrator/README.md) and [Airflow](airflow/README.md) pages.
 
 Diagrams (Graphviz in [`diagrams/`](diagrams/README.md), `just diagrams` to render):
 [architecture](diagrams/architecture.dot), [storage-layout](diagrams/storage-layout.dot),
@@ -13,7 +17,7 @@ Diagrams (Graphviz in [`diagrams/`](diagrams/README.md), `just diagrams` to rend
 - Self-hosted Neo4j **Enterprise Edition**, clustered (primaries + followers).
 - Multi-tenant: **multiple databases per customer**, ~50–500 customers, so the
   database count plausibly reaches the high hundreds to low thousands.
-- Orchestration: **Dagster** already in house.
+- Orchestration: Dagster or Airflow, whichever is already in house (both adapters exist).
 - Backup target: object storage (S3 assumed; `gs://`/`azb://` work identically).
 - Requirement: **policy-based schedules** with per-tenant cadence/retention, plus a
   **restore loop** that closes back to verified recovery.
@@ -39,14 +43,14 @@ Three entities:
 ### Registry over name-parsing
 
 Maintain an explicit registry (`db_group` → `[databases]`, plus group policy),
-reconciled against `SHOW DATABASES` on every run. Reconciliation is a feature, not
-overhead: it surfaces a database with no owning group (unbacked-up risk) and a
-registry entry with no live database (stale policy). Do not encode grouping in
+reconciled against `SHOW DATABASES` on every run (planned, not built: the sensor that
+exists keeps Dagster's partitions in step with the policy only). The intent was to surface a
+database with no owning group and a registry entry with no live database. Do not encode grouping in
 database names and parse it back out; names drift, registries are authoritative.
 
 ## 3. Execution model: Cypher vs agents on nodes
 
-Confirmed against the current operations manual. Headline: **the whole loop can be
+Confirmed against the current operations manual. **The whole loop can be
 node-agentless** — backup from a central runner, restore (including PITR) via Cypher
 seed-from-URI that the cluster pulls itself. (Diagram:
 [architecture](diagrams/architecture.dot).)
@@ -382,7 +386,7 @@ Additive:
 4. Point `PolicyResource` at the policy source.
 5. Enable the schedules + reconciliation sensor.
 
-Shared-surface caveats — the honest friction: run storage, event log, and the daemon
+Shared-surface caveats: run storage, event log, and the daemon
 (scheduler/sensors/run queue) are instance-global, so the lane `tag_concurrency_limits`
 live in the shared `dagster.yaml`; coordinate that one change with whoever owns the
 instance. And pin the location's `dagster` version close to the host webserver/daemon —
@@ -417,7 +421,7 @@ scratch, and network path.
 
 ### 6.10 Front-ends over the shared core
 
-Dagster is one front-end, not the design. The operation bodies (backup / aggregate / verify /
+Dagster is one of the front-ends. The operation bodies (backup / aggregate / verify /
 prune / restore / metadata / system) live once in `neo4j_backup_core.ops`, parameterized by a
 `run_admin` callable + client handles; each front-end is a thin adapter that binds execution and
 shapes results:
@@ -502,8 +506,9 @@ quiescing or accepting the bounded skew. State this explicitly to stakeholders.
 The alias indirection turns restore from a destructive in-place operation into an
 out-of-band build plus a pointer move. It composes cleanly with the rest of the design:
 seed-from-URI builds the new database with zero node agents, group-aligned
-`seedRestoreUntil` keeps the set consistent, and the verification step (section 8)
-gates the swap so you never cut over to an unverified restore.
+`seedRestoreUntil` keeps the set consistent, and the swap waits until every new database is
+online. Running the group's checks before the swap is opt-in (`restore --check`); the
+consistency check of section 8 runs on backups, not on each restore.
 
 ## 7.5 Backup-file encryption (per-group key)
 
@@ -571,7 +576,7 @@ option that preserves it. Mechanism:
   pipeline does not require it.
 - `backup.sh` and `restore.sh` stay unchanged: the store encrypts on PUT and decrypts
   on GET transparently for callers with KMS decrypt. The encrypt/decrypt hooks in
-  those scripts remain no-ops, which is the point of choosing SSE-KMS.
+  those scripts remain no-ops.
 - The DB nodes already pull seeds from object storage; grant them **KMS decrypt** on
   the relevant per-group keys so seed-from-URI reads cleartext.
 - Rotation/revocation is per group via the KMS key. Audit is the KMS key's audit trail.
@@ -582,10 +587,9 @@ the SSE-KMS header are encrypted (`BACKUP_UPLOAD=pipeline` with `S3_SSE`); see S
 Until 2026-11 the local stack used MinIO's built-in KMS, which did apply the bucket default
 (#127).
 
-Open sub-item being verified now: whether the server-side seed pull works against a
-plain-HTTP MinIO or requires TLS, and that SSE-KMS objects restore transparently via
-seedURI. This gates the critical path, so it is being confirmed against the docs rather
-than assumed.
+Validated since: the server-side seed pull works against a plain-HTTP emulator, and SSE-KMS
+objects restored through seedURI on MinIO. Not yet validated against real AWS S3 with KMS (see
+the README's validation table).
 
 ## 8. Restore verification (closing the loop)
 
@@ -666,7 +670,7 @@ Dagster; do not wait on NOM.
   endpoint, explicitly "not yet public." No REST API. An external orchestrator has no
   supported way to drive NOM.
 - **Per-node agent.** NOM deploys a Go agent on each Neo4j host (gRPC to the server)
-  that runs DBMS and OS commands locally. Note the irony: NOM would put an agent on
+  that runs DBMS and OS commands locally. NOM would put an agent on
   every node, whereas the seed-from-URI restore path (section 3) needs **zero** node
   agents. NOM does not reduce your footprint.
 - **Free** for Enterprise license holders (includes one dedicated DBMS for NOM's own
@@ -706,7 +710,7 @@ tiers:
 
 Deployment-specific behaviour is exposed as seams in the shared `neo4j_backup_core`, so both
 adapters inherit them and each defaults to the validated behaviour (full env list:
-[`orchestrator/README.md`](orchestrator/README.md#environment-variables)). The pattern
+[`orchestrator/README.md`](ENVIRONMENT.md)). The pattern
 throughout: a small interface plus a `Default*` implementation selected via env/policy, with
 any third-party SDK imported lazily so nothing is pulled unless the non-default is chosen.
 
@@ -774,7 +778,7 @@ Decisions locked:
 
 | Decision | Choice |
 |---|---|
-| Start scope | Single node; cluster deferred |
+| Start scope | Single node first; clusters (`clusters:`, restore into another cluster) added later, not yet validated on a multi-server cluster |
 | Local env | Docker Compose first; k3d for k8s-mode validation |
 | Restore | Pure Cypher seed-from-URI + alias-swap (path A) |
 | Encryption | SSE-KMS, cloud KMS, per-group bucket/key |
@@ -799,5 +803,6 @@ Open risks / findings:
 - Plain-HTTP seed and path-style addressing are validated against the local emulator (MinIO
   until 2026-11, floci since #127); SSE-KMS read via seed-from-URI was validated on MinIO.
 
-Deferred / optional: cluster topologies (back up from a secondary/follower); NOM for
-cluster monitoring only (not a backup feature).
+Not yet validated: a multi-server cluster (backup from a secondary, seeding with a topology,
+the alias swap seen by every member). NOM is for cluster monitoring only (not a backup
+feature).
