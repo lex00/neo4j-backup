@@ -126,14 +126,23 @@ The plan lists the backup each database will come from, any database that would 
 ### 5. Restore
 
 ```bash
-neo4j-backup --json restore <group> --until 2026-11-15T09:00:00Z --confirm > restore.json
+neo4j-backup --json restore <group> --until 2026-11-15T09:00:00Z --confirm \
+  --ticket CHG-1234 --reason "customer request: bad import at 09:05" > restore.json
 ```
+
+`--ticket` and `--reason` ([#119](https://github.com/lex00/neo4j-backup/issues/119)) are written
+to the log and returned in the result; every mutating command takes them (`aggregate`, `prune`,
+`metadata restore` too), as do the MCP write tools (`ticket`, `reason`), the Dagster restore job
+(config; also set as the run tags `neo4j_backup/ticket` and `neo4j_backup/reason`) and the Airflow
+restore DAG (params). The tool records them; approval stays with your own process. Set
+`NEO4J_BACKUP_REQUIRE_TICKET=true` to refuse any applied change without a ticket (exit 3,
+`ticket_required`); dry runs never need one.
 
 The same restore from the orchestrators:
 
 - Dagster: launch the `restore_group` job with config
-  `{ops: {restore_group_op: {config: {group_id: <group>, restore_until: "2026-11-15T09:00:00Z"}}}}`.
-- Airflow: `airflow dags trigger neo4j_restore -c '{"group_id": "<group>", "restore_until": "2026-11-15T09:00:00Z"}'`.
+  `{ops: {restore_group_op: {config: {group_id: <group>, restore_until: "2026-11-15T09:00:00Z", ticket: CHG-1234, reason: "…"}}}}`.
+- Airflow: `airflow dags trigger neo4j_restore -c '{"group_id": "<group>", "restore_until": "2026-11-15T09:00:00Z", "ticket": "CHG-1234", "reason": "…"}'`.
 
 The result lists, per member, the old database (`old`), the new one (`newdb`) and the privileges
 granted on the new one (`privileges`). Keep it for the report.
@@ -186,8 +195,7 @@ removes the privileges granted on it.
 - A restore always covers the whole group; one database alone isn't possible
   ([#121](https://github.com/lex00/neo4j-backup/issues/121)).
 
-**Planned:** `--ticket` and `--reason` on the command ([#119](https://github.com/lex00/neo4j-backup/issues/119)),
-`rollback` ([#122](https://github.com/lex00/neo4j-backup/issues/122)) and `cleanup`
+**Planned:** `rollback` ([#122](https://github.com/lex00/neo4j-backup/issues/122)) and `cleanup`
 ([#93](https://github.com/lex00/neo4j-backup/issues/93)).
 
 ## Load a customer's data in bulk

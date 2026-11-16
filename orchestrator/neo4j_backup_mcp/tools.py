@@ -13,11 +13,12 @@ Two tiers:
 
 from __future__ import annotations
 
+import functools
 import os
 import sys
 import time
 
-from neo4j_backup_core import env, ops, paths
+from neo4j_backup_core import env, ops, paths, record
 from neo4j_backup_core.policy import load_policy
 from neo4j_backup_core.until import parse_until
 
@@ -32,6 +33,18 @@ def _layout():
 
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr)  # stdout is the MCP stdio channel
+
+
+def _recorded(fn):
+    """Check and log `ticket` / `reason` (#119) and return them with the tool's result."""
+    @functools.wraps(fn)
+    def wrapper(*args, ticket: str | None = None, reason: str | None = None, **kw):
+        rec = record.fields(ticket, reason,
+                            applying=bool(kw.get("confirm")) and not kw.get("dry_run"))
+        _log(record.describe(fn.__name__, rec))
+        out = fn(*args, ticket=ticket, reason=reason, **kw)
+        return {**out, **rec} if isinstance(out, dict) else out
+    return wrapper
 
 
 def _run_admin(runner):
@@ -136,7 +149,9 @@ def run_verify(group: str) -> dict:
     return {"group": group, "verified": done}
 
 
-def run_aggregate(group: str, confirm: bool = False, dry_run: bool = False) -> dict:
+@_recorded
+def run_aggregate(group: str, confirm: bool = False, dry_run: bool = False,
+                  ticket: str | None = None, reason: str | None = None) -> dict:
     """Collapse each of a group's chains into one recovered full, in place (destructive to the
     chain: trades intra-chain PITR). Needs confirm=true; dry_run previews the physicals affected."""
     g = load_policy(env.policy_path()).group(group)
@@ -152,9 +167,11 @@ def run_aggregate(group: str, confirm: bool = False, dry_run: bool = False) -> d
     return {"group": group, "aggregated": done}
 
 
+@_recorded
 def run_restore(group: str, until: str | None = None, replace: bool = False,
                 confirm: bool = False, dry_run: bool = False, verify_first: bool = True,
-                baseline: bool = True) -> dict:
+                baseline: bool = True, ticket: str | None = None,
+                reason: str | None = None) -> dict:
     """Restore a group (alias-swap, or by-name with `replace` to DROP+recreate; `until` = PITR).
     Needs confirm=true; dry_run returns the plan. For a destructive `replace`, runs
     verify-before-drop (skip with verify_first=false). `until` is ISO-8601 (UTC if no offset);
@@ -193,7 +210,9 @@ def run_restore(group: str, until: str | None = None, replace: bool = False,
     return result
 
 
-def run_prune(confirm: bool = False, dry_run: bool = False) -> dict:
+@_recorded
+def run_prune(confirm: bool = False, dry_run: bool = False, ticket: str | None = None,
+              reason: str | None = None) -> dict:
     """Delete backups past each group's retention (destructive). Needs confirm=true; dry_run (and
     the pre-confirmation result) return the exact keys that would be deleted."""
     store, policy, layout = env.store(), load_policy(env.policy_path()), _layout()

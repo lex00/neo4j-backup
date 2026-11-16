@@ -7,6 +7,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Added
+- **`--ticket` and `--reason`** (#119) on every mutating CLI command (`restore`, `aggregate`,
+  `prune`, `metadata restore`), the MCP write tools, the Dagster restore job (config, plus run tags
+  `neo4j_backup/ticket` / `neo4j_backup/reason`) and the Airflow restore DAG (params). Logged and
+  returned with the result. `NEO4J_BACKUP_REQUIRE_TICKET=true` refuses an applied change without a
+  ticket (`ticket_required`, exit 3).
+
 ## [0.5.0] — 2026-11-15
 
 Phase 1 of #100 (correctness): restores keep customer privileges and take a baseline full,

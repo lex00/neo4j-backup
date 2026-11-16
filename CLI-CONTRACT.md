@@ -59,6 +59,11 @@ gate on meaning rather than a bare non-zero:
 - **`--confirm` (or `--yes`) required for destructive ops. No interactive prompts, ever** — an
   agent/CI can't answer one, so a missing confirmation is a `GUARD` refusal, not a hang. Read-only
   is the default posture.
+- **`--ticket` / `--reason`** on every mutating command: one line each (at most 500 characters),
+  logged to stderr and returned in `result.ticket` / `result.reason` (null when not given), in the
+  dry-run and refusal envelopes too. With `NEO4J_BACKUP_REQUIRE_TICKET=true`, an applied change
+  without `--ticket` is a `GUARD` refusal with error kind `ticket_required`; `--dry-run` never
+  needs one.
 
 ## For implementers
 

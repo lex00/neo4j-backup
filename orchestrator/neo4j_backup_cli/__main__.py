@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 
-from neo4j_backup_core import env, ops, paths
+from neo4j_backup_core import env, ops, paths, record
 from neo4j_backup_core.cli_contract import Exit, envelope, make_error
 from neo4j_backup_core.policy import load_policy
 from neo4j_backup_core.until import UntilError, parse_until
@@ -184,6 +184,27 @@ def cmd_metadata_restore(args):
     return envelope("metadata-restore", ok=True, result=out), Exit.OK
 
 
+def _recorded(cmd):
+    """Wrap a guarded (mutating) command: check `--ticket` / `--reason`, log them, and return
+    them in the result (#119). A missing ticket when one is required refuses like the confirm
+    guard (exit 3) before anything runs; a dry run never needs one."""
+    def run(args):
+        try:
+            rec = record.fields(args.ticket, args.reason,
+                                applying=args.confirm and not args.dry_run)
+        except record.TicketError as e:
+            return envelope(args.command, ok=False, error=make_error(e.kind, str(e))), Exit.GUARD
+        _log(record.describe(args.command, rec))
+        try:
+            env_, code = cmd(args)
+        except ops.OpError as e:
+            env_, code = envelope(args.command, ok=False,
+                                  error=make_error("op_failed", str(e))), Exit.FAILURE
+        env_["result"] = {**(env_.get("result") or {}), **rec}
+        return env_, code
+    return run
+
+
 # --- parser + dispatch ------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -196,6 +217,8 @@ def build_parser() -> argparse.ArgumentParser:
     def guarded(sp):
         sp.add_argument("--dry-run", action="store_true", help="preview the blast radius; mutate nothing")
         sp.add_argument("--confirm", action="store_true", help="apply the mutation (required unless --dry-run)")
+        sp.add_argument("--ticket", help="the change ticket this runs under; recorded with the result")
+        sp.add_argument("--reason", help="why it runs; recorded with the result")
         return sp
 
     b = sub.add_parser("backup", help="back up every database in a policy group")
@@ -209,7 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     a = guarded(sub.add_parser("aggregate", help="collapse each chain into a recovered full (in place)"))
     a.add_argument("group")
-    a.set_defaults(func=cmd_aggregate)
+    a.set_defaults(func=_recorded(cmd_aggregate))
 
     r = guarded(sub.add_parser("restore", help="restore a group (alias-swap or by-name)"))
     r.add_argument("group")
@@ -218,10 +241,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--replace", action="store_true", help="by-name: DROP+recreate an existing target")
     r.add_argument("--no-baseline", action="store_true",
                    help="skip the full backup of each restored database (taken by default, #97)")
-    r.set_defaults(func=cmd_restore)
+    r.set_defaults(func=_recorded(cmd_restore))
 
     pr = guarded(sub.add_parser("prune", help="delete backups past each group's retention"))
-    pr.set_defaults(func=cmd_prune)
+    pr.set_defaults(func=_recorded(cmd_prune))
 
     sb = sub.add_parser("system-backup", help="binary FULL backup of the system database")
     sb.set_defaults(func=cmd_system_backup)
@@ -241,7 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     me.set_defaults(func=cmd_metadata_export)
     mr = guarded(msub.add_parser("restore", help="replay a metadata export into system"))
     mr.add_argument("--key", help="artifact key to replay (default: latest)")
-    mr.set_defaults(func=cmd_metadata_restore)
+    mr.set_defaults(func=_recorded(cmd_metadata_restore))
 
     return p
 
