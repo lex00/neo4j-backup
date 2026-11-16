@@ -254,7 +254,9 @@ def _command_build(run_admin, runner, store, src_store, group, name, local, sp, 
             args = ["--input-type=parquet", *args]
         return _admin(run_admin, runner.import_dump_command(local, args, store.uri(prefix)),
                       store)
-    args = list(b.import_args)
+    # relative files are in the work dir; neo4j-admin doesn't resolve them against the shell's
+    # working directory ("Unable to find the parent of the path"), so pass absolute paths
+    args = resolve_args(b.import_args, lambda p: f"{work}/{p}")
     if b.input_type == "parquet":
         args = ["--input-type=parquet", *args]
     cmd = runner.command_build_command([*b.command, *b.args], local, work, store.uri(prefix),

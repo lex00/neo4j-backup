@@ -219,6 +219,8 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- `kind: command` builds: relative `import_args` files are passed to neo4j-admin as absolute
+  paths in the work dir, which neo4j-admin needs (#109; found by the stack smoke).
 - Docs (#116): README says who the tool is for (a platform team serving other teams from one
   policy); POLICY.md says what goes in the policy and what in the environment, and points at the
   right schema file; RECOVERY.md has the customer-request runbook in short.

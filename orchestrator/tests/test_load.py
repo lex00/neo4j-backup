@@ -230,7 +230,9 @@ def test_command_build_runs_in_one_step_with_env_and_timeout(monkeypatch):
     cmd, env, image = seen[0]
     script = cmd[2]
     assert "timeout 7200 rdf2csv --in src" in script and "database import full" in script
-    assert "--nodes=nodes.csv" in script and "database dump" in script and "rm -rf" in script
+    # relative import files are made absolute under the work dir (found on the stack: #109)
+    assert f"--nodes={env['WORK_DIR']}/nodes.csv" in script
+    assert "database dump" in script and "rm -rf" in script
     assert env["TOKEN"] == "t0k" and env["MODE"] == "fast"     # secret resolved
     assert env["SOURCE_URI"] == "s3://bucket/cat/_source/" and env["WORK_DIR"].startswith("/scratch/")
     assert image is None and out["members"][0]["import_counts"]["nodes"] == 3
