@@ -71,7 +71,7 @@ def main() -> None:
 
     print("== VERIFY via dag.test() (non-destructive) ==")
     pre = len(store.list_artifacts(paths.alias_prefix("demo", "acme-orders")))
-    run = av.neo4j_verify_dag.test()
+    run = av.neo4j_verify_gold.test()
     assert _ok(run), f"verify DAG state={getattr(run,'state',run)}"
     post = len(store.list_artifacts(paths.alias_prefix("demo", "acme-orders")))
     assert post == pre, f"verify mutated prod artifacts ({pre}->{post})"
@@ -116,7 +116,7 @@ def main() -> None:
     print(f"   diff DAG sent acme-orders to the full pool; {newphys} now has a full")
 
     print("== PRUNE via dag.test() ==")
-    run = av.neo4j_prune_dag.test()
+    run = av.neo4j_prune_gold.test()
     assert _ok(run), f"prune DAG state={getattr(run,'state',run)}"
     print("   prune OK")
 

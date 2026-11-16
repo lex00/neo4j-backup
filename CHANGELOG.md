@@ -7,7 +7,21 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+**Upgrading (Airflow).** The fixed `neo4j_verify`, `neo4j_aggregate`, `neo4j_prune`,
+`neo4j_metadata_backup` and `neo4j_system_backup` DAGs are replaced by policy-generated ones
+(`neo4j_verify_<tier>`, `neo4j_aggregate_<tier>`, `neo4j_prune_<tier>`,
+`neo4j_dbms_metadata_default`, `neo4j_dbms_system_default`). Their run history isn't carried
+over; unpause the new DAGs.
+
 ### Added
+- **Every schedule comes from the policy** (#104). Tiers gain `verify_cron`, `aggregate_cron`,
+  `prune_cron` (defaulting to the old fixed crons on tiers that take backups) and `cleanup_cron`
+  (for #93); a top-level `dbms:` block sets `metadata_cron`, `system_backup_cron`,
+  `keep_metadata` and `keep_system`; `schedules: running` makes the generated Dagster schedules
+  start running. Dagster gains `<tier>_verify`, `<tier>_aggregate`, `<tier>_prune`,
+  `default_dbms_metadata` and `default_dbms_system`; Airflow's DAGs are generated the same way.
+  Prune runs per tier over that tier's groups; the DBMS sweep runs after each metadata export and
+  system backup. CI.md maps each cron to its CLI command.
 - **`tenant` label** (#102). Groups (and profiles) take `tenant:`; `owner` is still read as the
   tenant, with a deprecation warning. `backup`, `verify`, `aggregate` and `targets` take
   `--tenant <t>` instead of a group (group and `--tenant` together, or an unknown name, is exit 2);

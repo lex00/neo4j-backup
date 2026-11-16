@@ -54,6 +54,23 @@ pip install "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0
 Add a cloud extra if you use Azure/GCS — put it on the package name:
 `"neo4j-backup-dagster[azure] @ git+…#subdirectory=orchestrator"` (or `[gcp]`).
 
+## Policy crons → CLI commands
+
+The orchestrators read every schedule from the policy (#104). A cron or CI job runs the matching
+command on the same cron:
+
+| Policy cron | Command |
+|---|---|
+| `tiers.<t>.full_cron` | `neo4j-backup backup <group> --kind FULL` for each group on tier `<t>` |
+| `tiers.<t>.diff_cron` | `neo4j-backup backup <group> --kind DIFF` (then `--kind FULL` if `result.needs_full` lists any, #74) |
+| `tiers.<t>.verify_cron` | `neo4j-backup verify <group>` |
+| `tiers.<t>.aggregate_cron` | `neo4j-backup aggregate <group> --confirm` |
+| `tiers.<t>.prune_cron` | `neo4j-backup prune --confirm` (all groups and the DBMS sweep; one job is enough) |
+| `dbms.metadata_cron` | `neo4j-backup metadata export` |
+| `dbms.system_backup_cron` | `neo4j-backup system-backup` |
+
+`neo4j-backup targets --tenant <t>` (or `targets <group>`) lists what a job covers.
+
 ## Gating and lanes
 
 - **Exit codes gate the job.** The CLI returns non-zero on failure (`1`), bad args (`2`), or a

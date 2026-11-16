@@ -46,8 +46,8 @@ def main() -> None:
 
     store = config.store()
 
-    print("== BACKUP: neo4j_metadata_backup via dag.test() ==")
-    run = md.neo4j_metadata_backup_dag.test()
+    print("== BACKUP: neo4j_dbms_metadata_default via dag.test() ==")
+    run = md.neo4j_dbms_metadata_default.test()
     assert _ok(run), f"metadata backup DAG state={getattr(run,'state',run)}"
     key = store.latest_text_key(paths.metadata_prefix())
     assert key, "no _dbms/ artifact written"

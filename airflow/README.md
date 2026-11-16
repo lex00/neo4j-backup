@@ -17,9 +17,9 @@ runner command-building + pod spec); each adapter is a thin binding. Architectur
 |---|---|
 | `dags/backup_dag.py` | One backup DAG per **(tier, lane)** — `neo4j_backup_<tier>_<full\|diff>`. Fans out over the tier's `(group, alias)` via dynamic task mapping. |
 | `dags/restore_dag.py` | `neo4j_restore` — manual, params `group_id` + `restore_until`. Group-aligned seed-from-URI then alias swap (pure Cypher). |
-| `dags/avp_dags.py` | `neo4j_aggregate`, `neo4j_verify` (non-destructive), `neo4j_prune` — retention / consistency. |
-| `dags/metadata_dag.py` | `neo4j_metadata_backup` / `neo4j_metadata_restore` — agentless DBMS metadata export/replay (#14). |
-| `dags/system_dag.py` | `neo4j_system_backup` — binary `system` backup for exact restore (#15); restore via `bootstrap/restore_system.sh`. |
+| `dags/avp_dags.py` | `neo4j_aggregate_<tier>`, `neo4j_verify_<tier>` (non-destructive), `neo4j_prune_<tier>` on each tier's crons (#104). |
+| `dags/metadata_dag.py` | `neo4j_dbms_metadata_default` / `neo4j_metadata_restore` — agentless DBMS metadata export/replay (#14). |
+| `dags/system_dag.py` | `neo4j_dbms_system_default` — binary `system` backup for exact restore (#15); restore via `bootstrap/restore_system.sh`. |
 | `dags/scaffold_dag.py` | Trivial policy-loading DAG (smoke of the wiring). |
 | `neo4j_backup_airflow/config.py` | Env → core clients (the [Dagster env table](../orchestrator/README.md#environment-variables), verbatim). |
 | `neo4j_backup_airflow/execution.py` | `run_admin` — subprocess or KubernetesPodOperator per `RUNNER_MODE`. |
@@ -31,15 +31,17 @@ runner command-building + pod spec); each adapter is a thin binding. Architectur
 | `neo4j_backup_<tier>_full` | tier's `full_cron` | `neo4j-admin database backup --type FULL` of each alias's live physical, into its per-store prefix. |
 | `neo4j_backup_<tier>_diff` | tier's `diff_cron` | same, `--type DIFF` — extends the chain in that physical's prefix. |
 | `neo4j_restore` | manual (`-c '{"group_id":"demo"}'`) | seed a fresh physical per alias from the latest artifact (optionally `restore_until` for PITR), then swap each alias. |
-| `neo4j_aggregate` | weekly | collapse each chain into one recovered full (in place). |
-| `neo4j_verify` | daily | **non-destructive** consistency check — copy chain to a scratch prefix, aggregate + `neo4j-admin database check`, then delete the copy. |
-| `neo4j_prune` | weekly | age-based retention; always keep the chain head. |
-| `neo4j_metadata_backup` | daily | export users/roles/privileges/aliases as replayable Cypher to `_dbms/` (pure Bolt). |
+| `neo4j_aggregate_<tier>` | tier's `aggregate_cron` (default Sundays 05:00) | collapse each chain into one recovered full (in place). |
+| `neo4j_verify_<tier>` | tier's `verify_cron` (default daily 06:00) | **non-destructive** consistency check — copy chain to a scratch prefix, aggregate + `neo4j-admin database check`, then delete the copy. |
+| `neo4j_prune_<tier>` | tier's `prune_cron` (default Sundays 07:00) | chain-aware retention over the tier's groups (#73). |
+| `neo4j_dbms_metadata_default` | `dbms.metadata_cron` (default daily 02:00) | export users/roles/privileges/aliases as replayable Cypher to `_dbms/` (pure Bolt), then keep `dbms.keep_metadata` / `keep_system`. |
 | `neo4j_metadata_restore` | manual | replay the latest (or a given `key`) against `system` over Bolt. |
-| `neo4j_system_backup` | daily | binary `system` backup (exact metadata, native passwords) to `_dbms/system/`. Restore is offline — `just restore-system`. |
+| `neo4j_dbms_system_default` | `dbms.system_backup_cron` (default daily 01:00) | binary `system` backup (exact metadata, native passwords) to `_dbms/system/`, then the same sweep. Restore is offline — `just restore-system`. |
 
-One backup DAG is generated per tier × lane from the policy at parse time, so adding a tier
-or changing a cron is a policy edit — no DAG code changes.
+Every scheduled DAG is generated from the policy at parse time (#104), so adding a tier or
+changing a cron is a policy edit, with no DAG code changes. The fixed `neo4j_verify`,
+`neo4j_aggregate`, `neo4j_prune`, `neo4j_metadata_backup` and `neo4j_system_backup` DAGs of
+v0.5.0 and earlier are gone; their run history isn't carried over to the new ids.
 
 ## How it maps to the Dagster adapter
 

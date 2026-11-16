@@ -134,11 +134,13 @@ def aggregate(
         out = ops.aggregate_target(
             _admin(context, runner, pipes_subprocess_client), store, runner, _layout,
             group_id, alias, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
-            log=context.log.info,
+            log=context.log.info, skip_missing=True,
         )
     except ops.OpError as e:
         raise dg.Failure(str(e))
-    return dg.MaterializeResult(metadata={"physical": out["physical"], "full": out["full"] or ""})
+    return dg.MaterializeResult(metadata={"physical": out["physical"] or "",
+                                          "full": out["full"] or "",
+                                          "skipped": bool(out.get("skipped"))})
 
 
 # --- Verify (consistency check, NON-destructive) ---------------------------------
@@ -157,9 +159,12 @@ def verify(
         out = ops.verify_target(
             _admin(context, runner, pipes_subprocess_client), store, runner, _layout,
             group_id, alias, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH,
+            skip_missing=True, log=context.log.info,
         )
     except ops.OpError as e:
         raise dg.Failure(str(e))
+    if out.get("skipped"):  # no backups of this member yet (#104)
+        return dg.MaterializeResult(metadata={"alias": alias, "skipped": True})
     context.log.info(f"verified {out['physical']}: consistent ({out['checked']} artifacts checked)")
     return dg.MaterializeResult(
         metadata={"alias": alias, "physical": out["physical"], "consistent": True}
@@ -167,19 +172,28 @@ def verify(
 
 
 # --- Prune (age-based retention) -------------------------------------------------
+class PruneConfig(dg.Config):
+    tier: str | None = None  # one tier's groups (its prune_cron schedule, #104); None: all
+    dbms: bool = True        # also the DBMS sweep (metadata exports, system backups)
+
+
 @dg.asset(group_name="neo4j_backup")
 def prune(
     context: dg.AssetExecutionContext,
+    config: PruneConfig,
     store: ObjectStoreResource,
     runner: RunnerResource,
     pipes_subprocess_client: dg.PipesSubprocessClient,
 ):
     """Delete backups past each group's retention_days, whole chains only (#73): a full that a
     kept diff depends on is kept, and the chain covering the cutoff is kept. Artifacts with no
-    metadata sidecar are inspected first (#118)."""
-    out = ops.prune(store, load_policy(POLICY_PATH), _layout,
+    metadata sidecar are inspected first (#118). The `{tier}_prune` schedules run it per tier
+    without the DBMS sweep, which runs after each metadata export and system backup (#104)."""
+    pol = load_policy(POLICY_PATH)
+    out = ops.prune(store, pol, _layout,
                     run_admin=_admin(context, runner, pipes_subprocess_client), runner=runner,
-                    log=context.log.info)
+                    log=context.log.info, dbms=config.dbms,
+                    groups=pol.groups_for_tier(config.tier) if config.tier else None)
     context.log.info(f"pruned {out['deleted']} artifacts; kept {out['kept_for_chains']} past "
                      f"retention for their chains; {out['unknown_kept']} without metadata")
     return dg.MaterializeResult(
@@ -202,6 +216,9 @@ def system_backup(
     out = ops.system_backup(_admin(context, runner, pipes_subprocess_client), store, runner,
                             _layout, upload=BACKUP_UPLOAD, staging=UPLOAD_STAGING_PATH)
     context.log.info(f"system backup -> {out['key']}")
+    # DBMS sweep (#104): keep the policy's dbms.keep_system / keep_metadata
+    swept = ops.prune(store, load_policy(POLICY_PATH), _layout, groups=[])
+    context.log.info(f"dbms sweep deleted {swept['deleted']}")
     return dg.MaterializeResult(metadata={"key": out["key"] or ""})
 
 
@@ -216,6 +233,8 @@ def metadata_export(
     store it under the reserved `_dbms/` prefix. Restore is `metadata_restore`."""
     out = ops.export_metadata(neo4j, store, _layout)
     context.log.info(f"metadata export -> {out['key']} ({out['bytes']} bytes)")
+    swept = ops.prune(store, load_policy(POLICY_PATH), _layout, groups=[])  # DBMS sweep (#104)
+    context.log.info(f"dbms sweep deleted {swept['deleted']}")
     return dg.MaterializeResult(
         metadata={"key": out["key"], "bytes": dg.MetadataValue.int(out["bytes"])})
 
@@ -365,31 +384,81 @@ def diff_lane_requests(keys, neo4j, store, log=lambda _m: None, tick: str = "") 
     return out
 
 
-def _make_schedule(tier_name: str, lane: str, cron: str):
-    def _tick(context) -> str:
-        try:
-            t = context.scheduled_execution_time  # set by the daemon; raises if unset (tests)
-        except Exception:  # noqa: BLE001
-            t = None
-        return t.isoformat() if t else ""
+verify_job = dg.define_asset_job("verify_job", selection=[verify], partitions_def=targets)
+aggregate_job = dg.define_asset_job("aggregate_job", selection=[aggregate],
+                                    partitions_def=targets)
+prune_job = dg.define_asset_job("prune_job", selection=[prune])
+dbms_metadata_job = dg.define_asset_job("dbms_metadata_job", selection=[metadata_export])
+dbms_system_job = dg.define_asset_job("dbms_system_job", selection=[system_backup])
 
+
+def _status(policy) -> dg.DefaultScheduleStatus:
+    """The policy's `schedules:` setting (#104): stopped (default) or running."""
+    return (dg.DefaultScheduleStatus.RUNNING if getattr(policy, "schedules", "stopped") == "running"
+            else dg.DefaultScheduleStatus.STOPPED)
+
+
+def _tick(context) -> str:
+    try:
+        t = context.scheduled_execution_time  # set by the daemon; raises if unset (tests)
+    except Exception:  # noqa: BLE001
+        t = None
+    return t.isoformat() if t else ""
+
+
+def _tier_keys(context, pol, tier_name: str) -> list[str]:
+    # Only request partitions that currently exist — a policy read that's ahead of
+    # (or behind) the reconcile sensor must not request a non-existent partition (#43).
+    existing = set(context.instance.get_dynamic_partitions(targets.name))
+    return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name) for a in g.names
+            if f"{g.id}/{a}" in existing]
+
+
+def _make_maintenance_schedule(tier_name: str, lane: str, cron: str, status):
+    """`{tier}_verify`, `{tier}_aggregate` (one run per member of the tier), `{tier}_prune` (one
+    run over the tier's groups) from the tier's crons (#104)."""
+    if lane == "prune":
+        @dg.schedule(job=prune_job, cron_schedule=cron, name=f"{tier_name}_prune",
+                     default_status=status)
+        def _prune(context):
+            return dg.RunRequest(run_key=f"{tier_name}:prune:{_tick(context)}", run_config={
+                "ops": {"prune": {"config": {"tier": tier_name, "dbms": False}}}})
+        return _prune
+    job = verify_job if lane == "verify" else aggregate_job
+
+    @dg.schedule(job=job, cron_schedule=cron, name=f"{tier_name}_{lane}", default_status=status)
+    def _members(context):
+        return [dg.RunRequest(run_key=f"{k}:{lane}:{_tick(context)}", partition_key=k)
+                for k in _tier_keys(context, load_policy(POLICY_PATH), tier_name)]
+    return _members
+
+
+def _make_dbms_schedules(policy, status, cluster: str = "default") -> list:
+    """`{cluster}_dbms_metadata` and `{cluster}_dbms_system` from the policy's `dbms:` block
+    (#104); one `default` cluster until #106."""
+    return [
+        dg.ScheduleDefinition(name=f"{cluster}_dbms_metadata", job=dbms_metadata_job,
+                              cron_schedule=policy.dbms.metadata_cron, default_status=status),
+        dg.ScheduleDefinition(name=f"{cluster}_dbms_system", job=dbms_system_job,
+                              cron_schedule=policy.dbms.system_backup_cron, default_status=status),
+    ]
+
+
+def _make_schedule(tier_name: str, lane: str, cron: str,
+                   status=dg.DefaultScheduleStatus.STOPPED):
     def _keys(context, pol):
-        # Only request partitions that currently exist — a policy read that's ahead of
-        # (or behind) the reconcile sensor must not request a non-existent partition (#43).
-        existing = set(context.instance.get_dynamic_partitions(targets.name))
-        return [f"{g.id}/{a}" for g in pol.groups_for_tier(tier_name) for a in g.names
-                if f"{g.id}/{a}" in existing]
+        return _tier_keys(context, pol, tier_name)
 
     if lane == "full":
         @dg.schedule(job=backup_job, cron_schedule=cron, name=f"{tier_name}_{lane}",
-                     default_status=dg.DefaultScheduleStatus.STOPPED)
+                     default_status=status)
         def _full(context):
             return [_lane_request(k, "full", _tick(context))
                     for k in _keys(context, load_policy(POLICY_PATH))]
         return _full
 
     @dg.schedule(job=backup_job, cron_schedule=cron, name=f"{tier_name}_{lane}",
-                 default_status=dg.DefaultScheduleStatus.STOPPED)
+                 default_status=status)
     def _diff(context, neo4j: Neo4jResource, store: ObjectStoreResource):
         return diff_lane_requests(_keys(context, load_policy(POLICY_PATH)), neo4j, store,
                                   log=context.log.warning, tick=_tick(context))
@@ -402,15 +471,23 @@ def _build_schedules() -> list:
     policy = load_policy_at_startup(POLICY_PATH, configured="NEO4J_BACKUP_POLICY" in os.environ)
     if policy is None:
         return []
-    return [_make_schedule(tier_name, lane, cron)
+    status = _status(policy)
+    out = [_make_schedule(tier_name, lane, cron, status)
+           for tier_name, tier in policy.tiers.items()
+           for lane, cron in (("full", tier.full_cron), ("diff", tier.diff_cron))
+           if cron]  # a load-only tier may have neither (#103)
+    out += [_make_maintenance_schedule(tier_name, lane, cron, status)
             for tier_name, tier in policy.tiers.items()
-            for lane, cron in (("full", tier.full_cron), ("diff", tier.diff_cron))
-            if cron]  # a load-only tier may have neither (#103)
+            for lane, cron in (("verify", tier.verify_cron), ("aggregate", tier.aggregate_cron),
+                               ("prune", tier.prune_cron))
+            if cron]
+    return out + _make_dbms_schedules(policy, status)
 
 
 defs = dg.Definitions(
     assets=[backup, aggregate, verify, prune, metadata_export, system_backup],
-    jobs=[backup_job, restore_group, metadata_restore],
+    jobs=[backup_job, verify_job, aggregate_job, prune_job, dbms_metadata_job, dbms_system_job,
+          restore_group, metadata_restore],
     schedules=_build_schedules(),
     sensors=[reconcile_registry],
     resources={

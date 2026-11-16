@@ -49,3 +49,28 @@ def test_profiled_policy_dags_see_resolved_groups(tmp_path, monkeypatch):
     from neo4j_backup_airflow import config
     gold = policy.load_policy(config.policy_path()).groups_for_tier("gold")  # the targets task
     assert "shop" in [g.id for g in gold]
+
+
+def test_policy_crons_drive_every_dag(tmp_path, monkeypatch):
+    # #104: verify/aggregate/prune per tier and the DBMS DAGs take their crons from the policy
+    import yaml
+    repo = Path(__file__).resolve().parents[2]
+    raw = yaml.safe_load((repo / "policies" / "demo.yaml").read_text())
+    raw["tiers"]["gold"]["verify_cron"] = "30 4 * * *"
+    raw["dbms"] = {"metadata_cron": "15 3 * * *"}
+    f = tmp_path / "p.yaml"
+    f.write_text(yaml.safe_dump(raw))
+    monkeypatch.setenv("NEO4J_BACKUP_POLICY", str(f))
+    from neo4j_backup_core import policy
+    policy._cache.clear()
+    bag = DagBag(dag_folder=str(repo / "airflow" / "dags"), include_examples=False)
+    assert bag.import_errors == {}, bag.import_errors
+    sched = {d: str(bag.dags[d].schedule) for d in bag.dags}
+    assert "30 4 * * *" in sched["neo4j_verify_gold"]
+    assert "0 5 * * 0" in sched["neo4j_aggregate_silver"]   # default, as before
+    assert "0 7 * * 0" in sched["neo4j_prune_bronze"]
+    assert "15 3 * * *" in sched["neo4j_dbms_metadata_default"]
+    assert "0 1 * * *" in sched["neo4j_dbms_system_default"]
+    assert not {"neo4j_verify", "neo4j_aggregate", "neo4j_prune", "neo4j_metadata_backup",
+                "neo4j_system_backup"} & set(bag.dags)
+    assert not any(d.endswith("_nightly") for d in bag.dags if not d.startswith("neo4j_backup_"))
