@@ -225,3 +225,18 @@ def test_restore_to_cluster_dry_run_and_apply(monkeypatch):
                      "--no-baseline"])
     assert_exit(code, Exit.OK)
     assert seen["move"]["fence_source"] is True and env["result"]["policy"]
+
+
+# --- status (#123) ----------------------------------------------------------------------------
+
+def test_status_stale_exits_non_zero(monkeypatch):
+    from neo4j_backup_core import freshness
+    monkeypatch.setattr(freshness, "status", lambda *a, **k: {"targets": [], "stale": ["demo/x"]})
+    env, code = run(["status"])
+    assert_exit(code, Exit.OK)
+    env, code = run(["status", "--stale"])
+    assert_exit(code, Exit.FAILURE)
+    assert env["error"]["kind"] == "stale"
+    monkeypatch.setattr(freshness, "status", lambda *a, **k: {"targets": [], "stale": []})
+    env, code = run(["status", "--stale"])
+    assert_exit(code, Exit.OK)

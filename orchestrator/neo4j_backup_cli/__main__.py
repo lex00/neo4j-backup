@@ -95,6 +95,24 @@ def _by_tenant(cmd, op):
     return run
 
 
+def cmd_status(args):
+    """Freshness against `rpo_minutes` (#123). `--stale` exits 1 when any target is stale."""
+    from neo4j_backup_core import freshness
+
+    policy = load_policy(env.policy_path())
+    try:
+        groups = (policy.select(args.group, args.tenant) if (args.group or args.tenant)
+                  else policy.db_groups)
+    except policy_mod.SelectionError as e:
+        return envelope("status", ok=False, error=make_error("usage", str(e))), Exit.USAGE
+    out = freshness.status(env.store(), paths.get_layout(), groups)
+    if args.stale and out["stale"]:
+        return envelope("status", ok=False, result=out, error=make_error(
+            "stale", f"{len(out['stale'])} target(s) past rpo_minutes: "
+                     f"{', '.join(out['stale'])}")), Exit.FAILURE
+    return envelope("status", ok=True, result=out), Exit.OK
+
+
 def cmd_restore_points(args):
     """What a group can be restored to, per member (#113). Read-only: sidecars and load folders,
     and Neo4j only to name the current database."""
@@ -587,6 +605,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     t = selectable(sub.add_parser("targets", help="list the policy's group/member targets"))
     t.set_defaults(func=cmd_targets)
+
+    stt = selectable(sub.add_parser("status", help="freshness of each target against its "
+                                                   "rpo_minutes (#123)"))
+    stt.add_argument("--stale", action="store_true",
+                     help="exit 1 when any target is stale (for cron or CI alerts)")
+    stt.set_defaults(func=cmd_status)
 
     im = sub.add_parser("import", help="bulk-import raw data into an offline store on the loader (#16)")
     im.add_argument("database", help="the physical database name to import into (see IMPORT.md)")

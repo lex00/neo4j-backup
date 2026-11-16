@@ -519,6 +519,31 @@ class Policy(BaseModel):
                     f"retention_days {g.retention_days}; prune keeps each chain until a newer "
                     f"full covers the window, so backups stay up to {_days(gap)} plus "
                     f"{g.retention_days} days")
+        out += self._rpo_warnings()
+        return out
+
+    def _rpo_warnings(self) -> list[str]:
+        """A group whose backups (or, for a group not backed up by design, rebuilds) come further
+        apart than its `rpo_minutes` can't meet it (#123)."""
+        out = []
+        for g in self.db_groups:
+            t = self.tiers[g.tier]
+            load = g.load
+            by_design = load.writes == "read-only" or (load.writes == "read-write"
+                                                       and load.protect_writes is False)
+            name, expr = (("rebuild_cron", t.rebuild_cron) if by_design
+                          else ("diff_cron", t.diff_cron) if t.diff_cron
+                          else ("full_cron", t.full_cron))
+            if not expr:
+                continue
+            try:
+                gap = cron.max_gap(expr)
+            except ValueError:
+                continue
+            if gap is not None and gap.total_seconds() > g.rpo_minutes * 60:
+                out.append(f"group {g.id!r}: tier {g.tier!r} runs {name} {expr!r} up to "
+                           f"{int(gap.total_seconds() // 60)} minutes apart, longer than "
+                           f"rpo_minutes {g.rpo_minutes}; `status` will report it stale")
         return out
 
     def group(self, gid: str) -> DbGroup:

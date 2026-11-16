@@ -112,28 +112,14 @@ def show_chain(group: str, member: str) -> dict:
 
 
 def backup_status(tenant: str | None = None) -> dict:
-    """Freshness of every target (or one tenant's, #102): its latest artifact and how many hours
-    old it is (null if never backed up), with the group's tenant. The 'are my backups current?'
-    view."""
-    store, policy, layout = env.store(), load_policy(env.policy_path()), _layout()
-    now = time.time()
-    rows = []
-    for g in (policy.select(tenant=tenant) if tenant else policy.db_groups):
-        for a in g.names:
-            arts = ops._store(store, g.id).list_artifacts(layout.alias_prefix(g.id, a))
-            if not arts:
-                rows.append({"target": f"{g.id}/{a}", "tenant": g.tenant,
-                             "cluster": getattr(g, "cluster", None) or "default",
-                             "latest": None, "age_hours": None})
-                continue
-            k, _s, m = max(arts, key=lambda t: t[2])
-            age = round((now - m.timestamp()) / 3600, 1) if hasattr(m, "timestamp") else None
-            loads = ops.load_artifacts(store, layout, g.id, a)
-            rows.append({"target": f"{g.id}/{a}", "tenant": g.tenant,
-                         "cluster": getattr(g, "cluster", None) or "default", "latest": k,
-                         "age_hours": age,
-                         "latest_load": loads[-1]["key"] if loads else None})
-    return {"targets": rows}
+    """Freshness of every target (or one tenant's, #102): its newest backup and load, how old the
+    newest restorable point is, and its state against the group's `rpo_minutes` (#123): `ok`,
+    `stale`, or `by_design` (not backed up by design, #112). `stale` lists the stale targets."""
+    from neo4j_backup_core import freshness
+
+    policy = load_policy(env.policy_path())
+    groups = policy.select(tenant=tenant) if tenant else policy.db_groups
+    return freshness.status(env.store(), _layout(), groups)
 
 
 @_selectable
