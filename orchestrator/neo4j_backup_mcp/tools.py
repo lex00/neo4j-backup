@@ -89,7 +89,7 @@ def list_targets(group: str | None = None, tenant: str | None = None) -> dict:
 
 def latest_artifact(group: str, member: str) -> dict:
     """The newest backup artifact for one group member (its chain head), or null if none."""
-    store, layout = env.store(), _layout()
+    store, layout = env.store().for_group(group), _layout()  # the group's store (#105)
     key = store.latest_artifact_key(layout.alias_prefix(group, member))
     if not key:
         return {"group": group, "member": member, "artifact": None}
@@ -100,7 +100,7 @@ def show_chain(group: str, member: str) -> dict:
     """List the backup artifacts for one group member, oldest first, and the chains read from
     their sidecars (#118): per physical folder, full then diffs, with the time window each covers.
     Artifacts with no sidecar yet are listed under `unknown`."""
-    store, layout = env.store(), _layout()
+    store, layout = env.store().for_group(group), _layout()  # the group's store (#105)
     arts = sorted(store.list_artifacts(layout.alias_prefix(group, member)), key=lambda t: t[2])
     chain = [{"key": k, "bytes": s, "modified": _iso(m)} for (k, s, m) in arts]
     read = ops.artifact_chains(store, layout, group, member)
@@ -117,7 +117,7 @@ def backup_status(tenant: str | None = None) -> dict:
     rows = []
     for g in (policy.select(tenant=tenant) if tenant else policy.db_groups):
         for a in g.names:
-            arts = store.list_artifacts(layout.alias_prefix(g.id, a))
+            arts = ops._store(store, g.id).list_artifacts(layout.alias_prefix(g.id, a))
             if not arts:
                 rows.append({"target": f"{g.id}/{a}", "tenant": g.tenant, "latest": None,
                              "age_hours": None})

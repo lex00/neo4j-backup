@@ -48,6 +48,12 @@ class BaselineError(OpError):
         self.done = done
 
 
+def _store(store, group_id: str):
+    """The store for `group_id` (#105): a StoreSet resolves the group's named store; a plain
+    store (tests, single-store callers) is used as is."""
+    return store.for_group(group_id) if hasattr(store, "for_group") else store
+
+
 def _stage(runner, tag: str, name: str, staging: str | None) -> str:
     return f"{(staging or runner.scratch_path).rstrip('/')}/{tag}/{name}"
 
@@ -144,6 +150,7 @@ def base_full(neo4j, store, layout, group_id: str, alias: str) -> dict:
     after the database's creation counts (sidecar times, #118). Returns `physical`, `full` (the
     newest such full's key, or None) and `unknown` (backups in the folder without a sidecar, which
     might be a base; callers treat those as "maybe")."""
+    store = _store(store, group_id)
     physical = neo4j.resolve_physical(alias)
     if not physical:
         raise OpError(f"{alias!r} resolves to no physical database — bootstrap the group first")
@@ -180,6 +187,7 @@ def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: s
     is the type neo4j-admin actually wrote (an AUTO can be either), from the sidecar. `physical`
     names the database explicitly (a restore's new physical, even when an external router, not
     the alias, points at it)."""
+    store = _store(store, group_id)
     physical = physical or neo4j.resolve_physical(alias)
     if not physical:
         raise OpError(f"{alias!r} resolves to no physical database — bootstrap the group first")
@@ -202,6 +210,7 @@ def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: s
 
 def head_physical(store, layout, group_id: str, alias: str) -> tuple[str, str]:
     """The alias's chain head key and its physical name, or raise if the alias has no backup."""
+    store = _store(store, group_id)
     head = store.latest_artifact_key(layout.alias_prefix(group_id, alias))
     if not head:
         raise OpError(f"no artifact for {group_id}/{alias}")
@@ -213,6 +222,7 @@ def aggregate_target(run_admin: RunAdmin, store, runner, layout, group_id: str, 
                      log: Log = _NOLOG, skip_missing: bool = False) -> dict:
     """Collapse the live physical's chain into one recovered full, IN PLACE (RTO/retention).
     `skip_missing` (scheduled runs, #104): a member with no backups yet is skipped, not failed."""
+    store = _store(store, group_id)
     if skip_missing and not store.latest_artifact_key(layout.alias_prefix(group_id, alias)):
         log(f"{group_id}/{alias}: no backups yet; aggregate skipped")
         return {"alias": alias, "physical": None, "full": None, "skipped": True}
@@ -228,6 +238,7 @@ def verify_target(run_admin: RunAdmin, store, runner, layout, group_id: str, ali
                   skip_missing: bool = False, log: Log = _NOLOG) -> dict:
     """Non-destructive consistency check of the latest backup for the alias. `skip_missing`
     (scheduled runs, #104): a member with no backups yet is skipped, not failed."""
+    store = _store(store, group_id)
     if skip_missing and not store.latest_artifact_key(layout.alias_prefix(group_id, alias)):
         log(f"{group_id}/{alias}: no backups yet; verify skipped")
         return {"alias": alias, "physical": None, "consistent": None, "skipped": True}
@@ -244,6 +255,7 @@ def artifact_chains(store, layout, group_id: str, alias: str, *, run_admin: RunA
     """The backup chains for one member, per physical, from the sidecars (#118). With `run_admin`
     and `runner`, artifacts that have no sidecar (taken before #118) are inspected once and
     backfilled first; without, they are reported under `unknown`."""
+    store = _store(store, group_id)
     prefix = layout.alias_prefix(group_id, alias)
     if run_admin is not None and runner is not None:
         _metas, unknown = artifacts.read(store, prefix)
@@ -348,7 +360,9 @@ def prune(store, policy, layout, *, keep_system: int | None = None,
             store.delete_keys(keys)
 
     swept: list[str] = []
+    base = store
     for g in (policy.db_groups if groups is None else groups):
+        store = _store(base, g.id)  # each group's own store (#105)
         cutoff = now - timedelta(days=g.retention_days)
         for a in g.names:
             prefix = layout.alias_prefix(g.id, a)
@@ -360,19 +374,20 @@ def prune(store, policy, layout, *, keep_system: int | None = None,
             held_total += held
             unknown_kept.extend(read["unknown"])
             _sweep(keys, f"{g.id}/{a}")
-            swept.append(prefix)
+            swept.append((store, prefix))
+    store = base  # DBMS objects live in the default store (per cluster with #106)
     if dbms:
         # DBMS metadata: keep the newest N (mirrors metadata.prune, but enumerable for dry-run)
         marts = sorted(store.list_text_keys(layout.metadata_prefix()), key=lambda t: t[1])
         _sweep([k for (k, _m) in marts[:-keep_metadata]], "_dbms/metadata")
         sysarts = sorted(store.list_artifacts(layout.system_prefix()), key=lambda t: t[2])
         _sweep([k for (k, _s, _m) in sysarts[:-keep_system]], "_dbms/system")
-        swept.append(layout.system_prefix())
+        swept.append((store, layout.system_prefix()))
     # sidecars (#118) go with their artifacts
     sidecars = 0
     if not dry_run:
-        for prefix in swept:
-            sidecars += len(artifacts.drop_orphans(store, prefix))
+        for st, prefix in swept:
+            sidecars += len(artifacts.drop_orphans(st, prefix))
     return {"deleted": len(victims), "detail": detail, "keys": victims, "dry_run": dry_run,
             "sidecars_deleted": sidecars, "kept_for_chains": held_total,
             "unknown_kept": len(unknown_kept)}
@@ -437,6 +452,7 @@ def choose_seed(store, layout, group_id: str, name: str, until: str | None = Non
     - Otherwise (before the first backup, or in a gap between chains): OpError listing the
       nearest windows, raised before anything is changed.
     Returns {key, until, chain: {folder, from, to} | None, whole: bool}."""
+    store = _store(store, group_id)
     prefix = layout.alias_prefix(group_id, name)
     if until is None:
         key = store.latest_artifact_key(prefix)
@@ -511,6 +527,7 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
     the caller cuts the alias over afterwards (`cutover_seeded`, which copies privileges first).
     Returns a plan entry tagged with `mode`. The artifact (and whether `restore_until` applies)
     comes from `choose_seed` (#114), or `seed` when the caller chose already."""
+    store = _store(store, group.id)
     seed = seed or choose_seed(store, layout, group.id, name, restore_until)
     key, until = seed["key"], seed["until"]
     if group.restore_mode == "by-name":
@@ -555,6 +572,7 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
     across tasks instead). by-name pre-validates every artifact + existing-target precondition BEFORE
     any drop, so a missing artifact or an unreplaceable target fails before anything is destroyed.
     alias-swap seeds every fresh physical, then cuts all aliases over. Returns the member plan."""
+    store = _store(store, group.id)
     members: list[dict] = []
     seeds = choose_seeds(store, layout, group, restore_until)  # every member, before any change
     if group.restore_mode == "by-name":

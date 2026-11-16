@@ -36,6 +36,46 @@ class Topology(BaseModel):
     secondaries: int = Field(default=0, ge=0)
 
 
+class StoreConfig(BaseModel):
+    """A named object store (#105). `url` is `s3://<bucket>`, `gs://<bucket>` or
+    `azb://<account>/<container>`; the rest are optional per-store settings. `credentials_ref` is
+    a secret reference (resolved by the secret provider; wired with the runner env in #105's
+    second part)."""
+    model_config = ConfigDict(extra="forbid")
+    url: str
+    region: str | None = None
+    endpoint: str | None = None
+    sse: str | None = None
+    sse_kms_key_id: str | None = None
+    write_args: dict = Field(default_factory=dict)
+    credentials_ref: str | None = None
+
+    @model_validator(mode="after")
+    def _url(self) -> "StoreConfig":
+        scheme, _, rest = self.url.partition("://")
+        parts = [p for p in rest.split("/") if p]
+        if scheme not in ("s3", "gs", "azb") or not parts:
+            raise ValueError(f"store url {self.url!r}: expected s3://<bucket>, gs://<bucket> "
+                             f"or azb://<account>/<container>")
+        if (scheme == "azb" and len(parts) != 2) or (scheme != "azb" and len(parts) != 1):
+            raise ValueError(f"store url {self.url!r}: name the bucket (or account/container) "
+                             f"only; key prefixes come from the path layout")
+        return self
+
+    @property
+    def cloud(self) -> str:
+        return {"s3": "aws", "gs": "gcp", "azb": "azure"}[self.url.split("://")[0]]
+
+    @property
+    def bucket(self) -> str:
+        """The bucket (S3/GCS) or container (Azure)."""
+        return self.url.split("://", 1)[1].rstrip("/").split("/")[-1]
+
+    @property
+    def account(self) -> str | None:
+        return self.url.split("://", 1)[1].split("/")[0] if self.cloud == "azure" else None
+
+
 class LoadSource(BaseModel):
     """Where a rebuild's input files live (#103): a named store (#105) and a prefix. Default:
     the group's own store under `<group>/_source/`."""
@@ -126,7 +166,8 @@ class DbGroup(BaseModel):
     aliases: list[str] = Field(default_factory=list)      # alias-swap mode
     databases: list[str] = Field(default_factory=list)    # by-name mode (database names)
     tier: str
-    s3_prefix: str
+    storage: str | None = None  # a name under `storage:` (#105); None: the `default` store
+    s3_prefix: str | None = None  # deprecated (#105): never read; the store comes from `storage`
     retention_days: int = 7
     rpo_minutes: int = 60
     rto_minutes: int = 120
@@ -148,6 +189,13 @@ class DbGroup(BaseModel):
                                  for err in e.errors())
                 raise ValueError(f"group {data.get('id')!r}: load: {msgs}") from None
         return data
+
+    @model_validator(mode="after")
+    def _s3_prefix_deprecated(self) -> "DbGroup":
+        if self.s3_prefix is not None:
+            _log.warning("policy: group %r sets 's3_prefix', which is ignored; name a store with "
+                         "'storage:' instead (#105)", self.id)
+        return self
 
     @model_validator(mode="after")
     def _owner_is_tenant(self) -> "DbGroup":
@@ -300,6 +348,9 @@ class Policy(BaseModel):
     tiers: dict[str, Tier]
     profiles: dict[str, dict] = Field(default_factory=dict)  # #101; resolved before validation
     dbms: Dbms = Field(default_factory=Dbms)  # #104
+    # Named stores (#105). Without a `default` entry, the environment (BACKUP_BUCKET, CLOUD, …)
+    # defines the `default` store, as before.
+    storage: dict[str, StoreConfig] = Field(default_factory=dict)
     # initial status of the Dagster schedules generated from this policy (#104)
     schedules: Literal["stopped", "running"] = "stopped"
 
@@ -313,6 +364,13 @@ class Policy(BaseModel):
         for g in self.db_groups:
             if g.tier not in self.tiers:
                 raise ValueError(f"group {g.id!r} references unknown tier {g.tier!r}")
+            for what, name in (("storage", g.storage),
+                               ("load.source.storage", g.load.source.storage
+                                if g.load.source else None)):
+                if name and name != "default" and name not in self.storage:
+                    known = ", ".join(sorted({"default", *self.storage}))
+                    raise ValueError(f"group {g.id!r}: {what} {name!r} is not a store "
+                                     f"(stores: {known})")
             t = self.tiers[g.tier]
             if g.load.mode == "rebuild" and not t.rebuild_cron:
                 raise ValueError(f"group {g.id!r}: load.mode 'rebuild' needs tier {g.tier!r} "
@@ -351,6 +409,11 @@ class Policy(BaseModel):
             if g.id == gid:
                 return g
         raise KeyError(gid)
+
+    def store_name(self, group_id: str) -> str:
+        """The store a group's backups use (#105): the group's `storage`, else `default`.
+        (Per-cluster `storage` sits between the two once clusters exist, #106.)"""
+        return self.group(group_id).storage or "default"
 
     def tenants(self) -> list[str]:
         return sorted({g.tenant for g in self.db_groups if g.tenant})

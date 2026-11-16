@@ -24,7 +24,6 @@ db_groups:
       - acme-graph
       - acme-audit
     tier: gold
-    s3_prefix: s3://neo4j-backups/demo/
     retention_days: 7
     rpo_minutes: 60
     rto_minutes: 120

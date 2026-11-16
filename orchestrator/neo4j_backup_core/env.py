@@ -39,7 +39,9 @@ def neo4j() -> Neo4jClient:
     )
 
 
-def store() -> ObjectStore:
+def env_store() -> ObjectStore:
+    """The store the environment describes (BACKUP_BUCKET, CLOUD, …): `default` when the policy
+    names no `default` store (#105)."""
     return object_store(
         os.environ.get("BACKUP_BUCKET", "neo4j-backups"),
         os.environ.get("AWS_ENDPOINT_URL_S3") or None,  # unset on real AWS
@@ -49,6 +51,61 @@ def store() -> ObjectStore:
         write_args_json=os.environ.get("S3_WRITE_ARGS", "{}"),
         cloud=os.environ.get("CLOUD") or None,  # aws (default) | azure | gcp
     )
+
+
+def store_from_config(cfg) -> ObjectStore:
+    """Build an object store from a policy `storage:` entry (#105)."""
+    if cfg.cloud == "azure" and cfg.account:
+        os.environ.setdefault("AZURE_STORAGE_ACCOUNT", cfg.account)
+    return object_store(cfg.bucket, cfg.endpoint, cfg.region or os.environ.get("AWS_REGION",
+                                                                              "us-east-1"),
+                        sse=cfg.sse, sse_kms_key_id=cfg.sse_kms_key_id,
+                        write_args_json=json.dumps(cfg.write_args or {}), cloud=cfg.cloud)
+
+
+class StoreSet:
+    """The stores a deployment uses (#105). Acts as the `default` store (every ObjectStore method
+    is forwarded to it), and `for_group(group_id)` returns the store a group's policy names. The
+    core ops call `for_group` wherever they know the group, so callers pass one StoreSet."""
+
+    def __init__(self, default: ObjectStore, policy_source=None, policy=None):
+        self._default, self._source, self._policy = default, policy_source, policy
+        self._built: dict[str, ObjectStore] = {}
+
+    def _pol(self):
+        if self._policy is not None:
+            return self._policy
+        from .policy import load_policy
+        return load_policy(self._source)
+
+    def named(self, name: str) -> ObjectStore:
+        if name not in self._built:
+            try:
+                pol = self._pol() if (self._policy is not None or self._source) else None
+            except Exception:  # noqa: BLE001 - no loadable policy: only the env default exists
+                pol = None
+            cfg = pol.storage.get(name) if pol is not None else None
+            self._built[name] = store_from_config(cfg) if cfg else (
+                self._default if name == "default" else None)
+            if self._built[name] is None:
+                raise KeyError(f"no store named {name!r}")
+        return self._built[name]
+
+    def for_group(self, group_id: str) -> ObjectStore:
+        try:
+            name = self._pol().store_name(group_id)
+        except KeyError:  # not a policy group (e.g. a probe): the default store
+            name = "default"
+        return self.named(name)
+
+    def __getattr__(self, attr):
+        return getattr(self.named("default"), attr)
+
+
+def store() -> StoreSet:
+    """The deployment's stores: the `default` store (policy `storage.default`, else the
+    environment) plus each group's named store, resolved per group (#105)."""
+    return StoreSet(env_store(), policy_source=policy_path())
 
 
 def runner(exec_prefix=None) -> BackupRunner:

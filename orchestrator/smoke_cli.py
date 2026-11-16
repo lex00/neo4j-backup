@@ -102,7 +102,7 @@ def by_name_privileges() -> None:
     pol = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
     pol.write("db_groups:\n  - id: smoke117\n    restore_mode: by-name\n"
               "    databases: [smoke117db]\n    tier: gold\n"
-              "    s3_prefix: s3://neo4j-backups/smoke117/\n    retention_days: 7\n"
+              "    retention_days: 7\n"
               "tiers:\n  gold: { full_cron: '0 2 * * *', diff_cron: '0 * * * *' }\n")
     pol.close()
     old = ENV["NEO4J_BACKUP_POLICY"]
