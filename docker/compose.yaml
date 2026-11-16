@@ -61,6 +61,33 @@ services:
       retries: 30
       start_period: 30s
 
+  # A second, independent Neo4j (#115): the target of `restore --to-cluster`. Not started by
+  # default: `docker compose --profile multi up -d neo4j-b`. Bolt on host port 7688; it reads
+  # the same bucket, as any cluster serving the groups must.
+  neo4j-b:
+    image: neo4j:${NEO4J_VERSION}
+    hostname: neo4j-b
+    profiles: ["multi"]
+    environment:
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "eval"
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD}"
+      DB_PASSWORD: "${NEO4J_PASSWORD}"
+      NEO4J_server_backup_enabled: "true"
+      NEO4J_server_backup_listen__address: "0.0.0.0:6362"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      AWS_REGION: "${AWS_REGION}"
+      AWS_ENDPOINT_URL_S3: "${AWS_ENDPOINT_URL_S3}"
+    ports:
+      - "7688:7687"
+    networks: [neo4j, ops]
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p $${DB_PASSWORD} 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
   # Local S3 + KMS emulator (floci). MinIO's images are no longer publicly pullable.
   # S3 API on 4566 inside the network; mapped to host port 9000 so host-side tools and
   # smokes keep using http://localhost:9000.

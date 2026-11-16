@@ -99,6 +99,11 @@ rebuild-smoke:
 ops-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_ops.py
 
+# Restore into another cluster (#115): starts a second Neo4j (`neo4j-b`, profile multi) as cluster `west`
+move-smoke:
+    {{compose}} --profile multi up -d --wait neo4j-b
+    orchestrator/.venv/bin/python orchestrator/smoke_move.py
+
 # Azure backend on Azurite (#79, #80): upload, copy with wait, streamed download (needs a backup)
 azure-smoke:
     docker compose --env-file .env -f docker/compose.yaml --profile azure up -d azurite
