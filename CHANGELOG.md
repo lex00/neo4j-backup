@@ -14,6 +14,12 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **`load <group>`** (#107, core, CLI and MCP): builds each member in the runner from the policy's
+  `load.build` (`kind: import`; relative input paths resolve against `load.source`, read by
+  neo4j-admin straight from the store), dumps it, seeds a new database from the dump, sets it
+  read-only for `writes: read-only`, runs the checks (with the import's counts), copies
+  privileges and swaps every alias together, then takes the baseline. A failure before the swap
+  drops the new databases and names the step. `--reapply-access` applies `writes` without a load.
 - **`writes` and `protect_writes` enforced** (#112). A `writes: read-only` group's new databases
   are set read-only before the swap (restores included). Backups follow the live access mode and
   `protect_writes`: a read-only database, or a group whose writes are disposable, is skipped with

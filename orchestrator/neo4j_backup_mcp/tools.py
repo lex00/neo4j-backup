@@ -264,6 +264,37 @@ def run_prune(confirm: bool = False, dry_run: bool = False, ticket: str | None =
             "kept_for_chains": out["kept_for_chains"], "unknown_kept": out["unknown_kept"]}
 
 
+@_recorded
+def run_load(group: str, confirm: bool = False, dry_run: bool = False, replace: bool = False,
+             keep_failed: bool = False, baseline: bool = True, reapply_access: bool = False,
+             ticket: str | None = None, reason: str | None = None) -> dict:
+    """Load or rebuild a group from its policy build (#107): build in the runner, dump, seed a
+    new database, check it, set its access, swap the alias, take the baseline. Needs
+    confirm=true; dry_run returns the plan. `reapply_access` only applies the policy's `writes`
+    to the current databases."""
+    from neo4j_backup_core import load as load_mod
+
+    g = load_policy(env.policy_path()).group(group)
+    store, runner, neo, layout = env.store(), env.runner(), env.neo4j(), _layout()
+    if reapply_access:
+        if not confirm:
+            return _needs_confirmation("load", {"reapply_access": g.load.writes})
+        return {"group": group, "access": load_mod.reapply_access(neo, g, log=_log)}
+    plan = load_mod.plan_load(neo, store, layout, g, replace=replace)
+    if dry_run:
+        return {"group": group, "dry_run": True, "plan": plan}
+    if not confirm:
+        return _needs_confirmation("load", {"plan": plan})
+    try:
+        return load_mod.load_group(_run_admin(runner), runner, neo, store, layout, g,
+                                   replace=replace, keep_failed=keep_failed,
+                                   baseline=None if baseline else False, upload=_UPLOAD,
+                                   staging=_STAGING, cypher_version=_CYPHER, log=_log)
+    except load_mod.LoadError as e:
+        return {"ok": False, "error": {"kind": "load_failed", "msg": str(e)},
+                "failed_step": e.step, **e.result}
+
+
 READ_TOOLS = [list_targets, latest_artifact, show_chain, backup_status,
               preview_restore, preview_prune]
-WRITE_TOOLS = [run_backup, run_verify, run_aggregate, run_restore, run_prune]
+WRITE_TOOLS = [run_backup, run_verify, run_aggregate, run_restore, run_prune, run_load]

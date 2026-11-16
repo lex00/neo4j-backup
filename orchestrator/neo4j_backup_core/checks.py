@@ -41,15 +41,21 @@ def parse_expect(expect: str):
 def import_counts(output: str) -> dict | None:
     """Node and relationship counts from `neo4j-admin database import` output, or None.
 
-    The import summary reads, for example: `Imported:` then `  3 nodes`, `  2 relationships`,
-    `  6 properties` (#118 captures the output)."""
-    nodes = re.search(r"Imported:.*?(\d[\d,]*)\s+nodes", output or "", re.S)
-    rels = re.search(r"Imported:.*?(\d[\d,]*)\s+relationships", output or "", re.S)
+    2026.05 prints `Imported Stats[processed=3, created=3, …] nodes in 160ms` and the same for
+    relationships; older versions an `Imported:` block with `3 nodes` / `2 relationships`."""
+    out = output or ""
+    stats = {kind: re.search(rf"Imported Stats\[[^\]]*created=(\d+)[^\]]*\]\s+{kind}", out)
+             for kind in ("nodes", "relationships")}
+    if stats["nodes"]:
+        return {"nodes": int(stats["nodes"].group(1)),
+                "relationships": int(stats["relationships"].group(1))
+                if stats["relationships"] else 0}
+    nodes = re.search(r"Imported:.*?(\d[\d,]*)\s+nodes", out, re.S)
+    rels = re.search(r"Imported:.*?(\d[\d,]*)\s+relationships", out, re.S)
     if not nodes:
         return None
-    n = int(nodes.group(1).replace(",", ""))
-    r = int(rels.group(1).replace(",", "")) if rels else 0
-    return {"nodes": n, "relationships": r}
+    return {"nodes": int(nodes.group(1).replace(",", "")),
+            "relationships": int(rels.group(1).replace(",", "")) if rels else 0}
 
 
 def _one_number(rows) -> float:
