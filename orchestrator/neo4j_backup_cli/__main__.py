@@ -273,7 +273,7 @@ def cmd_prune(args):
     fill = {"run_admin": _run_admin(runner), "runner": runner, "log": _log}
     preview = ops.prune(store, policy, layout, dry_run=True, **fill)
     short = _guard("prune", None, {k: preview[k] for k in ("deleted", "detail", "keys",
-                                                           "kept_for_chains", "unknown_kept")},
+                                                           "kept_for_chains", "unknown_kept", "loads")},
                    args.confirm, args.dry_run)
     if short:
         return short

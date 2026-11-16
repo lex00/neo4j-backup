@@ -439,10 +439,18 @@ def prune(store, policy, layout, *, keep_system: int | None = None,
 
     swept: list[str] = []
     base = store
+    loads_victims: list[str] = []
     for g in (policy.db_groups if groups is None else groups):
         store = _store(base, g.id)  # each group's own store (#105)
         cutoff = now - timedelta(days=g.retention_days)
+        keep_loads = g.load.keep_loads if hasattr(g, "load") else 14
         for a in g.names:
+            # load artifacts (#157): the newest `keep_loads` per member, not age-swept
+            if hasattr(store, "list_load_artifacts"):
+                loads = store.list_load_artifacts(layout.load_prefix(g.id, a))
+                old = [k for (k, _m, _kind) in loads[:-keep_loads]]
+                loads_victims.extend(old)
+                _sweep(old, f"{g.id}/{a}/loads")
             prefix = layout.alias_prefix(g.id, a)
             if not store.list_artifacts(prefix):
                 continue
@@ -471,7 +479,7 @@ def prune(store, policy, layout, *, keep_system: int | None = None,
             sidecars += len(artifacts.drop_orphans(st, prefix))
     return {"deleted": len(victims), "detail": detail, "keys": victims, "dry_run": dry_run,
             "sidecars_deleted": sidecars, "kept_for_chains": held_total,
-            "unknown_kept": len(unknown_kept)}
+            "unknown_kept": len(unknown_kept), "loads": loads_victims}
 
 
 # --- DBMS metadata (pure Bolt, no runner) ------------------------------------------------------

@@ -236,7 +236,7 @@ arrive with #107 and #108, write enforcement with #112. `baseline` is used today
 | `mode` | `live` \| `once` \| `rebuild` | `live` | decl | `live`: data written by the application. `once`: loaded once (by hand per IMPORT.md, or by the tool with `build`). `rebuild`: rebuilt in full every `rebuild_cron` |
 | `writes` | `read-write` \| `read-only` | `read-write` | decl | whether the database accepts writes between loads |
 | `protect_writes` | bool | `true` for read-write; n/a for read-only | decl | back up writes made after a load (full/diff schedules). `false` only for rebuild groups whose writes are disposable |
-| `keep_loads` | int (≥1) | `14` | decl | how many load artifacts stay restorable |
+| `keep_loads` | int (≥1) | `14` | used | how many load artifacts (dumps in the member's `_seed/` folder) prune keeps per member, newest first; not age-based (#157) |
 | `baseline` | bool | `true` | used | full backup right after a restore (and, later, a load) |
 | `source` | `{storage, prefix}` | the group's store, `<group>/_source/` | decl | where rebuild input files live; `storage` names a store (#105) |
 | `build.kind` | `import` \| `command` | `import` | decl | `import`: `neo4j-admin database import full`; `command`: a command or container in the runner (#109) |

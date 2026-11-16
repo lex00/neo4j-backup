@@ -150,7 +150,7 @@ def test_restore_baseline_failure_is_its_own_error_kind(monkeypatch):
 
 def test_prune_dry_run_and_guard(monkeypatch):
     monkeypatch.setattr(cli.ops, "prune",
-                        lambda *a, dry_run=False, **k: {"deleted": 3, "detail": {}, "keys": ["a", "b", "c"], "kept_for_chains": 1, "unknown_kept": 0,
+                        lambda *a, dry_run=False, **k: {"deleted": 3, "detail": {}, "keys": ["a", "b", "c"], "kept_for_chains": 1, "unknown_kept": 0, "loads": [],
                                                         "dry_run": dry_run})
     dry, code = run(["prune", "--dry-run"])
     assert_conformant(dry, expect_ok=True)

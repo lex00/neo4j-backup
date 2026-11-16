@@ -14,6 +14,9 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Prune keeps `keep_loads` load artifacts per member** (#157, part of #98): the newest
+  `load.keep_loads` dumps in each member's `_seed/` folder stay; older ones go, whatever their
+  age. The preview lists them under `loads` (CLI, MCP).
 - **Restore from load artifacts** (#144, #159, part of #98): `restore --from-load` (every
   member's newest dump) and `--from-dump MEMBER=KEY_OR_URI` (a key in the member's `_seed/`, or an
   external dump URI the servers can read); also in MCP, the Dagster restore config and the Airflow
