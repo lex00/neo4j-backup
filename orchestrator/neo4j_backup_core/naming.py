@@ -31,11 +31,12 @@ def ts_format() -> str:
         raise NamingError(f"NAMING_TS_FMT {fmt!r} contains {JOIN!r}, the join character")
     return fmt
 
-# Neo4j database names (Operations Manual, "Database names", 5.x and 2025.x): start with an
-# ASCII letter, then letters, digits, dots and dashes, 3-63 characters; `_` and `system` prefixes
-# are reserved. Names are case-insensitive and stored lowercase.
+# Neo4j database names (Operations Manual, "Naming rules for databases"): the first character an
+# ASCII letter or digit, then letters, digits, dots and dashes; no trailing dot or dash; 3-63
+# characters; `_` and `system` prefixes reserved. Names are case-insensitive and normalized to
+# lowercase (#85).
 # https://neo4j.com/docs/operations-manual/current/database-administration/standard-databases/naming-databases/
-_DB_RE = re.compile(r"[a-z][a-z0-9.-]{2,62}")
+_DB_RE = re.compile(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]")
 _SLUG_CLEAN_RE = re.compile(rf"[a-z0-9][a-z0-9-]{{1,{SLUG_BASE_MAXLEN}}}[a-z0-9]")
 _ALIAS_PLAIN_RE = re.compile(r"[a-zA-Z0-9-]+")
 
@@ -66,7 +67,8 @@ def validate_db(name: str) -> str:
     """Assert a legal Neo4j DATABASE name (strict). Raises NamingError otherwise."""
     if not _DB_RE.fullmatch(name):
         raise NamingError(
-            f"illegal database name {name!r} (need a leading letter, then [a-z0-9.-], 3-63)"
+            f"illegal database name {name!r} (need [a-z0-9.-], 3-63, start and end with a "
+            f"letter or digit)"
         )
     if name.startswith("_") or name.startswith("system"):
         raise NamingError(f"reserved database name {name!r}")
@@ -128,8 +130,6 @@ def physical(a: str, ts_val: str | None = None) -> str:
     long, the readable base is cut and the 8-character hash kept (#87), so the name still says
     whose it is (`owns`)."""
     s = slug(a)
-    if not s[:1].isalpha():  # a database name starts with a letter (#85); the slug is unchanged
-        s = f"db{JOIN}{s}"
     t = ts_val if ts_val is not None else ts()
     tslen = len(t) + len(JOIN)
     if len(s) + tslen > DB_MAXLEN:
@@ -149,8 +149,6 @@ def owns(a: str, name: str) -> bool:
     if not sep or not t or (ts_format() == TS_FMT and not re.fullmatch(r"\d{8}t\d{6}", t)):
         return False
     s = slug(a)
-    if not s[:1].isalpha():
-        s = f"db{JOIN}{s}"
     if not _hashed(a):
         return prefix == s
     base, h = s.rsplit(JOIN, 1)

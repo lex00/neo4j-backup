@@ -210,7 +210,7 @@ naming:
 Fields: `{alias}` (the alias, lowercased and sanitized), `{slug}`, `{group}`, `{ts}`. The
 template must contain `{ts}`, so each restore gets a new name, and `ts_format` can't contain `-`.
 When the policy loads, every member's name is rendered with a sample timestamp and checked
-against Neo4j's rules (a leading letter, `[a-z0-9.-]`, at most 63 characters), so a bad
+against Neo4j's rules (`[a-z0-9.-]`, 3-63 characters, starting and ending with a letter or digit), so a bad
 template fails there rather than at a restore. `cleanup` recognises names made from the
 template. A `NAMING=module.Class` hook (#89) takes precedence over the block. The shell
 scripts under `bootstrap/` use the default names only.
