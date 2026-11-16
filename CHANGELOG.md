@@ -183,6 +183,10 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- Database-name validation follows Neo4j (#85): a leading letter, then `[a-z0-9.-]`, 3-63
+  characters, no `_` or `system` prefix; a trailing dash or dot is allowed. A digit-led slug gets
+  `db-` in front of it inside the physical name only (storage prefixes are unchanged). by-name
+  groups lowercase their database names instead of rejecting uppercase.
 - Long aliases: `physical()` cuts the readable part of the name and keeps the 8-character alias
   hash (#87), in `naming.py` and `naming.sh`; `naming.owns(alias, physical)` recognises the
   tool's own physicals (for cleanup, #93).

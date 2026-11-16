@@ -30,6 +30,9 @@ CASES = [
     "tenant_42",
     "Customer Graph (EU) – production instance number 42",  # #87: hash kept when cut
     "y" * 200,
+    "2024-orders",   # #85: digit-led slug, db- prefix in the physical only
+    "Orders-",       # trailing dash
+    "9lives",
 ]
 TS = "20260628t120000"
 
