@@ -23,7 +23,14 @@ under `<group>/<slug>/<database>/`, with your own IAM and KMS.
 
 ## Who this is for
 
-Platform teams that:
+A platform team that delivers Neo4j to the rest of its organization. Other teams (the
+customers) run their applications on databases the platform team operates, and depend on it to
+keep them backed up and to restore them on request. One policy file describes every customer's
+databases, schedules and retention, and drives every job: backups, verification, pruning,
+loads, restores. Approvals stay with the team's own change process; the tool records the ticket
+and reason (`--ticket`, `--reason`) and can refuse changes without one.
+
+Such teams:
 
 - run **Neo4j Enterprise** themselves (online backup and seeding a database from a backup are
   Enterprise features; Community has only offline dump and load);

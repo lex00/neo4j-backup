@@ -219,6 +219,9 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- Docs (#116): README says who the tool is for (a platform team serving other teams from one
+  policy); POLICY.md says what goes in the policy and what in the environment, and points at the
+  right schema file; RECOVERY.md has the customer-request runbook in short.
 - GCS applies `write_args` (`kms_key_name`, `content_type`, `metadata`, `cache_control`,
   `storage_class`) to every object the tool writes, and refuses other keys instead of dropping
   them (#81).
