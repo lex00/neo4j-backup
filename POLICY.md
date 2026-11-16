@@ -242,7 +242,11 @@ arrive with #107 and #108, write enforcement with #112. `baseline` is used today
 | `build.kind` | `import` \| `command` | `import` | decl | `import`: `neo4j-admin database import full`; `command`: a command or container in the runner (#109) |
 | `build.input_type` | `csv` \| `parquet` | required for `import` | decl | the import's input format |
 | `build.args` | list of string | `[]` | decl | passed through to the import (the tool puts the database name first) |
-| `build.command` / `build.image` / `build.env` | list / string / map | | decl | for `kind: command` (#109): one of `command` or `image` is required |
+| `build.command` / `build.image` / `build.args` | list / string / list | | used | `kind: command` (#109): `command` runs in the runner; `image` runs as its own pod (k8s runner modes; it needs `bash`, `tee` and `base64`). One of the two is required |
+| `build.env` | map | `{}` | used | environment for the command; a value `secret:<ref>` is resolved with the secret-reference syntax (see Storage) |
+| `build.output` | `import` \| `dump` | `import` | used | `import`: the command writes CSV/Parquet that the built-in import reads (`build.import_args`, paths relative to the work dir, or to `OUTPUT_URI` for an image); `dump`: the command leaves `<work>/<database>.dump` (command only) |
+| `build.import_args` | list | `[]` | used | the import's `--nodes` / `--relationships` for `output: import` |
+| `build.timeout` | `90m`, `2h`, `3600s` | `2h` | used | the command is stopped after this; the load fails before any seed |
 | `checks` | list of `{query, expect, name?}` | `[]` | used | checks on a new database before its swap (#111): Cypher returning one number; `expect` is `== n`, `>= n`, `<= n` or `between a b`. Run after every load (with the default checks: online, non-zero counts, counts equal to the import's) and by `restore --check` |
 
 Rejected at load, naming the group: `live` with `read-only`; `live` with `protect_writes: false`;

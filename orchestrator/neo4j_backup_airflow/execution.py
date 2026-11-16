@@ -16,18 +16,20 @@ from neo4j_backup_airflow import config
 from neo4j_backup_core import capture
 
 
-def run_admin(command: list, env: dict | None = None) -> str:
+def run_admin(command: list, env: dict | None = None, image: str | None = None) -> str:
     """Run one neo4j-admin command to completion and return its output (#118); non-zero exit
     raises. The output is still streamed to the task log."""
     runner = config.runner()
     full_env = {**runner.env(), **(env or {})}
     if runner.mode == "k8s":
-        return _run_pod(runner, command, full_env)
+        return _run_pod(runner, command, full_env, image=image)
+    if image:
+        raise RuntimeError(f"build image {image!r} needs RUNNER_MODE=k8s; use build.command")
     return capture.run_captured(runner.with_env(command, env or {}), env=full_env,
                                 stream=sys.stdout)
 
 
-def _run_pod(runner, command: list, env: dict) -> str:
+def _run_pod(runner, command: list, env: dict, image: str | None = None) -> str:
     if not runner.image:
         raise RuntimeError("RUNNER_MODE=k8s requires RUNNER_IMAGE")
     from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
@@ -51,7 +53,7 @@ def _run_pod(runner, command: list, env: dict) -> str:
         task_id="neo4j_admin_pod",
         name="neo4j-admin",
         namespace=os.environ.get("RUNNER_NAMESPACE", "default"),
-        image=runner.image,
+        image=image or runner.image,  # a build image (#109), else the neo4j runner image
         image_pull_policy="IfNotPresent",
         # wrapped so the output comes back through the XCom sidecar (#118)
         cmds=capture.wrap_for_xcom(command)[:1],

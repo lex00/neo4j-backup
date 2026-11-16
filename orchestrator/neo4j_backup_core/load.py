@@ -62,8 +62,6 @@ def plan_load(neo4j, store, layout, group, *, replace: bool = False) -> dict:
     if load.build is None:
         raise OpError(f"group {group.id!r} has no load.build; load it by hand (IMPORT.md) and "
                       f"restore with --from-dump")
-    if load.build.kind != "import":
-        raise OpError("build.kind 'command' runs with #109")
     src_store = _source_store(store, group)
     members = []
     for name in group.names:
@@ -71,10 +69,16 @@ def plan_load(neo4j, store, layout, group, *, replace: bool = False) -> dict:
         objects = [k for (k, _m) in src_store.list_text_keys(sp, "")] \
             if hasattr(src_store, "list_text_keys") else []
         neo = _per(neo4j, group.id)
+        if load.build.kind == "command":
+            build = {"kind": "command", "command": load.build.command, "image": load.build.image,
+                     "args": load.build.args, "output": load.build.output,
+                     "import_args": load.build.import_args, "timeout": load.build.timeout,
+                     "env": sorted(load.build.env)}  # names only: values may be secrets
+        else:
+            build = ["neo4j-admin", "database", "import", "full", "<build db>",
+                     *resolve_args(load.build.args, lambda p, sp=sp: src_store.uri(sp + p))]
         entry = {"member": name, "source": src_store.uri(sp), "objects": objects,
-                 "build": ["neo4j-admin", "database", "import", "full", "<build db>",
-                           *resolve_args(load.build.args, lambda p, sp=sp: src_store.uri(sp + p))],
-                 "writes": load.writes}
+                 "build": build, "writes": load.writes}
         if group.restore_mode == "by-name":
             existed = neo.database_exists(name)
             if existed and not replace:
@@ -119,11 +123,15 @@ def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool 
             sp = source_prefix(group, name)
             local = f"load-{naming.slug(name)}-{ts}"[:63]
             prefix = f"{layout.load_prefix(group.id, name)}{ts}/"
-            args = resolve_args(load.build.args, lambda p, sp=sp: src_store.uri(sp + p))
-            if load.build.input_type == "parquet":
-                args = ["--input-type=parquet", *args]
-            out = _admin(run_admin, runner.import_dump_command(local, args, store.uri(prefix)),
-                         store)
+            if load.build.kind == "command":
+                out = _command_build(run_admin, runner, store, src_store, group, name, local,
+                                     sp, prefix, ts)
+            else:
+                args = resolve_args(load.build.args, lambda p, sp=sp: src_store.uri(sp + p))
+                if load.build.input_type == "parquet":
+                    args = ["--input-type=parquet", *args]
+                out = _admin(run_admin,
+                             runner.import_dump_command(local, args, store.uri(prefix)), store)
             key = f"{prefix}{local}.dump"
             counts = checks.import_counts(out or "")
             log(f"{group.id}/{name}: built and dumped -> {key} ({counts})")
@@ -173,6 +181,45 @@ def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool 
             run_admin, neo4j, store, runner, layout, group, seeded, upload=upload,
             staging=staging, log=log)
     return result
+
+
+def build_env(build) -> dict:
+    """The command's `env`, with `secret:<ref>` values resolved through the one secret-reference
+    syntax (#105)."""
+    from .secrets import resolve_ref
+
+    return {k: resolve_ref(v[len("secret:"):]) if v.startswith("secret:") else v
+            for k, v in build.env.items()}
+
+
+def _command_build(run_admin, runner, store, src_store, group, name, local, sp, prefix, ts):
+    """A `kind: command` build (#109). `command` runs in the runner in one step with the import
+    and dump (its work dir lives only as long as that step). `image` runs as its own pod (k8s
+    runner modes) and must write its output to OUTPUT_URI in the store; then the built-in
+    import (or a copy of its dump) runs from there."""
+    b = group.load.build
+    out_prefix = f"{group.id}/_build/{ts}/{naming.slug(name)}/"
+    work = f"{runner.scratch_path.rstrip('/')}/_build/{group.id}-{naming.slug(name)}-{ts}"
+    env = {"SOURCE_URI": src_store.uri(sp), "OUTPUT_URI": store.uri(out_prefix),
+           "WORK_DIR": work, "NEO4J_BACKUP_GROUP": group.id, "NEO4J_BACKUP_MEMBER": name,
+           **build_env(b)}
+    env.update(store.admin_env() if hasattr(store, "admin_env") else {})
+    if b.image:
+        run_admin([*b.command, *b.args], env=env, image=b.image)  # writes to OUTPUT_URI
+        if b.output == "dump":
+            raise OpError("an image build with output 'dump' is not supported yet: write CSV or "
+                          "Parquet to OUTPUT_URI with output 'import'")
+        args = resolve_args(b.import_args, lambda p: store.uri(out_prefix + p))
+        if b.input_type == "parquet":
+            args = ["--input-type=parquet", *args]
+        return _admin(run_admin, runner.import_dump_command(local, args, store.uri(prefix)),
+                      store)
+    args = list(b.import_args)
+    if b.input_type == "parquet":
+        args = ["--input-type=parquet", *args]
+    cmd = runner.command_build_command([*b.command, *b.args], local, work, store.uri(prefix),
+                                       args, b.output, b.timeout_seconds)
+    return run_admin(cmd, env=env)
 
 
 def reapply_access(neo4j, group, *, log=_NOLOG) -> list[dict]:

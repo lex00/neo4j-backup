@@ -255,8 +255,32 @@ object (`_locks/<group>.lock`) that backups and loads both take, waiting up to
 `NEO4J_BACKUP_LOCK_WAIT` seconds (default 3600). A failed rebuild is a failed run; the previous
 load keeps serving. The first load of a new group creates its alias.
 
-**Planned:** custom build steps such as RDF conversion
-([#109](https://github.com/lex00/neo4j-backup/issues/109)).
+### Custom builds (#109)
+
+When `neo4j-admin database import` can't read the source (RDF is the usual case), run your own
+converter as `build.kind: command`. The tool doesn't ship converters; this is an example:
+
+```yaml
+load:
+  mode: rebuild
+  writes: read-only
+  build:
+    kind: command
+    command: [python3, /opt/rdf2csv.py]      # in the runner (subprocess); or image: on k8s
+    args: [--in, "$SOURCE_URI", --out, .]
+    env: { API_TOKEN: "secret:aws-sm:rdf-token" }
+    output: import                           # the command writes nodes.csv, rels.csv
+    import_args: [--nodes=nodes.csv, --relationships=rels.csv]
+    timeout: 2h
+```
+
+The command runs in a fresh work directory (its current directory, also `WORK_DIR`) with
+`SOURCE_URI` (the group's source folder in the store), `OUTPUT_URI`, `NEO4J_BACKUP_GROUP` and
+`NEO4J_BACKUP_MEMBER` set. In the runner the command, the import, the dump and the cleanup run
+as one step. An `image` (k8s runner modes) runs as its own pod and must write its CSV or Parquet
+to `OUTPUT_URI`, which the import then reads. A non-zero exit, the timeout, or a missing output
+fails the load before anything is seeded; the command's output is in the run logs (CLI stderr,
+Dagster and Airflow task logs).
 
 ## Change a customer's tier
 

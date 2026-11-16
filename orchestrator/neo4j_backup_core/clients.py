@@ -647,6 +647,34 @@ class BackupRunner:
         script = f"{shlex.join(imp)} && {shlex.join(dump)}; rc=$?; {shlex.join(clean)}; exit $rc"
         return [*self.exec_prefix, "sh", "-c", script]
 
+    def command_build_command(self, build_cmd: list, database: str, work: str, to_path: str,
+                              import_args: list | None, output: str, timeout: int,
+                              env_names=(), data_root: str = "/data") -> list:
+        """One runner step for a `kind: command` build (#109): a fresh work dir, the customer's
+        command under `timeout`, then the built-in import of what it wrote (`output: import`) or
+        its `<database>.dump` (`output: dump`), the dump to `to_path`, and cleanup. Exit code
+        kept; a missing output fails the step."""
+        import shlex
+
+        q = shlex.join
+        steps = [f"rm -rf {shlex.quote(work)}", f"mkdir -p {shlex.quote(work)}",
+                 f"cd {shlex.quote(work)}", f"timeout {int(timeout)} {q(build_cmd)}"]
+        if output == "dump":
+            dumpfile = f"{work}/{database}.dump"
+            steps += [f"test -s {shlex.quote(dumpfile)} || {{ echo 'build left no "
+                      f"{database}.dump in the work dir' >&2; false; }}",
+                      q([self.neo4j_admin, "database", "load",
+                         f"--from-path={work}", "--overwrite-destination=true", database])]
+        else:
+            steps.append(q([self.neo4j_admin, "database", "import", "full", database,
+                            *(import_args or [])]))
+        steps.append(q([self.neo4j_admin, "database", "dump", f"--to-path={to_path}",
+                        "--overwrite-destination=true", database]))
+        clean = q(["rm", "-rf", work, *(f"{data_root}/{d}/{database}"
+                                        for d in ("databases", "transactions"))])
+        script = " && ".join(steps) + f"; rc=$?; {clean}; exit $rc"
+        return [*self.exec_prefix, "sh", "-c", script]
+
     def export_command(self, from_path: str, database: str, to_path: str,
                        until: str | None = None, data_root: str = "/data") -> list:
         """One shell step (#160), so it also works when each command is its own pod: restore

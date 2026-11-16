@@ -14,6 +14,11 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Custom build steps** (#109): `build.kind: command` runs a customer command in the runner
+  (one step with the import and dump, under `timeout`) or an `image` as its own pod in the k8s
+  runner modes, with `SOURCE_URI`, `WORK_DIR`, `OUTPUT_URI` and `env` (values `secret:<ref>`
+  resolved). `output: import` hands CSV/Parquet to the built-in import; `output: dump` a dump.
+  `run_admin` takes an `image` in every adapter.
 - **Scheduled rebuilds and orchestrated loads** (#107, #108): Dagster `load_job` and
   `<tier>_rebuild` schedules (from `rebuild_cron`, only `load.mode: rebuild` groups); Airflow
   `neo4j_load` and `neo4j_rebuild_<tier>`. Runs carry a `neo4j_group` tag (the sample
