@@ -49,8 +49,9 @@ naming_sanitize() {
 # Assert a legal Neo4j DATABASE name (strict). Non-zero + message if illegal.
 naming_validate_db() {
   local n="$1"
-  if ! printf '%s' "$n" | grep -Eq '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'; then
-    echo "!! illegal database name '$n' (need [a-z0-9.-], 3-63 chars, start/end alnum)" >&2
+  # Neo4j: a leading letter, then [a-z0-9.-], 3-63 chars (#85)
+  if ! printf '%s' "$n" | grep -Eq '^[a-z][a-z0-9.-]{2,62}$'; then
+    echo "!! illegal database name '$n' (need a leading letter, then [a-z0-9.-], 3-63 chars)" >&2
     return 1
   fi
   case "$n" in _*|system*) echo "!! reserved database name '$n'" >&2; return 1 ;; esac
@@ -103,10 +104,11 @@ naming_slug() {
 naming_physical() {
   local slug ts tslen base h
   slug="$(naming_slug "$1")"
+  case "$slug" in [a-z]*) ;; *) slug="db$NAMING_JOIN$slug" ;; esac  # leading letter (#85)
   ts="${2:-$(naming_ts)}"
   tslen=$(( ${#ts} + ${#NAMING_JOIN} ))
   if (( ${#slug} + tslen > NAMING_MAXLEN )); then
-    if [ "$slug" != "$1" ]; then  # hashed slug: cut the base, keep the 8-char hash (#87)
+    if [ "$(naming_slug "$1")" != "$1" ]; then  # hashed slug: keep the 8-char hash (#87)
       h="${slug##*-}"; base="${slug%-*}"
       base="${base:0:$(( NAMING_MAXLEN - tslen - ${#h} - ${#NAMING_JOIN} ))}"
       base="$(printf '%s' "$base" | sed -E 's/[.-]+$//')"

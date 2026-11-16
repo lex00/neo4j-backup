@@ -290,6 +290,15 @@ class DbGroup(BaseModel):
                          "rename it", self.id)
         return self
 
+    @model_validator(mode="before")
+    @classmethod
+    def _lowercase_databases(cls, data):
+        # Neo4j stores database names lowercase (#85): accept `Orders`, use `orders`
+        if isinstance(data, dict) and isinstance(data.get("databases"), list):
+            data = {**data, "databases": [d.lower() if isinstance(d, str) else d
+                                          for d in data["databases"]]}
+        return data
+
     @model_validator(mode="after")
     def _validate_members(self) -> "DbGroup":
         if self.restore_mode == "by-name":

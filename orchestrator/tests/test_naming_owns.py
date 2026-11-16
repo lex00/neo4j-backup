@@ -32,3 +32,30 @@ def test_owns():
     assert not naming.owns("Acme Orders", f"acme-orders-deadbeef-{TS}")  # wrong hash
     assert naming.owns("Acme Orders", naming.physical("Acme Orders", TS))
     assert not naming.owns("acme-orders", "customer-made-db")
+
+
+# --- #85: Neo4j's database-name rules ----------------------------------------------------------
+
+@pytest.mark.parametrize("ok", ["abc", "orders.eu", "ab-", "orders-", "a" * 63])
+def test_legal_names(ok):
+    naming.validate_db(ok)
+
+
+@pytest.mark.parametrize("bad", ["2024-orders", "ab", "a" * 64, "_x1", "system-x", "Orders",
+                                 "a_b"])
+def test_illegal_names(bad):
+    with pytest.raises(naming.NamingError):
+        naming.validate_db(bad)
+
+
+def test_digit_led_slug_keeps_its_prefix_and_gets_db_in_the_physical():
+    from neo4j_backup_core import paths
+    assert paths.alias_prefix("g", "2024-orders") == "g/2024-orders/"   # storage unchanged
+    p = naming.physical("2024-orders", TS)
+    assert p == f"db-2024-orders-{TS}" and naming.owns("2024-orders", p)
+
+
+def test_by_name_databases_are_lowercased():
+    from neo4j_backup_core.policy import DbGroup
+    g = DbGroup(id="g", restore_mode="by-name", databases=["Orders"], tier="gold")
+    assert g.names == ["orders"]
