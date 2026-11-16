@@ -716,6 +716,7 @@ any third-party SDK imported lazily so nothing is pulled unless the non-default 
 | **Cutover** | alias swap (`ALTER ALIAS`) | `CUTOVER_STRATEGY=external` + `CUTOVER_HOOK` (external router) |
 | **Restore mode** | `alias-swap` (seed new + swap) | policy `restore_mode: by-name` (#48): target the database by its own name — create-if-absent, or destructive DROP+recreate with `replace`. No non-destructive in-place (Neo4j has no rename) |
 | **Path layout** | `<group>/<slug>/<physical>/` | `PATH_LAYOUT=module.Class` |
+| **Naming** | `<slug>-<ts>` physicals (`naming.py`) | `NAMING=module.Class` with `slug(alias)`, `physical(alias, ts, current)`, `owns(alias, physical)` (#89); every physical it returns is validated against Neo4j's rules, and a name already in use (blue/green) is refused |
 | **Seed topology** | DBMS default | policy `topology:` → `TOPOLOGY n PRIMARIES m SECONDARIES` |
 | **Seed Cypher version** | server default | `SEED_CYPHER_VERSION=5` (adds `existingData`) / `25` |
 | **S3 write args** | bucket default encryption | `S3_SSE` / `S3_SSE_KMS_KEY_ID` / `S3_WRITE_ARGS` on boto3 PUT/COPY |

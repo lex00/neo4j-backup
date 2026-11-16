@@ -34,7 +34,7 @@ class N(Neo):
         self.target = t
 
     def database_exists(self, n):
-        return self.exists
+        return self.exists and n == "orders-old"
 
     def privilege_commands(self, d):
         return [f"GRANT ACCESS ON DATABASE `{d}` TO `r`"]

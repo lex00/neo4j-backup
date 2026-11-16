@@ -161,3 +161,64 @@ def owns(a: str, name: str) -> bool:
 def slug_of_physical(name: str) -> str:
     """Recover the slug from a physical name (strip trailing <join><ts>)."""
     return name.rsplit(JOIN, 1)[0]
+
+
+# --- the naming hook (#89) ------------------------------------------------------------------------
+
+class DefaultNaming:
+    """The built-in scheme: `slug`, `physical` and `owns` above. A custom scheme (`NAMING=
+    module.Class`) implements the same three methods; `physical` also gets the alias's current
+    target, so a scheme can flip between two names (blue/green)."""
+
+    def slug(self, alias: str) -> str:
+        return slug(alias)
+
+    def physical(self, alias: str, ts_val: str, current: str | None = None) -> str:
+        return physical(alias, ts_val)
+
+    def owns(self, alias: str, name: str) -> bool:
+        return owns(alias, name)
+
+
+class _Validated:
+    """Wraps a scheme so every physical name it returns is checked against Neo4j's rules."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def slug(self, alias: str) -> str:
+        return self._inner.slug(alias)
+
+    def physical(self, alias: str, ts_val: str, current: str | None = None) -> str:
+        return validate_db(self._inner.physical(alias, ts_val, current))
+
+    def owns(self, alias: str, name: str) -> bool:
+        return bool(self._inner.owns(alias, name))
+
+
+_SCHEME = None
+
+
+def scheme():
+    """The configured naming scheme, loaded once: `NAMING=module.Class`, else DefaultNaming."""
+    global _SCHEME
+    if _SCHEME is None:
+        import importlib
+        import os
+
+        spec = os.environ.get("NAMING")
+        if spec:
+            module, _, cls = spec.rpartition(".")
+            if not module:
+                raise NamingError(f"NAMING must be 'module.Class', got {spec!r}")
+            inner = getattr(importlib.import_module(module), cls)()
+        else:
+            inner = DefaultNaming()
+        _SCHEME = _Validated(inner)
+    return _SCHEME
+
+
+def reset_scheme() -> None:
+    """Forget the loaded scheme (tests)."""
+    global _SCHEME
+    _SCHEME = None

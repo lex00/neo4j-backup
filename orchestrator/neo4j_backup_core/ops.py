@@ -775,7 +775,11 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
                                uri=seed.get("uri"))
         return {**out, "seed": seed}
     old = neo4j.alias_target(name)  # captured before cutover (for external routing #17)
-    newdb = naming.physical(name, ts or naming.ts())
+    newdb = naming.scheme().physical(name, ts or naming.ts(), old)  # (#89)
+    if newdb == old or (hasattr(neo4j, "database_exists") and neo4j.database_exists(newdb)):
+        # a name-reusing scheme (blue/green) must not seed over a database in use (#89)
+        raise OpError(f"{group.id}/{name}: the new physical name {newdb!r} is already taken"
+                      + (" (it's the alias's current target)" if newdb == old else ""))
     uri = seed.get("uri") or store.uri(key)
     neo4j.seed_database(newdb, uri, restore_until=until,
                         topology=_topology(neo4j, group, name), cypher_version=cypher_version,

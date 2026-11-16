@@ -143,8 +143,11 @@ def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool 
                 entry.update(name=name, replaced=neo4j.database_exists(name))
                 seeded.append(entry)  # by-name is seeded at the swap (DROP + CREATE)
                 continue
-            newdb = naming.physical(name, ts)
-            entry.update(alias=name, newdb=newdb, old=neo4j.alias_target(name))
+            old = neo4j.alias_target(name)
+            newdb = naming.scheme().physical(name, ts, old)  # (#89)
+            if newdb == old or neo4j.database_exists(newdb):
+                raise OpError(f"{group.id}/{name}: the new physical name {newdb!r} is taken")
+            entry.update(alias=name, newdb=newdb, old=old)
             neo4j.seed_database(newdb, store.uri(key), topology=_topology(neo4j, group, name),
                                 cypher_version=cypher_version, store_base=store.uri(""))
             seeded.append(entry)
