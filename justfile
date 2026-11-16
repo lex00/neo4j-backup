@@ -86,6 +86,10 @@ mcp-smoke:
 sidecar-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_sidecars.py
 
+# Dump path (#161): import -> dump -> seed -> baseline -> diff -> point-in-time -> export
+dump-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_dump.py
+
 # Bulk import (#16): import a tiny CSV -> adopt -> backup -> seed, end to end (needs the stack)
 import-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_import.py

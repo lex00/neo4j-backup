@@ -14,6 +14,8 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- `just dump-smoke` (#161): import -> dump -> seed -> baseline -> diff -> point-in-time restore
+  -> export, end to end on the local stack.
 - **`export <group> [--until T]`** (#160, part of #98): a portable `.dump` of each member at a
   point in time (or the latest backup), written to its `_seed/` folder. The runner restores the
   covering chain into a throwaway local store, dumps it and removes it in one step; the cluster is
