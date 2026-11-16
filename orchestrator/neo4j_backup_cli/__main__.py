@@ -494,6 +494,9 @@ def build_parser() -> argparse.ArgumentParser:
                                 description="Scheduler-agnostic Neo4j backup/restore over the "
                                             "policy-driven core. Honours the #60 CLI contract.")
     p.add_argument("--json", action="store_true", help="emit the result as one JSON object (stdout)")
+    p.add_argument("--debug", action="store_true",
+                   help="print the traceback of an unexpected error to stderr (or set "
+                        "NEO4J_BACKUP_DEBUG=1)")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
     def guarded(sp):
@@ -662,12 +665,23 @@ def main(argv=None) -> int:
     try:
         result_env, code = args.func(args)
     except ops.OpError as e:
-        result_env, code = envelope(args.command, ok=False,
-                                    error=make_error("op_failed", str(e))), Exit.FAILURE
+        extra = ({"result": {"dropped": e.dropped, "kept": e.kept}}
+                 if isinstance(e, ops.SeedError) else {})
+        result_env, code = envelope(args.command, ok=False, **extra,
+                                    error=make_error(getattr(e, "kind", "op_failed"),
+                                                     str(e))), Exit.FAILURE
     except subprocess.CalledProcessError as e:
         result_env, code = envelope(args.command, ok=False,
                                     error=make_error("admin_failed",
                                                      f"neo4j-admin exited {e.returncode}")), Exit.FAILURE
+    except Exception as e:  # noqa: BLE001 - every failure keeps the contract: one envelope (#140)
+        if args.debug or os.environ.get("NEO4J_BACKUP_DEBUG"):
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+        kind = ("neo4j_error" if type(e).__module__.split(".")[0] == "neo4j"
+                else "internal_error")
+        result_env, code = envelope(args.command, ok=False, error=make_error(
+            kind, f"{type(e).__name__}: {e}")), Exit.FAILURE
     _emit(result_env, args.json)
     return int(code)
 
