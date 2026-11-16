@@ -813,7 +813,68 @@ def check_seeded(neo4j, group, seeded: list[dict], *, expect_counts: dict | None
                           + ("" if keep_failed else "; the new databases were dropped")) from e
 
 
-def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG) -> None:
+STATE_PREFIX = "_state/"
+
+
+def record_swaps(store, group_id: str, swaps: list[dict], *, keep: int = 20) -> None:
+    """Remember each alias's previous target for `rollback` (#122): `_state/<group>.json` holds the
+    last `keep` swaps, newest last. A stand-in until the records layer exists (#100)."""
+    import json
+    from datetime import datetime, timezone
+
+    key = f"{STATE_PREFIX}{group_id}.json"
+    try:
+        state = json.loads(store.get_text(key))
+    except Exception:  # noqa: BLE001 - no state yet
+        state = {"group": group_id, "swaps": []}
+    state["swaps"].append({"at": datetime.now(timezone.utc).isoformat(), "members": {
+        s["alias"]: {"from": s.get("old"), "to": s["newdb"]} for s in swaps}})
+    state["swaps"] = state["swaps"][-keep:]
+    store.put_text(key, json.dumps(state, indent=1))
+
+
+def last_swap(store, group_id: str) -> dict | None:
+    import json
+    try:
+        swaps = json.loads(store.get_text(f"{STATE_PREFIX}{group_id}.json"))["swaps"]
+    except Exception:  # noqa: BLE001
+        return None
+    return swaps[-1] if swaps else None
+
+
+def rollback(neo4j, store, group, *, members: list[str] | None = None, dry_run: bool = False,
+             log: Log = _NOLOG) -> dict:
+    """Point each alias back at the database it targeted before the most recent swap (#122).
+    The previous target comes from `_state/<group>.json`. Refuses before any change when it isn't
+    known, or no longer exists. Privileges granted on the current database since the swap are
+    copied to the previous one first (#117); no baseline (the old chain still exists)."""
+    neo4j = _per(neo4j, group.id)
+    state_store = _store(store, group.id)  # the group's own store holds its state
+    swap = last_swap(state_store, group.id)
+    if swap is None:
+        raise OpError(f"no recorded swap for {group.id}: nothing to roll back")
+    names = members or [n for n in group.names if n in swap["members"]]
+    plan = []
+    for name in names:
+        moved = swap["members"].get(name)
+        if not moved or not moved.get("from"):
+            raise OpError(f"{group.id}/{name}: the last swap ({swap['at']}) didn't move it from "
+                          f"an earlier database")
+        current = neo4j.alias_target(name)
+        if not neo4j.database_exists(moved["from"]):
+            raise OpError(f"{group.id}/{name}: the previous database {moved['from']!r} no longer "
+                          f"exists (cleaned up?)")
+        plan.append({"alias": name, "newdb": moved["from"], "old": current,
+                     "mode": "alias-swap", "group": group.id,
+                     "privileges": _privileges_of(neo4j, current)})
+    if dry_run:
+        return {"group": group.id, "swap_at": swap["at"], "dry_run": True, "members": plan}
+    cutover_seeded(neo4j, plan, log=log, store=state_store, group_id=group.id)
+    return {"group": group.id, "swap_at": swap["at"], "members": plan}
+
+
+def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG, store=None,
+                   group_id: str | None = None) -> None:
     """Barrier after alias-swap seeds. First copy every member's privileges from its old physical
     to its new one (#117); only when all copies succeed, point each alias at its new physical. A
     failed copy raises before any alias moves. Privileges on the old physical are left in place
@@ -833,6 +894,12 @@ def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG) -> None:
         strategy = cutover.for_cluster(getattr(neo, "cutover_config", None))
         strategy.cutover(neo, s["alias"], s["newdb"], s.get("old"))
         log(f"cutover {s['alias']}: {s.get('old')} -> {s['newdb']}")
+    gid = group_id or next((s["group"] for s in swaps if s.get("group")), None)
+    if store is not None and gid and swaps:  # for rollback (#122)
+        try:
+            record_swaps(_store(store, gid), gid, swaps)
+        except Exception as e:  # noqa: BLE001 - the swap is done; only the record failed
+            log(f"warning: could not record the swap for rollback: {e}")
 
 
 def restore_group(neo4j, store, group, layout, *, restore_until: str | None = None,
@@ -870,7 +937,7 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
                                    seed=seeds[name]))
     if check:  # `restore --check` (#111): the policy's checks before any alias moves
         check_seeded(neo4j, group, members, keep_failed=keep_failed, require_data=False, log=log)
-    cutover_seeded(neo4j, members, log=log)
+    cutover_seeded(neo4j, members, log=log, store=store, group_id=group.id)
     return {"mode": "alias-swap", "members": members}
 
 

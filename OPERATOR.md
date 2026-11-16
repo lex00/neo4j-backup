@@ -204,13 +204,20 @@ Send the customer the restore point, the time of the switch, and the old and new
 
 ### Undo a restore
 
-The old database is still there. Point the alias back:
+The old database is still there until cleanup. Point the aliases back:
 
-```cypher
-ALTER ALIAS `<alias>` SET DATABASE TARGET `<old database>`
+```bash
+neo4j-backup --json rollback <group> --dry-run          # [--member <alias>]
+neo4j-backup --json rollback <group> --confirm --ticket CHG-1234
 ```
 
-Its privileges were never removed, so access works again straight away.
+Every restore, load and rebuild records each alias's previous database in
+`_state/<group>.json` in the group's store (until the records layer exists, #100), and rollback
+uses the most recent swap. It refuses, before changing anything, if the previous database no
+longer exists. Privileges granted on the current database since the swap are copied back first,
+and no baseline is taken (the old chain is still there). A rollback is itself recorded, so
+running it again goes forward again. In Dagster it's the `rollback_job`, in Airflow
+`neo4j_rollback`, in MCP `run_rollback`.
 
 ### Clean up later
 
@@ -220,7 +227,7 @@ removes the privileges granted on it.
 ### Limits today
 
 
-**Planned:** `rollback` ([#122](https://github.com/lex00/neo4j-backup/issues/122)) and `cleanup`
+**Planned:** `cleanup`
 ([#93](https://github.com/lex00/neo4j-backup/issues/93)).
 
 ## Load a customer's data in bulk

@@ -174,7 +174,8 @@ def load_group(run_admin, runner, neo4j, store, layout, group, *, replace: bool 
             s.update(privileges=out["privileges"])
             s["checks"] = checks.run(neo4j, s["name"], list(load.checks),
                                      expect_counts=s.get("import_counts"))
-    cutover_seeded(neo4j, seeded, log=log)  # privileges first, then the aliases (#117)
+    # privileges first, then the aliases (#117); the swap is recorded for rollback (#122)
+    cutover_seeded(neo4j, seeded, log=log, store=store, group_id=group.id)
     result["members"] = seeded
     take = load.baseline if baseline is None else baseline
     if take:

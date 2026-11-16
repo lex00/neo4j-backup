@@ -413,6 +413,34 @@ def load_job():
     load_group_op()
 
 
+class RollbackConfig(dg.Config):
+    group_id: str
+    members: list[str] = []
+    ticket: str | None = None
+    reason: str | None = None
+
+
+@dg.op
+def rollback_op(context: dg.OpExecutionContext, config: RollbackConfig, neo4j: Neo4jResource,
+                store: ObjectStoreResource):
+    """Point each alias back at its previous database (#122)."""
+    try:
+        rec = record.fields(config.ticket, config.reason, applying=True)
+        out = ops.rollback(Neo4jSet(neo4j._core(), policy_source=POLICY_PATH),
+                           StoreSet(store._core(), policy_source=POLICY_PATH),
+                           load_policy(POLICY_PATH).group(config.group_id),
+                           members=config.members or None, log=context.log.info)
+    except (ops.OpError, record.TicketError) as e:
+        raise dg.Failure(str(e))
+    context.log.info(record.describe("rollback", rec))
+    return {**out, **rec}
+
+
+@dg.job
+def rollback_job():
+    rollback_op()
+
+
 # The full-lane tag: the baseline step is a full backup, so the job queues behind the full lane's
 # tag concurrency limit like a scheduled full does (#97).
 @dg.job(tags={"backup_kind": "full"})
@@ -606,7 +634,7 @@ def _build_schedules() -> list:
 defs = dg.Definitions(
     assets=[backup, aggregate, verify, prune, metadata_export, system_backup],
     jobs=[backup_job, verify_job, aggregate_job, prune_job, dbms_metadata_job, dbms_system_job,
-          restore_group, metadata_restore, load_job],
+          restore_group, metadata_restore, load_job, rollback_job],
     schedules=_build_schedules(),
     sensors=[reconcile_registry],
     resources={
