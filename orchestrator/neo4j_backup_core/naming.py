@@ -125,6 +125,18 @@ def _hashed(a: str) -> bool:
     return not _SLUG_CLEAN_RE.fullmatch(a)
 
 
+def readable_key(a: str) -> str:
+    """`slug_style: readable` (#91): the lowercased alias when that is already a clean slug
+    (`Orders` -> `orders`), else the alias itself, which then gets the usual hashed slug (a
+    sanitized `_`, space or symbol, or a length out of range)."""
+    low = a.lower()
+    return low if _SLUG_CLEAN_RE.fullmatch(low) else a
+
+
+def slug_readable(a: str) -> str:
+    return slug(readable_key(a))
+
+
 def physical(a: str, ts_val: str | None = None) -> str:
     """Unique physical database name for an alias at a timestamp: <slug>-<ts>. When that is too
     long, the readable base is cut and the 8-character hash kept (#87), so the name still says
@@ -266,17 +278,21 @@ def render(template: str, alias: str, group_id: str, ts_val: str,
 class TemplateNaming:
     """The scheme a group's `naming:` block describes (#88)."""
 
-    def __init__(self, group_id: str, template: str, bases: dict | None = None):
+    def __init__(self, group_id: str, template: str, bases: dict | None = None,
+                 readable: bool = False):
         self.group_id, self.template, self.bases = group_id, template, bases or {}
+        self.key = readable_key if readable else (lambda a: a)
 
     def slug(self, alias: str) -> str:
-        return slug(alias)
+        return slug(self.key(alias))
 
     def physical(self, alias: str, ts_val: str, current: str | None = None) -> str:
-        return render(self.template, alias, self.group_id, ts_val, self.bases.get(alias))
+        return render(self.template, self.key(alias), self.group_id, ts_val,
+                      self.bases.get(alias))
 
     def owns(self, alias: str, name: str) -> bool:
         base = self.bases.get(alias)
+        alias = self.key(alias)
         if self.template == DEFAULT_TEMPLATE and not base:  # custom ts_format: rebuild, compare
             t = name.rpartition(JOIN)[2]
             try:
@@ -296,6 +312,10 @@ def _group_naming(group):
             getattr(n, "ts_format", None))
 
 
+def readable(group) -> bool:
+    return getattr(getattr(group, "naming", None), "slug_style", "legacy") == "readable"
+
+
 def for_group(group):
     """The scheme for a group's physical names: a `NAMING` hook (#89) wins; else the group's
     `naming:` block (#88); else the default."""
@@ -304,9 +324,10 @@ def for_group(group):
     template, fmt = _group_naming(group)
     bases = {a: ov["physical_base"] for a, ov in (getattr(group, "overrides", None) or {}).items()
              if isinstance(ov, dict) and ov.get("physical_base")}
-    if os.environ.get("NAMING") or (template == DEFAULT_TEMPLATE and not fmt and not bases):
+    if os.environ.get("NAMING") or (template == DEFAULT_TEMPLATE and not fmt and not bases
+                                    and not readable(group)):
         return scheme()
-    return _Validated(TemplateNaming(group.id, template, bases))
+    return _Validated(TemplateNaming(group.id, template, bases, readable(group)))
 
 
 def ts_for(group, now: datetime | None = None) -> str:

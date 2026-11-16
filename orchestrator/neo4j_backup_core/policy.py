@@ -27,6 +27,10 @@ class Naming(BaseModel):
     model_config = ConfigDict(extra="forbid")
     physical_template: str = naming.DEFAULT_TEMPLATE
     ts_format: str | None = None  # strftime; None: NAMING_TS_FMT, else %Y%m%dt%H%M%S
+    # #91: `readable` lowercases before deciding whether an alias needs a hashed slug
+    # (`Orders` -> `orders`, not `orders-cded0933`). Changes existing members' folders: see
+    # POLICY.md before switching.
+    slug_style: Literal["legacy", "readable"] = "legacy"
 
     @model_validator(mode="after")
     def _valid(self) -> "Naming":
@@ -560,7 +564,7 @@ class Policy(BaseModel):
             for a in g.names:
                 ov = g.overrides.get(a) or {}
                 p = (ov.get("prefix") if isinstance(ov, dict) else None) or \
-                    f"{g.id}/{naming.slug(a)}/"
+                    f"{g.id}/{naming.for_group(g).slug(a)}/"
                 by_store.setdefault(self.store_name(g.id), []).append((p, f"{g.id}/{a}"))
         for store, items in by_store.items():
             items.sort()

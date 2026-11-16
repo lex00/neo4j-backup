@@ -106,3 +106,9 @@ def test_ts_format_with_the_join_character_is_refused(monkeypatch):
     out = sp.run(["bash", "-c", f'source "{NAMING_SH}"'], capture_output=True, text=True,
                  env={**os.environ, "NAMING_TS_FMT": "%Y-%m-%d"})
     assert out.returncode != 0 and "join character" in out.stderr
+
+
+def test_readable_slug_parity():
+    """#91: naming_slug_readable == naming.slug_readable."""
+    for a in CASES + ["Orders", "ACME-Graph", "Orders.Prod", "ab", "Acme_Orders"]:
+        assert naming.slug_readable(a) == _sh("naming_slug_readable", a), a

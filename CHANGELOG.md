@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Readable slugs, opt-in** (#91): `naming.slug_style: readable` lowercases an alias before
+  deciding whether it needs a hash (`Orders` -> `orders`); the default stays `legacy`. Members
+  that would share a slug fail policy load. Migration: pin existing members with
+  `overrides.prefix` first.
 - **Per-member `prefix` and `physical_base`** (#90): `overrides.<alias>.prefix` pins a member's
   storage folder (renaming an alias keeps its history), `physical_base` the base of its
   database names. Duplicate, nested and reserved prefixes are refused at policy load.

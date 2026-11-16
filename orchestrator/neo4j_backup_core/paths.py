@@ -74,11 +74,21 @@ class DefaultPathLayout:
         return "_dbms/system/" if cluster == "default" else f"_dbms/{cluster}/system/"
 
 
+def _member_prefix(group, alias: str) -> str | None:
+    """A member's folder when the policy decides it: `overrides.<alias>.prefix` (#90), else the
+    readable slug when the group's `naming.slug_style` is `readable` (#91); else None."""
+    ov = (group.overrides or {}).get(alias)
+    if isinstance(ov, dict) and ov.get("prefix"):
+        return ov["prefix"]
+    if naming.readable(group) and not os.environ.get("NAMING"):
+        return f"{group.id}/{naming.slug_readable(alias)}/"
+    return None
+
+
 def prefixes_of(policy) -> dict[tuple[str, str], str]:
-    """{(group, alias): prefix} for every `overrides.<alias>.prefix` in a policy (#90)."""
-    return {(g.id, a): ov["prefix"] for g in policy.db_groups
-            for a, ov in (g.overrides or {}).items()
-            if isinstance(ov, dict) and ov.get("prefix")}
+    """{(group, alias): prefix} for every member whose folder the policy decides (#90, #91)."""
+    return {(g.id, a): p for g in policy.db_groups for a in g.names
+            if (p := _member_prefix(g, a))}
 
 
 def prefix_from(policy):
@@ -97,10 +107,9 @@ def _policy_prefix(group_id: str, alias: str) -> str | None:
     except Exception:  # noqa: BLE001 - no policy (bootstrap, a probe): the default layout
         return None
     try:
-        ov = pol.group(group_id).overrides.get(alias) or {}
+        return _member_prefix(pol.group(group_id), alias)
     except KeyError:
         return None
-    return ov.get("prefix") if isinstance(ov, dict) else None
 
 
 def get_layout() -> PathLayout:
