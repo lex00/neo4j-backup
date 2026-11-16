@@ -24,7 +24,7 @@ RAW = {
          "s3_prefix": "s3://x/", "retention_days": 30, "load": {"build": BUILD}},
     ],
     "tiers": {"gold": {"full_cron": "0 2 * * *", "diff_cron": "0 * * * *"},
-              "nightly": {"rebuild_cron": "0 1 * * *"}},
+              "rebuild_nightly": {"rebuild_cron": "0 1 * * *"}},
 }
 
 
@@ -33,7 +33,7 @@ def test_group_gets_profile_values_and_overrides_win():
     shop, recs, cat = (p.group(g) for g in ("shop", "recs-sandbox", "catalog"))
     assert (shop.tier, shop.retention_days, shop.profile) == ("gold", 14, "app-live")
     assert (recs.tier, recs.load.mode, recs.load.protect_writes, recs.load.keep_loads) == \
-        ("nightly", "rebuild", False, 3)  # load merged per key; keep_loads overridden
+        ("rebuild_nightly", "rebuild", False, 3)  # load merged per key; keep_loads overridden
     assert cat.retention_days == 30 and cat.load.writes == "read-only"
 
 

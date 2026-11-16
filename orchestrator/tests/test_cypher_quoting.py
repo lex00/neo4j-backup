@@ -13,6 +13,8 @@ class Recorder(Neo4jClient):
         self.cypher = []
 
     def run_system(self, cypher, **params):
+        if cypher.startswith("SHOW DATABASE"):  # the seed's wait for every server (#221)
+            return [{"currentStatus": "online"}]
         self.cypher.append(cypher)
         return []
 
@@ -34,7 +36,7 @@ def test_alias_with_a_backtick_gives_valid_quoted_ddl():
         "CREATE ALIAS `we``ird` IF NOT EXISTS FOR DATABASE `orders-1`",
         "STOP DATABASE `db``x` WAIT",
         "DROP DATABASE `db``x` IF EXISTS WAIT",
-        "CREATE DATABASE `db``x` OPTIONS { seedURI: 's3://b/k.backup' } WAIT",
+        "CREATE DATABASE `db``x` OPTIONS { seedURI: 's3://b/k.backup' } WAIT 3600 SECONDS",
     ]
 
 

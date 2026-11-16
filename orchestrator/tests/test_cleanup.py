@@ -72,3 +72,16 @@ def test_cleanup_drops_exactly_the_plan():
 def test_revoke():
     from neo4j_backup_core.privileges import revoke
     assert revoke("DENY WRITE ON GRAPH `x` TO `r`") == "REVOKE DENY WRITE ON GRAPH `x` FROM `r`"
+
+
+def test_tier_cleanup_settings_default_to_a_week_of_soak():
+    """#231: the scheduled cleanup keeps one previous database and anything under 7 days old."""
+    from neo4j_backup_core import policy as P
+    p = P.Policy.model_validate({
+        "db_groups": [{"id": "g", "tier": "gold", "aliases": ["orders"]}],
+        "tiers": {"gold": {"full_cron": "0 2 * * *", "diff_cron": "0 * * * *",
+                           "cleanup_cron": "0 3 * * *"},
+                  "fast": {"full_cron": "0 2 * * *", "cleanup_keep": 2,
+                           "cleanup_older_than_days": 1}}})
+    assert (p.tiers["gold"].cleanup_keep, p.tiers["gold"].cleanup_older_than_days) == (1, 7)
+    assert (p.tiers["fast"].cleanup_keep, p.tiers["fast"].cleanup_older_than_days) == (2, 1)

@@ -1,6 +1,6 @@
 # Neo4j Policy-Based Backup / Restore
 
-### 📖 Documentation site: **<https://lex00.github.io/neo4j-backup/>**
+Documentation site: <https://lex00.github.io/neo4j-backup/>
 
 Policy-driven backup and restore for self-hosted Neo4j Enterprise, for the platform team that runs
 Neo4j for the rest of its organization. The team edits one policy file; it decides what is backed up
@@ -25,10 +25,9 @@ under `<group>/<slug>/<database>/`, with your own IAM and KMS.
 
 A platform team that delivers Neo4j to the rest of its organization. Other teams (the
 customers) run their applications on databases the platform team operates, and depend on it to
-keep them backed up and to restore them on request. One policy file describes every customer's
-databases, schedules and retention, and drives every job: backups, verification, pruning,
-loads, restores. Approvals stay with the team's own change process; the tool records the ticket
-and reason (`--ticket`, `--reason`) and can refuse changes without one.
+keep them backed up and to restore them on request. Approvals stay with the team's own change
+process; the tool records the ticket and reason (`--ticket`, `--reason`) and can refuse changes
+without one.
 
 Such teams:
 
@@ -53,17 +52,11 @@ wanting a turnkey GUI product. This is tooling to adapt to your environment.
 
 The policy, the bucket layout and every setting are the same across them.
 
-## No lock-in
+## Without the tool
 
-It is orchestration around standard pieces:
-
-- standard `neo4j-admin` backups in your bucket, restorable with `neo4j-admin` or a seed URI
-  without this package;
-- standard Cypher for restore (`CREATE DATABASE … seedURI`, `ALTER ALIAS`);
-- a plain YAML policy, standard Neo4j aliases, a standard Dagster code location or Airflow DAGs;
-- your own object store, IAM, KMS and runner placement.
-
-Remove the tooling and you are left with standard Neo4j backups in your own bucket.
+The backups are ordinary `neo4j-admin` artifacts in your bucket, and a restore is two Cypher
+statements (`CREATE DATABASE … OPTIONS { seedURI }`, `ALTER ALIAS`); [RECOVERY.md](RECOVERY.md)
+shows them, so you can restore without this package.
 
 ## Documentation map
 
@@ -79,22 +72,29 @@ Remove the tooling and you are left with standard Neo4j backups in your own buck
 | [CI.md](CI.md) | Scheduling the CLI from GitHub, GitLab or Forgejo. |
 | [MCP.md](MCP.md) | The operator MCP server. |
 | [AGENTS.md](AGENTS.md) | Driving the CLI from a coding or ops agent. |
-| [orchestrator/](orchestrator/README.md) | The Dagster code location, its configuration and environment table. |
-| [airflow/](airflow/README.md) | The Airflow DAG set and how it maps to the Dagster one. |
-| [DEPLOY.md](orchestrator/deploy/DEPLOY.md) | Adapting runner placement, concurrency and storage to your environment. |
-| [DESIGN.md](DESIGN.md) | The architecture and the decisions behind it. |
+| [ENVIRONMENT.md](ENVIRONMENT.md) | Every environment variable, with its default. |
+| [orchestrator/](orchestrator/README.md) | The Dagster code location: what it defines and its configuration. |
+| [airflow/](airflow/README.md) | The Airflow DAGs, and deploying them in production. |
+| [DEPLOY.md](orchestrator/deploy/DEPLOY.md) | Deploying the Dagster code location in production. |
+| [DESIGN.md](DESIGN.md) | Design notes and history; parts describe plans that changed. |
 | [STACK.md](STACK.md) | The local Docker stack. |
 | [diagrams/](diagrams/README.md) | Architecture, storage layout, restore cutover, pipeline and naming diagrams. |
 | [CHANGELOG.md](CHANGELOG.md) / [RELEASING.md](RELEASING.md) | Changes per version and how releases are cut. |
 
 ## What's validated
 
-The full loop runs four ways against the local stack: shell (`just`), Dagster
-(`orchestrator/smoke_*.py`), Airflow (`airflow/smoke_*.py`) and the CLI (`just cli-smoke`), plus
-point-in-time recovery (`just demo-pitr`) and bulk import (`just import-smoke`). `RUNNER_MODE=k8s`
-is validated on k3d for both adapters (`just k3d-smoke`, `just airflow-k8s-smoke`). Known issues
-are listed in [Getting started](GETTING-STARTED.md#know-the-open-issues-first); decisions and open
-risks are in [DESIGN.md §13](DESIGN.md).
+Every smoke runs against a local stack: Neo4j 2026.05 Enterprise in Docker, S3 emulated by
+floci. What that covers, and what it doesn't:
+
+| Area | Validated on | Not validated |
+|---|---|---|
+| Neo4j topology | single server; a three-server cluster in Docker (backup from the cluster's backup ports, restore with `TOPOLOGY 1 PRIMARY 2 SECONDARIES`, the alias seen by every server); two independent servers for restore into another cluster | a production cluster across hosts or zones |
+| Object store | S3 API on floci; Azure on Azurite (store operations; Neo4j can't seed from an emulator); GCS against fakes | real AWS S3, Azure Blob and GCS; SSE-KMS with a real KMS key (checked on MinIO before 2026-11) |
+| Orchestrators | Dagster 1.13 in-process (`execute_in_process`, `materialize`); Airflow 3.2 with `dag.test` | a deployed Dagster instance or Airflow scheduler with real run launchers |
+| Runner | subprocess (in a container); `RUNNER_MODE=k8s` on k3d for both orchestrators (backups, an import build, an image build) | k8s on a managed cluster with IRSA or workload identity |
+| CLI and MCP | every command's smoke (`just cli-smoke`, `ops-smoke`, `move-smoke`, `load-smoke`, `mcp-smoke`, ...) | |
+
+Open issues are on [GitHub](https://github.com/lex00/neo4j-backup/issues).
 
 ## CI & docs site
 

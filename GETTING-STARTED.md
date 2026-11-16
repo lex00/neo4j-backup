@@ -13,7 +13,7 @@ the [Customer guide](CUSTOMERS.md) is the page to give the teams whose databases
 
 - Docker with Docker Compose
 - [`just`](https://github.com/casey/just)
-- Python 3.10 or newer
+- Python 3.10 or newer (the Airflow venv, `just airflow-install`, also needs `uv`; it installs Python 3.13)
 
 The stack runs Neo4j Enterprise under its evaluation license, the floci S3 emulator as the bucket,
 and a separate runner container that holds `neo4j-admin`. Nothing is installed on the database
@@ -118,7 +118,7 @@ so undoing a restore is pointing the alias back (see the [Operator guide](OPERAT
 
 > **Customer privileges.** Neo4j stores privileges against the database, not the alias, so the
 > restore re-grants every privilege on each old database onto the new one before the switch
-> ([#117](https://github.com/lex00/neo4j-backup/issues/117)). The demo uses the admin user, whose
+>. The demo uses the admin user, whose
 > grants are on `*`, so the restore output lists none.
 
 ### 4. Restore to a point in time
@@ -172,29 +172,33 @@ All of them read the same policy and produce the same backups, so you can change
 
 1. Applications connect through aliases. Restore moves the alias to a new database. Existing
    databases can be put behind an alias without disruption
-   (`CREATE ALIAS orders FOR DATABASE` followed by the existing database name); see [Prerequisite: aliases](orchestrator/README.md#prerequisite-applications-connect-via-aliases).
+   with `neo4j-backup adopt`; see "Adopt existing databases" in [OPERATOR.md](OPERATOR.md).
 2. Write the policy. Copy `policies/demo.yaml`: one group per customer (or per set of
    databases that must restore to the same instant), a tier for the schedule, and
    `retention_days`. [POLICY.md](POLICY.md) has every field.
 3. Set the environment. At minimum `NEO4J_PASSWORD` (or a secret reference), `NEO4J_BOLT_URI`,
    `NEO4J_BACKUP_SOURCE` (a member's backup port, ideally a secondary), `BACKUP_BUCKET`,
    `AWS_REGION` and `NEO4J_BACKUP_POLICY`. On real AWS leave `AWS_ENDPOINT_URL_S3` unset. The full
-   table is in the [Dagster README](orchestrator/README.md#environment-variables).
+   table is in [ENVIRONMENT.md](ENVIRONMENT.md).
 4. Place the runner. It needs `neo4j-admin` (same version as the cluster), network access to
    the backup port (6362) and the bucket, and a scratch volume as large as your largest full
    backup. As a subprocess on a worker or as a Kubernetes pod (`RUNNER_MODE=k8s`); see
-   [DEPLOY.md](orchestrator/deploy/DEPLOY.md).
+   [Deploying on Dagster](orchestrator/deploy/DEPLOY.md) or the Airflow page's
+   [Deploying in production](airflow/README.md#deploying-in-production).
 5. Let the cluster read the bucket. Restores are pulled by the Neo4j servers themselves, so
    every server needs read access to the bucket (and `kms:Decrypt` if it is encrypted).
 6. Set concurrency. Dagster: merge the lanes from
-   [`deploy/dagster.yaml`](orchestrator/deploy/dagster.yaml). Airflow: create the pools in the
-   [Airflow README](airflow/README.md).
+   [`deploy/dagster.yaml`](orchestrator/deploy/dagster.yaml) and set the `neo4j` pool limit.
+   Airflow: create the pools listed on the [Airflow page](airflow/README.md#pools).
 7. Try one group by hand. Back up one group, verify it, then restore it into a throwaway
    group before trusting it with a customer. Check the scratch size and the runner's memory.
 8. Turn on the schedules. In Dagster the `reconcile_registry` sensor and the schedules start
-   stopped; switch them on (or set `schedules: running` in the policy). In Airflow, unpause the
-   DAGs. Every schedule comes from the policy: the tier crons and the `dbms:` block.
+   stopped; switch them on together (or set `schedules: running` in the policy, which starts
+   both). In Airflow, unpause the DAGs, the manual ones included. Every schedule comes from the
+   policy: the tier crons and the `dbms:` block.
+9. Alert on failures, including the freshness check (`status_check` in Dagster, `neo4j_status`
+   in Airflow), which fails when a database's newest backup is older than its `rpo_minutes`.
 
 ### What's planned
 
-What's planned is tracked in [#100](https://github.com/lex00/neo4j-backup/issues/100).
+Open issues and plans are on [GitHub](https://github.com/lex00/neo4j-backup/issues).

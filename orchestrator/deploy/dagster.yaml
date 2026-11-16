@@ -1,32 +1,40 @@
-# Instance config for the host Dagster deployment (the one shared-surface change a
-# drop-in requires — coordinate with whoever owns the instance). The full/diff backup
-# lanes are enforced here by run-tag concurrency limits.
-
+# What this tool needs from the Dagster instance's dagster.yaml. Merge these entries into the
+# instance's existing `concurrency:` block; they don't set anything instance-wide (no
+# max_concurrent_runs, no pool default_limit), so other code locations are unaffected.
+#
+# Run tag limits. Runs from this tool's schedules carry the tags below; manual and backfill
+# runs don't, so the ops also take a per-group lock in the bucket (the same lock Airflow uses):
+# a member's backup, verify, aggregate and its group's load never overlap whatever launched them.
 concurrency:
   runs:
-    max_concurrent_runs: 25
     tag_concurrency_limits:
-      # Full backups stage ~DB-sized scratch each; bound by scratch capacity.
+      # Full backups, verifies and aggregates each need scratch the size of the database: bound
+      # them by scratch capacity. A restore's or load's baseline step is limited by the `neo4j`
+      # pool instead (below), so a restore doesn't queue behind fulls.
       - key: backup_kind
         value: full
         limit: 1
-      # Differentials are tiny (tx-log delta) — run many.
+      # Differentials only copy the transaction log since the last backup.
       - key: backup_kind
         value: diff
         limit: 6
-      # Per cluster (#106): at most this many backup runs against any one Neo4j cluster at once,
-      # on top of the lane limits above. Every backup, verify, aggregate and DBMS run carries a
-      # `neo4j_cluster` tag.
+      # At most this many of this tool's runs against any one Neo4j cluster at once (schedule
+      # runs of backup, verify, aggregate, rebuild and the DBMS jobs carry `neo4j_cluster`).
       - key: neo4j_cluster
         value:
           applyLimitPerUniqueValue: true
         limit: 4
-      # Per group (#108): a group's rebuild never overlaps its own backups or another rebuild.
+      # One run per group at a time. This also serializes the members of a group: a long full of
+      # one member delays the others' diffs by its length (see DEPLOY.md for what that means for
+      # rpo_minutes).
       - key: neo4j_group
         value:
           applyLimitPerUniqueValue: true
         limit: 1
-  pools:
-    # Protect the Neo4j source member: the `backup` asset declares pool="neo4j".
-    default_limit: 2
-    granularity: op
+
+# Op pool. The backup asset and the restore/load baseline steps declare pool="neo4j". Set its
+# limit with the CLI rather than a default for every pool on the instance:
+#
+#   dagster instance concurrency set neo4j 4
+#
+# (needs `concurrency: pools: granularity: op` if the instance doesn't use it already).

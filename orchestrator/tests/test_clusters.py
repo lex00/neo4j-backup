@@ -78,7 +78,7 @@ class FakeNeo:
         return f"{a}-old"
 
     def seed_database(self, n, uri, restore_until=None, topology=None, cypher_version=None,
-                      store_base=None):
+                      store_base=None, **_k):
         self.seeded.append((n, topology, cypher_version))
 
     def privilege_commands(self, db):

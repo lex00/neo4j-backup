@@ -101,7 +101,7 @@ class FakeNeo4j:
         self.dropped.append(name)
 
     def seed_database(self, name, uri, restore_until=None, topology=None, cypher_version=None,
-                      store_base=None):
+                      store_base=None, **_k):
         self.seeded.append({"name": name, "uri": uri, "until": restore_until})
 
     def alias_target(self, alias):

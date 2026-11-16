@@ -21,23 +21,30 @@ from neo4j_backup_core.policy import load_policy, load_policy_at_startup
 _layout = paths.get_layout()
 
 
+LOCK_WAIT = int(os.environ.get("NEO4J_BACKUP_LOCK_WAIT", "3600"))
+
+
 def aggregate_one(group_alias: str) -> dict:
+    from neo4j_backup_core import locks
     group_id, alias = group_alias.split("/", 1)
-    try:
-        return ops.aggregate_target(run_admin, config.store(), config.runner(), _layout,
-                                    group_id, alias, upload=upload.BACKUP_UPLOAD,
-                                    staging=upload.STAGING, log=print, skip_missing=True)
-    except ops.OpError as e:
+    try:  # never with the group's backups or rebuild (#223)
+        with locks.group_lock(config.store(), group_id, f"aggregate {alias}", wait=LOCK_WAIT):
+            return ops.aggregate_target(run_admin, config.store(), config.runner(), _layout,
+                                        group_id, alias, upload=upload.BACKUP_UPLOAD,
+                                        staging=upload.STAGING, log=print, skip_missing=True)
+    except (ops.OpError, locks.Locked) as e:
         raise RuntimeError(str(e))
 
 
 def verify_one(group_alias: str) -> dict:
+    from neo4j_backup_core import locks
     group_id, alias = group_alias.split("/", 1)
     try:
-        return ops.verify_target(run_admin, config.store(), config.runner(), _layout,
-                                 group_id, alias, upload=upload.BACKUP_UPLOAD,
-                                 staging=upload.STAGING, skip_missing=True, log=print)
-    except ops.OpError as e:
+        with locks.group_lock(config.store(), group_id, f"verify {alias}", wait=LOCK_WAIT):
+            return ops.verify_target(run_admin, config.store(), config.runner(), _layout,
+                                     group_id, alias, upload=upload.BACKUP_UPLOAD,
+                                     staging=upload.STAGING, skip_missing=True, log=print)
+    except (ops.OpError, locks.Locked) as e:
         raise RuntimeError(str(e))
 
 
@@ -96,7 +103,10 @@ def make_cleanup_dag(tier: str, cron: str):
         @task
         def cleanup() -> int:
             pol = load_policy(config.policy_path())
-            return sum(len(ops.cleanup(config.neo4j(), g, log=print)["drops"])
+            t = pol.tiers[tier]  # keep and soak period from the tier (#231)
+            return sum(len(ops.cleanup(config.neo4j(), g, keep=t.cleanup_keep,
+                                       older_than_days=t.cleanup_older_than_days,
+                                       log=print)["drops"])
                        for g in pol.groups_for_tier(tier))
 
         cleanup()

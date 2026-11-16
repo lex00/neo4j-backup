@@ -30,12 +30,18 @@ def backup_one(group_alias: str, kind: str) -> dict:
     try:
         # never at the same time as the group's rebuild (#108); wait for it rather than fail
         with locks.group_lock(store, group_id, f"backup {alias}", wait=LOCK_WAIT):
-            return ops.backup_target(
+            out = ops.backup_target(
                 run_admin, neo, store, runner, _layout, group_id, alias, kind,
                 upload=upload.BACKUP_UPLOAD, staging=upload.STAGING, log=print,
                 group=load_policy(config.policy_path()).group(group_id))
     except ops.OpError as e:
         raise RuntimeError(str(e))
+    if out.get("skipped") and not out.get("by_design"):
+        # visible as a skipped task, not a green one (#226); the next run takes the full
+        from airflow.exceptions import AirflowSkipException
+        raise AirflowSkipException(f"{group_alias}: no backup taken "
+                                   f"({out.get('reason') or 'a full is needed first'})")
+    return out
 
 
 def split_by_base(keys: list[str]) -> dict:
@@ -54,10 +60,7 @@ def split_by_base(keys: list[str]) -> dict:
     return out
 
 
-def pool_for(cluster: str, lane: str) -> str:
-    """The Airflow pool for a cluster's lane (#106): `neo4j_<lane>` for the default cluster (as
-    before), `neo4j_<cluster>_<lane>` for a named one."""
-    return f"neo4j_{lane}" if cluster == "default" else f"neo4j_{cluster}_{lane}"
+pool_for = config.pool_for  # shared with the rebuild DAGs (#232)
 
 
 def make_backup_dag(tier_name: str, lane: str, cron: str, kind: str,

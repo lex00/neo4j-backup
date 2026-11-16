@@ -31,12 +31,13 @@ nav:
     - CI recipes: CI.md
     - Operator MCP: MCP.md
     - Agent guide: AGENTS.md
+    - Environment variables: ENVIRONMENT.md
   - Orchestrators:
     - Dagster: orchestrator/README.md
     - Airflow: airflow/README.md
-    - Deploy / adapt: orchestrator/deploy/DEPLOY.md
-  - Design: DESIGN.md
+    - Deploying on Dagster: orchestrator/deploy/DEPLOY.md
   - Local stack: STACK.md
+  - Design notes (history): DESIGN.md
   - Diagrams: diagrams/README.md
 
 markdown_extensions:

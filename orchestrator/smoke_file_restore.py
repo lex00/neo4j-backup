@@ -36,7 +36,11 @@ def main() -> None:
         os.environ.get("NEO4J_PASSWORD", "devpassword"),
     )
 
-    src = store.latest_artifact_key(paths.alias_prefix("demo", ALIAS))
+    # a single file seeds only if it's a full: a differential needs its chain beside it
+    from neo4j_backup_core import artifacts
+    metas, _ = artifacts.read(store, paths.alias_prefix("demo", ALIAS))
+    fulls = sorted((m.get("time") or "", k) for k, m in metas.items() if m.get("type") == "full")
+    src = fulls[-1][1] if fulls else store.latest_artifact_key(paths.alias_prefix("demo", ALIAS))
     assert src, f"no artifact for demo/{ALIAS} — run `just backup demo` first"
     name = os.path.basename(src)
 

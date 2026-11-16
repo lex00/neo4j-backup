@@ -34,8 +34,10 @@ _SEED_CYPHER_VERSION = os.environ.get("SEED_CYPHER_VERSION") or None
     start_date=datetime(2025, 1, 1),
     catchup=False,
     params={
-        "group_id": Param("demo", type="string"),
+        "group_id": Param(type="string"),  # required: no default group (#235)
         "restore_until": Param(None, type=["null", "string"]),  # ISO-8601, needs a chain
+        "check": Param(False, type="boolean"),  # the group's load.checks before the swap (#221)
+        "keep_failed": Param(False, type="boolean"),  # with check: keep new dbs on a failure
         "replace": Param(False, type="boolean"),  # by-name only: DROP+recreate an existing target
         "baseline": Param(True, type="boolean"),  # FULL of each restored database afterwards (#97)
         "from_load": Param(False, type="boolean"),  # newest load artifact per member (#144)
@@ -59,9 +61,13 @@ def neo4j_restore():
         # chain covers fails before any seed task runs (#114)
         loads = ctx["params"].get("from_dump") or ("latest" if ctx["params"].get("from_load")
                                                    else None)
-        ops.choose_seeds(config.store(), _layout,
-                         ops.only_members(load_policy(config.policy_path()).group(gid),
-                                          ctx["params"].get("members")), until, loads)
+        # chosen once for the whole group, so a "latest" restore is aligned (#225)
+        seeds = ops.choose_seeds(config.store(), _layout,
+                                 ops.only_members(load_policy(config.policy_path()).group(gid),
+                                                  ctx["params"].get("members")), until, loads)
+        point = next((sd.get("point") for sd in seeds.values() if sd.get("point")), None)
+        if point:
+            print(f"restore point: {point}")
         return {
             "group_id": gid,
             # ISO-8601, UTC if no offset; a bad value fails here, before any Neo4j call (#77)
@@ -70,6 +76,9 @@ def neo4j_restore():
             "baseline": bool(ctx["params"].get("baseline", True)),
             "loads": loads,
             "members": list(ctx["params"].get("members") or []),
+            "seeds": seeds,
+            "check": bool(ctx["params"].get("check")),
+            "keep_failed": bool(ctx["params"].get("keep_failed")),
             **rec,
             "mode": load_policy(config.policy_path()).group(gid).restore_mode,
             "ts": naming.ts_for(load_policy(config.policy_path()).group(gid)),  # #88
@@ -88,10 +97,7 @@ def neo4j_restore():
         # the whole group). One group-wide timestamp (plan["ts"]) keeps alias-swap physicals aligned.
         group = load_policy(config.policy_path()).group(plan["group_id"])
         try:
-            loads = plan.get("loads")
-            seed = ops.choose_seed(config.store(), _layout, group.id, name,
-                                   plan["restore_until"],
-                                   loads.get(name) if isinstance(loads, dict) else loads)
+            seed = plan["seeds"][name]  # chosen in the plan, for the whole group (#225)
             return ops.seed_member(config.neo4j(), config.store(), group, _layout, name, seed=seed,
                                    restore_until=plan["restore_until"], replace=plan["replace"],
                                    cypher_version=_SEED_CYPHER_VERSION, ts=plan["ts"], log=print)
@@ -99,12 +105,22 @@ def neo4j_restore():
             raise RuntimeError(str(e))
 
     @task
-    def swap(seeded: list[dict]) -> list[dict]:  # barrier: runs once, after every seed completes
+    def swap(plan: dict, seeded: list[dict]) -> list[dict]:  # barrier: after every seed
         seeded = list(seeded)
+        if plan.get("check"):  # the policy's checks on the new databases first (#111, #221)
+            group = load_policy(config.policy_path()).group(plan["group_id"])
+            try:
+                ops.check_seeded(config.neo4j(), group, seeded,
+                                 keep_failed=plan.get("keep_failed", False),
+                                 require_data=False, log=print)
+            except ops.OpError as e:
+                raise RuntimeError(str(e))
         ops.cutover_seeded(config.neo4j(), seeded, log=print, store=config.store())
         return seeded
 
-    @task(pool="neo4j_full")  # a full backup: the full lane's pool (#97)
+    # a full backup: the full lane's pool (#97). The group is a run parameter and Airflow fixes
+    # a task's pool at parse time, so this is `neo4j_full` whatever the group's cluster (#232).
+    @task(pool="neo4j_full")
     def baseline(plan: dict, member: dict) -> dict | None:
         """A FULL of one restored database, after the cutover. A failure fails this task only;
         the restore is already applied (rerun the task or `backup --kind FULL`)."""
@@ -120,7 +136,7 @@ def neo4j_restore():
             raise RuntimeError(f"[{e.kind}] {e}")
 
     p = plan()
-    restored = swap(seed.partial(plan=p).expand(name=members(p)))
+    restored = swap(p, seed.partial(plan=p).expand(name=members(p)))
     baseline.partial(plan=p).expand(member=restored)
 
 
@@ -128,7 +144,7 @@ neo4j_restore_dag = neo4j_restore()  # the DAG object (Airflow discovers it in g
 
 
 @dag(dag_id="neo4j_rollback", schedule=None, start_date=datetime(2025, 1, 1), catchup=False,
-     params={"group_id": Param("demo", type="string"), "members": Param([], type="array"),
+     params={"group_id": Param(type="string"), "members": Param([], type="array"),
              "ticket": Param(None, type=["null", "string"]),
              "reason": Param(None, type=["null", "string"])},
      tags=["neo4j-backup", "restore", "rollback"])

@@ -176,13 +176,13 @@ def test_dagster_rebuild_schedule_requests_only_rebuild_groups(tmp_path):
 
     import yaml
     raw = yaml.safe_load(open("policies/demo.yaml"))
-    raw["db_groups"].append({"id": "cat", "aliases": ["catalog"], "tier": "nightly",
+    raw["db_groups"].append({"id": "cat", "aliases": ["catalog"], "tier": "rebuild_nightly",
                              "load": {"mode": "rebuild", "writes": "read-only",
                                       "build": {"kind": "import", "input_type": "csv"}}})
     f = tmp_path / "p.yaml"
     f.write_text(yaml.safe_dump(raw))
     code = ("import json, dagster as dg; from neo4j_backup_dagster import definitions as D\n"
-            "s = next(x for x in D.defs.schedules if x.name == 'nightly_rebuild')\n"
+            "s = next(x for x in D.defs.schedules if x.name == 'rebuild_nightly_rebuild')\n"
             "with dg.instance_for_test() as i:\n"
             "    r = s.evaluate_tick(dg.build_schedule_context(instance=i, "
             "repository_def=D.defs.get_repository_def())).run_requests\n"

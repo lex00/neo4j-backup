@@ -76,43 +76,63 @@ def adopt(run_admin, neo4j, store, runner, layout, group, *, migrate: bool = Fal
         raise ops.OpError(f"nothing adopted: {plan['needs']}")
     neo, st = ops._per(neo4j, group.id), ops._store(store, group.id)
     swaps = []
-    for m in plan["members"]:
+    todo = [m for m in plan["members"] if m["action"] in ("create", "migrate")]
+    for m in todo:
         if m["action"] == "create":
             neo.create_alias(m["alias"], m["database"])
             log(f"alias {m['alias']} -> {m['database']}")
             swaps.append({"alias": m["alias"], "old": None, "newdb": m["database"]})
-        elif m["action"] == "migrate":
+        else:
             m.update(_migrate(run_admin, neo4j, store, runner, layout, group, m["alias"],
                               upload=upload, staging=staging, log=log))
             swaps.append({"alias": m["alias"], "old": None, "newdb": m["newdb"]})
-    if swaps:
-        ops.record_swaps(st, group.id, swaps)
+        # recorded as each member is adopted, so a later failure leaves an exact record (#220)
+        ops.record_swaps(st, group.id, swaps, extend_last=len(swaps) > 1,
+                         complete=len(swaps) == len(todo))
     return plan
 
 
 def _migrate(run_admin, neo4j, store, runner, layout, group, name: str, *, upload: str,
              staging: str | None, log) -> dict:
-    """Same-name migration of one member. Every step before the DROP can fail without loss."""
+    """Same-name migration of one member. The original is made read-only first (#227), so no
+    write lands after the backup and is lost; it is read-only from here until the alias exists,
+    and unreachable between the DROP and the CREATE ALIAS. Every step before the DROP can fail
+    without loss, and a failure there puts the original back to read-write."""
     neo = ops._per(neo4j, group.id)
-    backup = ops.backup_target(run_admin, neo4j, store, runner, layout, group.id, name, "FULL",
-                               upload=upload, staging=staging, log=log, physical=name)
-    verified = ops.verify_target(run_admin, store, runner, layout, group.id, name,
-                                 upload=upload, staging=staging, log=log)
-    if not verified.get("consistent"):
-        raise ops.OpError(f"{name}: the backup didn't verify; nothing dropped")
-    st = ops._store(store, group.id)
-    newdb = naming.for_group(group).physical(name, naming.ts_for(group), None)
-    key = backup["artifact"]
-    neo.seed_database(newdb, st.uri(key), topology=ops._topology(neo, group, name),
-                      cypher_version=ops._cypher(neo, None), store_base=st.uri(""))
-    log(f"seeded {newdb} <= {key}")
-    entry = {"mode": "alias-swap", "alias": name, "newdb": newdb, "old": None,
-             "group": group.id}
-    ops.check_seeded(neo, group, [entry], require_data=False, log=log)
-    privileges = ops.regrant(neo, neo.privilege_commands(name), old=name, new=newdb, log=log)
-    ops.apply_access(neo, group, newdb, log=log)
+    was = neo.database_access(name) if hasattr(neo, "database_access") else None
+    neo.set_read_only(name, True)
+    log(f"{name}: read-only until the alias points at its copy")
+    try:
+        backup = ops.backup_target(run_admin, neo4j, store, runner, layout, group.id, name,
+                                   "FULL", upload=upload, staging=staging, log=log,
+                                   physical=name)
+        verified = ops.verify_target(run_admin, store, runner, layout, group.id, name,
+                                     upload=upload, staging=staging, log=log)
+        if not verified.get("consistent"):
+            raise ops.OpError(f"{name}: the backup didn't verify; nothing dropped")
+        st = ops._store(store, group.id)
+        newdb = naming.for_group(group).physical(name, naming.ts_for(group), None)
+        key = backup["artifact"]
+        neo.seed_database(newdb, st.uri(key), topology=ops._topology(neo, group, name),
+                          wait_seconds=ops._seed_wait(group),
+                          cypher_version=ops._cypher(neo, None), store_base=st.uri(""))
+        log(f"seeded {newdb} <= {key}")
+        entry = {"mode": "alias-swap", "alias": name, "newdb": newdb, "old": None,
+                 "group": group.id}
+        ops.check_seeded(neo, group, [entry], require_data=False, log=log)
+        privileges = ops.regrant(neo, neo.privilege_commands(name), old=name, new=newdb,
+                                 log=log)
+        # the copy is writable unless the group says read-only (#112)
+        if not ops.apply_access(neo, group, newdb, log=log):
+            neo.set_read_only(newdb, False)
+    except Exception:
+        if was != "read-only":
+            neo.set_read_only(name, False)
+            log(f"{name}: back to read-write (the migration stopped before the drop)")
+        raise
     neo.drop_database(name)
     log(f"dropped the original {name}")
     neo.create_alias(name, newdb)
     log(f"alias {name} -> {newdb}")
-    return {"newdb": newdb, "backup": key, "privileges": privileges}
+    return {"newdb": newdb, "backup": key, "privileges": privileges,
+            "read_only_window": "from the backup until the alias was created"}

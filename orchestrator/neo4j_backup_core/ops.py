@@ -76,6 +76,17 @@ def seed_all(neo4j, group, names, seed_one, *, log: Log = _NOLOG) -> list[dict]:
     return seeded
 
 
+class CutoverError(OpError):
+    """A group cutover failed part-way (#220): `moved` aliases point at their new databases,
+    `not_moved` at their old ones. The swap record lists exactly the moved ones."""
+
+    kind = "cutover_partial"
+
+    def __init__(self, msg: str, moved: list[str], not_moved: list[str]):
+        super().__init__(msg)
+        self.moved, self.not_moved = moved, not_moved
+
+
 class BaselineError(OpError):
     """The restore was applied but its baseline full backup failed (#97). `done` lists the
     baselines that were taken; rerun `backup <group> --kind FULL` for the rest."""
@@ -102,7 +113,18 @@ def _cypher(neo4j, cypher_version):
 
 
 def _upload(runner, upload):
-    return getattr(runner, "backup_upload", None) or upload
+    mode = getattr(runner, "backup_upload", None) or upload
+    if mode == "pipeline" and getattr(runner, "mode", None) == "k8s":
+        from .policy import PIPELINE_ON_K8S
+        raise OpError(PIPELINE_ON_K8S)  # #218
+    return mode
+
+
+def _seed_wait(group) -> int | None:
+    """How long a seed may take before it counts as failed (#221): the group's `rto_minutes`,
+    else NEO4J_SEED_WAIT_SECONDS (default 3600)."""
+    rto = getattr(group, "rto_minutes", None)
+    return int(rto) * 60 if isinstance(rto, int) and rto > 0 else None
 
 
 def _topology(neo4j, group, name):
@@ -158,6 +180,9 @@ def run_backup(run_admin: RunAdmin, runner, store, database: str, prefix: str, k
     else:
         _admin(run_admin, runner.backup_command(database, store.uri(prefix), kind=kind), store)
         key = store.latest_artifact_key(prefix)
+    if not key:  # a backup that produced nothing never reports success (#218)
+        raise OpError(f"backup of {database} reported success but no artifact appeared under "
+                      f"{prefix}")
     record_artifacts(run_admin, runner, store, prefix, log=log)  # reads stay direct (#39)
     return key
 
@@ -179,13 +204,35 @@ def run_aggregate(run_admin: RunAdmin, runner, store, physical: str, prefix: str
     return key
 
 
+def newest_database_keys(store, prefix: str) -> list[str] | None:
+    """The backups in `prefix` of the database its newest backup belongs to. A folder can hold
+    backups of two databases with the same name (a by-name restore with --replace, a same-name
+    adopt, a re-created database), and neo4j-admin refuses to aggregate them together ("same
+    database name but different database ids"). None when some backup has no sidecar: then the
+    whole folder is used, as before."""
+    metas, unknown = artifacts.read(store, prefix)
+    if unknown or not metas:
+        return None
+    newest = max(metas.values(), key=lambda m: m.get("time") or "")
+    dbid = newest.get("database_id")
+    return sorted(k for k, m in metas.items() if m.get("database_id") == dbid)
+
+
 def run_verify(run_admin: RunAdmin, runner, store, physical: str, src: str, scratch: str,
                *, upload: str = "admin", staging: str | None = None) -> int:
-    """Non-destructively prove `src` is restorable: copy it aside, aggregate the copy into a
-    recovered full, `database check` it, then clean up. Return the artifact count checked."""
+    """Non-destructively prove `src` is restorable: copy its newest database's chain aside,
+    aggregate the copy into a recovered full, `database check` it, then clean up. Return the
+    artifact count checked."""
+    keys = newest_database_keys(store, src)
     if upload == "pipeline":
         stage = _stage(runner, "_verify", physical, staging)
-        copied = store.download_prefix(src, stage)  # verify on local disk — no S3 scratch writes
+        if keys is None:
+            copied = store.download_prefix(src, stage)  # on local disk, no S3 scratch writes
+        else:
+            os.makedirs(stage, exist_ok=True)
+            for k in keys:
+                store._download(k, os.path.join(stage, k[len(src):]))
+            copied = len(keys)
         try:
             _admin(run_admin, runner.aggregate_command(physical, stage), store)
             full = next(f for f in sorted(os.listdir(stage)) if f.endswith(".backup"))
@@ -194,7 +241,12 @@ def run_verify(run_admin: RunAdmin, runner, store, physical: str, src: str, scra
             shutil.rmtree(stage, ignore_errors=True)
         return copied
     try:
-        copied = store.copy_prefix(src, scratch)
+        if keys is None:
+            copied = store.copy_prefix(src, scratch)
+        else:  # only the newest database's chain
+            for k in keys:
+                store._copy(k, scratch + k[len(src):])
+            copied = len(keys)
         _admin(run_admin, runner.aggregate_command(physical, store.uri(scratch)), store)
         full = store.latest_artifact_key(scratch)
         _admin(run_admin, runner.check_command(physical, store.uri(full)), store)
@@ -265,9 +317,29 @@ STORE_ID_CHANGED = "have different store ids"
 
 def needs_full(neo4j, store, layout, group_id: str, alias: str) -> bool:
     """True when a DIFF of this member would fail for want of a base full (#74). Unknown
-    (pre-#118) backups count as a possible base, so this never forces a full on a guess."""
+    (pre-#118) backups count as a possible base, so this never forces a full on a guess. Also
+    true while a store-id change is marked for the member's current physical (#226)."""
     b = base_full(neo4j, store, layout, group_id, alias)
+    marked = (_state(_store(store, group_id), group_id).get("needs_full") or {}).get(alias)
+    if marked and marked == b["physical"]:
+        return True
     return b["full"] is None and b["unknown"] == 0
+
+
+def _mark_needs_full(store, group_id: str, alias: str, physical: str | None) -> None:
+    """Remember (physical) or forget (None) that a member's next backup must be a FULL (#226)."""
+    import json
+    store = _store(store, group_id)
+    state = _state(store, group_id)
+    marks = state.get("needs_full") or {}
+    if physical is None and alias not in marks:
+        return
+    if physical is None:
+        marks.pop(alias, None)
+    else:
+        marks[alias] = physical
+    state["needs_full"] = marks
+    store.put_text(f"{STATE_PREFIX}{group_id}.json", json.dumps(state, indent=1))
 
 
 def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: str, alias: str,
@@ -315,11 +387,20 @@ def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: s
         # missing base (#74): skip, and the full lane starts a new chain.
         log(f"{group_id}/{alias}: {physical}'s store id changed since its last backup (an "
             f"incremental import or offline load?); skipping the diff, a full is needed")
+        try:  # so the next tick asks for a FULL, not another diff (#226)
+            _mark_needs_full(store, group_id, alias, physical)
+        except Exception as m:  # noqa: BLE001
+            log(f"warning: could not record that a full is needed: {m}")
         return {"group": group_id, "alias": alias, "physical": physical, "kind": kind,
                 "artifact": None, "taken": None, "skipped": True, "needs_full": True,
                 "reason": "store id changed"}
     metas, _unknown = artifacts.read(store, prefix)
     taken = (metas.get(artifact) or {}).get("type") if artifact else None
+    if taken == "full" or kind.upper() == "FULL":
+        try:  # a new full starts the chain: the mark is done (#226)
+            _mark_needs_full(store, group_id, alias, None)
+        except Exception:  # noqa: BLE001
+            pass
     return {"group": group_id, "alias": alias, "physical": physical, "kind": kind,
             "artifact": artifact, "taken": taken, "skipped": False, "needs_full": False}
 
@@ -338,6 +419,7 @@ def aggregate_target(run_admin: RunAdmin, store, runner, layout, group_id: str, 
                      log: Log = _NOLOG, skip_missing: bool = False) -> dict:
     """Collapse the live physical's chain into one recovered full, IN PLACE (RTO/retention).
     `skip_missing` (scheduled runs, #104): a member with no backups yet is skipped, not failed."""
+    check_fence(store, store, group_id)  # moved to another cluster (#115, #217)
     runner = _per(runner, group_id)
     upload = _upload(runner, upload)
     store = _store(store, group_id)
@@ -356,6 +438,7 @@ def verify_target(run_admin: RunAdmin, store, runner, layout, group_id: str, ali
                   skip_missing: bool = False, log: Log = _NOLOG) -> dict:
     """Non-destructive consistency check of the latest backup for the alias. `skip_missing`
     (scheduled runs, #104): a member with no backups yet is skipped, not failed."""
+    check_fence(store, store, group_id)  # moved to another cluster (#115, #217)
     runner = _per(runner, group_id)
     upload = _upload(runner, upload)
     store = _store(store, group_id)
@@ -774,15 +857,59 @@ def choose_seed(store, layout, group_id: str, name: str, until: str | None = Non
                   f"{windows}{unknown}")
 
 
+def common_point(store, layout, group) -> dict:
+    """The newest time every member can be restored to (#225): the earliest of the members'
+    newest backups, from the chain metadata (#118). {at, limited_by, problem}."""
+    newest: dict[str, str] = {}
+    for name in group.names:
+        st = _store(store, group.id)
+        try:
+            read = artifacts.chains(st, layout.alias_prefix(group.id, name))
+        except Exception as e:  # noqa: BLE001 - metadata unreadable: fall back, don't fail
+            return {"at": None, "limited_by": None,
+                    "problem": f"{name}'s backup metadata can't be read ({e})"}
+        tos = [c["to"] for c in read["chains"] if c.get("to")]
+        if not tos or read["unknown"]:
+            return {"at": None, "limited_by": None,
+                    "problem": f"{name} has backups without metadata"
+                    if read["unknown"] else f"{name} has no backups with metadata"}
+        newest[name] = max(tos, key=_sidecar_time)
+    limited_by = min(newest, key=lambda n: _sidecar_time(newest[n]))
+    return {"at": newest[limited_by], "limited_by": limited_by, "problem": None,
+            "newest": newest}
+
+
 def choose_seeds(store, layout, group, until: str | None = None,
                  loads: dict | str | None = None) -> dict[str, dict]:
     """`choose_seed` for every member, so a time no chain covers (or a missing load) fails before
-    any change. `loads`: "latest" for every member, or {member: key-or-uri}."""
+    any change. `loads`: "latest" for every member, or {member: key-or-uri}.
+
+    With neither `until` nor `loads`, a group of several members is restored to one instant
+    (#225): the newest point every member covers (`common_point`). The member that limits it is
+    restored whole; the others to that time. If that can't be done (a member without metadata,
+    or a gap in a chain), each member gets its own newest backup and every seed says why under
+    `point`."""
     if isinstance(loads, dict):
         unknown = set(loads) - set(group.names)
         if unknown:
             raise OpError(f"--from-dump names {sorted(unknown)}, not members of {group.id}")
     pick = (lambda n: loads.get(n)) if isinstance(loads, dict) else (lambda n: loads)
+    if until is None and loads is None and len(group.names) > 1:
+        point = common_point(store, layout, group)
+        if point["at"]:
+            try:
+                seeds = {name: choose_seed(store, layout, group.id, name, point["at"])
+                         for name in group.names}
+                for seed in seeds.values():
+                    seed["point"] = {"aligned": True, "at": point["at"],
+                                     "limited_by": point["limited_by"]}
+                return seeds
+            except OpError as e:
+                point = {**point, "problem": str(e)}
+        seeds = {name: choose_seed(store, layout, group.id, name) for name in group.names}
+        for seed in seeds.values():
+            seed["point"] = {"aligned": False, "problem": point["problem"]}
+        return seeds
     return {name: choose_seed(store, layout, group.id, name, until, pick(name))
             for name in group.names}
 
@@ -818,6 +945,7 @@ def _restore_by_name(neo4j, group, name: str, key: str, existed: bool, *, store,
         log(f"dropped {name} (replace)")
     neo4j.seed_database(name, uri or store.uri(key), restore_until=restore_until,
                         topology=_topology(neo4j, group, name), cypher_version=cypher_version,
+                        wait_seconds=_seed_wait(group),
                         store_base=None if uri and not uri.startswith(store.uri(""))
                         else store.uri(""))
     log(f"restored {name} <= {key}")
@@ -862,6 +990,7 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
     uri = seed.get("uri") or store.uri(key)
     neo4j.seed_database(newdb, uri, restore_until=until,
                         topology=_topology(neo4j, group, name), cypher_version=cypher_version,
+                        wait_seconds=_seed_wait(group),
                         # an external dump (#159) is outside the backup store by design
                         store_base=None if seed.get("external") else store.uri(""))
     log(f"seeded {newdb} <= {key}" + (f" until {until}" if until else ""))
@@ -950,9 +1079,14 @@ def cleanup(neo4j, group, *, keep: int = 1, older_than_days: float | None = None
 STATE_PREFIX = "_state/"
 
 
-def record_swaps(store, group_id: str, swaps: list[dict], *, keep: int = 20) -> None:
+def record_swaps(store, group_id: str, swaps: list[dict], *, keep: int = 20,
+                 extend_last: bool = False, complete: bool = True) -> None:
     """Remember each alias's previous target for `rollback` (#122): `_state/<group>.json` holds the
-    last `keep` swaps, newest last. A stand-in until the records layer exists (#100)."""
+    last `keep` swaps, newest last. A stand-in until the records layer exists (#100).
+
+    A cutover records after each alias it moves (#220): the first call appends an entry, later
+    ones (`extend_last`) replace that entry's members, and `complete` is set once every alias has
+    moved. So after a failure part-way, the newest entry lists exactly the aliases that moved."""
     import json
     from datetime import datetime, timezone
 
@@ -961,8 +1095,13 @@ def record_swaps(store, group_id: str, swaps: list[dict], *, keep: int = 20) -> 
         state = json.loads(store.get_text(key))
     except Exception:  # noqa: BLE001 - no state yet
         state = {"group": group_id, "swaps": []}
-    state["swaps"].append({"at": datetime.now(timezone.utc).isoformat(), "members": {
-        s["alias"]: {"from": s.get("old"), "to": s["newdb"]} for s in swaps}})
+    entry = {"at": datetime.now(timezone.utc).isoformat(), "complete": complete, "members": {
+        s["alias"]: {"from": s.get("old"), "to": s["newdb"]} for s in swaps}}
+    if extend_last and state["swaps"]:
+        entry["at"] = state["swaps"][-1].get("at", entry["at"])
+        state["swaps"][-1] = entry
+    else:
+        state["swaps"].append(entry)
     state["swaps"] = state["swaps"][-keep:]
     store.put_text(key, json.dumps(state, indent=1))
 
@@ -1055,6 +1194,11 @@ def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG, store=None,
     failed copy raises before any alias moves. Privileges on the old physical are left in place
     (a rollback needs them; DROP DATABASE removes them). by-name entries are no-ops here."""
     swaps = [s for s in seeded if s.get("mode") != "by-name"]
+    for s in swaps:  # every new database online before any alias moves (#221)
+        neo = _per(neo4j, s["group"]) if s.get("group") else neo4j
+        if hasattr(neo, "database_online") and not neo.database_online(s["newdb"]):
+            raise OpError(f"{s['alias']}: {s['newdb']} isn't online on every server; no alias "
+                          f"was moved")
     for s in swaps:
         neo = _per(neo4j, s["group"]) if s.get("group") else neo4j  # its cluster (#106)
         try:
@@ -1063,18 +1207,29 @@ def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG, store=None,
         except OpError as e:
             raise OpError(f"{s['alias']}: copying privileges {s.get('old')} -> {s['newdb']} "
                           f"failed, no alias was moved: {e}") from e
+    gid = group_id or next((s["group"] for s in swaps if s.get("group")), None)
+    moved: list[dict] = []
     for s in swaps:
         neo = _per(neo4j, s["group"]) if s.get("group") else neo4j
         # alias-swap (default) or external routing (#17); a cluster may set its own (#106)
         strategy = cutover.for_cluster(getattr(neo, "cutover_config", None))
-        strategy.cutover(neo, s["alias"], s["newdb"], s.get("old"))
-        log(f"cutover {s['alias']}: {s.get('old')} -> {s['newdb']}")
-    gid = group_id or next((s["group"] for s in swaps if s.get("group")), None)
-    if store is not None and gid and swaps:  # for rollback (#122)
         try:
-            record_swaps(_store(store, gid), gid, swaps)
-        except Exception as e:  # noqa: BLE001 - the swap is done; only the record failed
-            log(f"warning: could not record the swap for rollback: {e}")
+            strategy.cutover(neo, s["alias"], s["newdb"], s.get("old"))
+        except Exception as e:  # noqa: BLE001 - say exactly what moved (#220)
+            left = [x["alias"] for x in swaps[len(moved):]]
+            raise CutoverError(
+                f"cutover stopped at {s['alias']} ({type(e).__name__}: {e}). Moved: "
+                f"{[m['alias'] for m in moved] or 'none'}; not moved: {left}. "
+                + ("`rollback` puts the moved aliases back." if moved else ""),
+                moved=[m["alias"] for m in moved], not_moved=left) from e
+        moved.append(s)
+        log(f"cutover {s['alias']}: {s.get('old')} -> {s['newdb']}")
+        if store is not None and gid:  # recorded as it happens, for rollback (#122, #220)
+            try:
+                record_swaps(_store(store, gid), gid, moved, extend_last=len(moved) > 1,
+                             complete=len(moved) == len(swaps))
+            except Exception as e:  # noqa: BLE001 - the swap is done; only the record failed
+                log(f"warning: could not record the swap for rollback: {e}")
 
 
 def restore_group(neo4j, store, group, layout, *, restore_until: str | None = None,
@@ -1176,6 +1331,12 @@ def plan_restore(neo4j, store, group, layout, *, replace: bool = False,
         m["seed"] = seeds[m.get("alias") or m["name"]]
     out = {"mode": group.restore_mode, "members": members,
            "drops": [d for m in members for d in m["drops"]]}
+    point = next((sd.get("point") for sd in seeds.values() if sd.get("point")), None)
+    if point:  # the instant the group goes back to, or why it can't be aligned (#225)
+        out["point"] = point
+        if not point["aligned"]:
+            out["alignment_warning"] = (f"the members can't be restored to one instant "
+                                        f"({point['problem']}); each gets its own newest backup")
     if isinstance(group, _Members) and len(group.names) < len(group._group.names):
         rest = [n for n in group._group.names if n not in group.names]
         out["warning"] = (f"restoring {group.names} only: they will no longer be aligned in time "

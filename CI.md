@@ -8,10 +8,9 @@ core, so a CI job is "run the CLI on a schedule." Ready-to-copy templates live i
 
 ## Who this is for
 
-Small fleets and non-orchestrator teams. CI is weak at the orchestration this project's value rests
-on — concurrency lanes, dynamic policy fan-out, multi-TB scratch, and observability. If you run
-dozens of databases across tiers with tight RTOs, use the Dagster or Airflow adapter. If you run a
-handful and already have CI, the CLI path is a real option with the limits below stated plainly.
+Teams with a handful of databases and no orchestrator. CI has no concurrency lanes, no
+per-group locks across jobs, best-effort cron and limited disk; with dozens of databases across
+tiers, use Dagster or Airflow. The limits are listed under Caveats below.
 
 ## Execution model: the CI runner *is* the backup runner
 
@@ -23,9 +22,8 @@ The job must run somewhere that can actually take a backup — DESIGN.md's centr
 - egress to your object store;
 - a **scratch disk sized for the largest full backup** (`SCRATCH_PATH`), on its own volume.
 
-GitHub-hosted runners (≈14 GB disk, 6 h cap, no `neo4j-admin`) suit only tiny/demo databases. A
-Forgejo/Gitea Actions runner is itself a natural backup runner — ephemeral compute with secrets,
-sited next to the database.
+GitHub-hosted runners (about 14 GB disk, a 6-hour cap, no `neo4j-admin`) suit only tiny or demo
+databases; use a self-hosted runner placed next to the database.
 
 ## Secrets → environment
 
@@ -40,7 +38,7 @@ credentials in your CI's secret store and the rest in plain variables:
 | `NEO4J_BACKUP_SOURCE` | var | `db-host:6362` (backup port) |
 | `BACKUP_BUCKET`, `AWS_REGION`, `CLOUD` | var | `CLOUD` = `aws` (default) / `azure` / `gcp` |
 | `NEO4J_BACKUP_POLICY` | var | a repo path, or `s3://…` (loaded with TTL cache) |
-| `RUNNER_PAGECACHE` | var | set explicitly, or `neo4j-admin` inherits the server pagecache and OOMs |
+| `RUNNER_PAGECACHE` | var | neo4j-admin's page cache (default `512M`); raise it for large databases, within the runner's memory |
 | `SCRATCH_PATH` | var | a sized volume, not the runner's install disk |
 
 ## Install
@@ -56,13 +54,13 @@ Add a cloud extra if you use Azure/GCS — put it on the package name:
 
 ## Policy crons → CLI commands
 
-The orchestrators read every schedule from the policy (#104). A cron or CI job runs the matching
+The orchestrators read every schedule from the policy. A cron or CI job runs the matching
 command on the same cron:
 
 | Policy cron | Command |
 |---|---|
 | `tiers.<t>.full_cron` | `neo4j-backup backup <group> --kind FULL` for each group on tier `<t>` |
-| `tiers.<t>.diff_cron` | `neo4j-backup backup <group> --kind DIFF` (then `--kind FULL` if `result.needs_full` lists any, #74) |
+| `tiers.<t>.diff_cron` | `neo4j-backup backup <group> --kind DIFF` (then `--kind FULL` if `result.needs_full` lists any) |
 | `tiers.<t>.verify_cron` | `neo4j-backup verify <group>` |
 | `tiers.<t>.aggregate_cron` | `neo4j-backup aggregate <group> --confirm` |
 | `tiers.<t>.prune_cron` | `neo4j-backup prune --confirm` (all groups and the DBMS sweep; one job is enough) |

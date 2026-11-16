@@ -9,8 +9,8 @@
 # adds its own `load.build` (and `load.source`), since each customer builds different data.
 profiles:
   app-live:       { tier: gold, retention_days: 14 }
-  data-interval:  { tier: nightly, load: { mode: rebuild, writes: read-only, keep_loads: 14 } }
-  data-scratch:   { tier: nightly, load: { mode: rebuild, writes: read-write, protect_writes: false, keep_loads: 7 } }
+  data-interval:  { tier: rebuild_nightly, load: { mode: rebuild, writes: read-only, keep_loads: 14 } }
+  data-scratch:   { tier: rebuild_nightly, load: { mode: rebuild, writes: read-write, protect_writes: false, keep_loads: 7 } }
   data-then-live: { tier: gold, load: { mode: once, writes: read-write, protect_writes: true } }
 
 db_groups:
@@ -44,4 +44,6 @@ tiers:
   gold:   { full_cron: "0 2 * * *",   diff_cron: "0 * * * *" }    # daily full, hourly diff
   silver: { full_cron: "0 3 * * 0",   diff_cron: "0 */6 * * *" }  # weekly full, 6h diff
   bronze: { full_cron: "0 4 * * 0",   diff_cron: "0 0 * * *" }    # weekly full, daily diff
-  nightly: { rebuild_cron: "0 1 * * *" }                          # load-only groups: rebuild nightly
+  # rebuild-only: groups whose loads restore them (no backups, so no point-in-time restore).
+  # A group that needs point-in-time restore uses a tier with full_cron and diff_cron.
+  rebuild_nightly: { rebuild_cron: "0 1 * * *" }

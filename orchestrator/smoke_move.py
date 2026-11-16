@@ -69,10 +69,25 @@ def target(uri, alias):
     return rows[0]["database"] if rows else None
 
 
+def reset() -> None:
+    """Start clean, so the smoke can be run again on the same stack."""
+    from neo4j_backup_core.clients import object_store
+    for uri in (A, B):
+        q(uri, "system", "DROP ALIAS `mv-a` IF EXISTS FOR DATABASE")
+        for r in q(uri, "system", "SHOW DATABASES YIELD name WHERE name STARTS WITH 'mv-a' "
+                                  "RETURN DISTINCT name"):
+            q(uri, "system", f"DROP DATABASE `{r['name']}` IF EXISTS WAIT")
+        q(uri, "system", "DROP ROLE mover IF EXISTS")
+    st = object_store("neo4j-backups", "http://localhost:9000", "us-east-1")
+    st.delete_prefix("movegrp/")
+    st.delete_keys(["_state/movegrp.json"])
+
+
 def main() -> None:
     os.chdir(REPO)
     on_a, on_b = policy("default"), policy("west")
     try:
+        reset()
         q(A, "system", "CREATE DATABASE `mv-a-20261116t000000` IF NOT EXISTS WAIT")
         q(A, "system", "CREATE ALIAS `mv-a` IF NOT EXISTS FOR DATABASE `mv-a-20261116t000000`")
         q(A, "mv-a", "CREATE (:Moved {n: 1}), (:Moved {n: 2})")

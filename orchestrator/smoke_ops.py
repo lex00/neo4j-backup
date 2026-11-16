@@ -71,7 +71,18 @@ def target(alias):
     return rows[0]["database"] if rows else None
 
 
+def reset() -> None:
+    """Start clean, so the smoke can be run again on the same stack."""
+    for alias in ("legacy-shop", "samedb", "named-a"):
+        sysq(f"DROP ALIAS `{alias}` IF EXISTS FOR DATABASE")
+    for r in sysq("SHOW DATABASES YIELD name WHERE name IN ['shopdb', 'samedb', 'customer-made'] "
+                  "OR name STARTS WITH 'samedb-' OR name STARTS WITH 'named-a' "
+                  "OR name STARTS WITH 'prod-named-a-' RETURN DISTINCT name"):
+        sysq(f"DROP DATABASE `{r['name']}` IF EXISTS WAIT")
+
+
 def main() -> None:
+    reset()
     cli("backup", "demo", "--kind", "FULL")
     st = cli("status", "demo", "--stale")["result"]
     assert {r["state"] for r in st["targets"]} == {"ok"}, st

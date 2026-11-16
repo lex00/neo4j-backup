@@ -10,6 +10,9 @@ import dagster as dg
 from neo4j_backup_core.clients import BackupRunner, Neo4jClient, ObjectStore, object_store
 
 
+_CLIENTS: dict = {}  # Neo4jResource configuration -> its shared client (#230)
+
+
 class Neo4jResource(dg.ConfigurableResource):
     uri: str = "neo4j://localhost:7687"
     user: str = "neo4j"
@@ -22,13 +25,24 @@ class Neo4jResource(dg.ConfigurableResource):
     password: str | None = None
 
     def _core(self) -> Neo4jClient:
-        if self.password is not None:
-            return Neo4jClient(self.uri, self.user, self.password)
-        from neo4j_backup_core import secrets
+        # one client (and so one driver) per configuration in this process (#230), not one per
+        # statement; the client re-resolves the secret when it reconnects
+        key = (self.uri, self.user, self.password, self.secret_provider, self.password_ref)
+        client = _CLIENTS.get(key)
+        if client is None:
+            if self.password is not None:
+                client = Neo4jClient(self.uri, self.user, self.password)
+            else:
+                from neo4j_backup_core import secrets
 
-        provider = secrets.build(self.secret_provider)
-        ref = self.password_ref
-        return Neo4jClient(self.uri, self.user, lambda: provider.resolve(ref))
+                provider = secrets.build(self.secret_provider)
+                ref = self.password_ref
+                client = Neo4jClient(self.uri, self.user, lambda: provider.resolve(ref))
+            _CLIENTS[key] = client
+        return client
+
+    def close(self, *a, **k):
+        return self._core().close(*a, **k)
 
     def _driver(self):
         return self._core()._driver()
@@ -81,6 +95,13 @@ class Neo4jResource(dg.ConfigurableResource):
     def list_aliases(self, *a, **k):
         return self._core().list_aliases(*a, **k)
 
+    def _pol(self):
+        """The policy, so the core's fence check knows the group's cluster (#217): without it
+        Dagster backed up a group that `restore --to-cluster` had moved off this cluster."""
+        from neo4j_backup_core.env import Neo4jSet, policy_path
+
+        return Neo4jSet(self._core(), policy_source=policy_path())._pol()
+
     def for_group(self, group_id: str):
         """The client for the group's cluster (#106); this resource is the `default` cluster."""
         from neo4j_backup_core.env import Neo4jSet, policy_path
@@ -89,6 +110,12 @@ class Neo4jResource(dg.ConfigurableResource):
 
     def privilege_commands(self, *a, **k):
         return self._core().privilege_commands(*a, **k)
+
+    def database_online(self, *a, **k):
+        return self._core().database_online(*a, **k)
+
+    def wait_online(self, *a, **k):
+        return self._core().wait_online(*a, **k)
 
 
 class ObjectStoreResource(dg.ConfigurableResource):
@@ -105,6 +132,11 @@ class ObjectStoreResource(dg.ConfigurableResource):
     def _core(self) -> ObjectStore:
         return object_store(self.bucket, self.endpoint_url, self.region,
                             self.sse, self.sse_kms_key_id, self.write_args_json, self.cloud)
+
+    def _pol(self):
+        from neo4j_backup_core.env import StoreSet, policy_path
+
+        return StoreSet(self._core(), policy_source=policy_path())._pol()
 
     def for_group(self, group_id: str) -> ObjectStore:
         """The store a group's policy names (#105); this resource is the `default` store unless
@@ -182,6 +214,11 @@ class RunnerResource(dg.ConfigurableResource):
     scratch_storage: str = "6Ti"
     service_account: str = ""
     extra_env_json: str = "{}"
+    namespace: str = ""            # k8s (#229): "" = the run pod's namespace
+    cpu_request: str = ""
+    memory_request: str = ""
+    tolerations_json: str = "[]"
+    secret_env_json: str = "{}"    # {"ENV": "<secret>:<key>"}: credentials from k8s Secrets
 
     def _core(self) -> BackupRunner:
         return BackupRunner(
@@ -189,6 +226,9 @@ class RunnerResource(dg.ConfigurableResource):
             self.neo4j_admin, self.exec_prefix, self.mode, self.image,
             self.node_selector_json, self.memory_limit, self.scratch_storage,
             self.service_account, self.extra_env_json,
+            namespace=self.namespace, cpu_request=self.cpu_request,
+            memory_request=self.memory_request, tolerations_json=self.tolerations_json,
+            secret_env_json=self.secret_env_json,
         )
 
     def backup_command(self, *a, **k):
@@ -229,6 +269,12 @@ class RunnerResource(dg.ConfigurableResource):
 
     def env(self, *a, **k):
         return self._core().env(*a, **k)
+
+    def pod_env(self, *a, **k):
+        return self._core().pod_env(*a, **k)
+
+    def k8s_resources(self, *a, **k):
+        return self._core().k8s_resources(*a, **k)
 
     def k8s_pod_spec(self, *a, **k):
         return self._core().k8s_pod_spec(*a, **k)

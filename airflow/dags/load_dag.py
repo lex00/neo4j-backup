@@ -51,6 +51,8 @@ def load_one(group_id: str, replace: bool = False, keep_failed: bool = False,
              "reason": Param(None, type=["null", "string"])},
      tags=["neo4j-backup", "load"])
 def neo4j_load():
+    # the group is a run parameter, and Airflow fixes a task's pool when the DAG is parsed, so a
+    # manual load uses the default cluster's full pool whatever its cluster (#232)
     @task(pool="neo4j_full")
     def load() -> dict:
         p = get_current_context()["params"]
@@ -66,20 +68,29 @@ def neo4j_load():
 neo4j_load_dag = neo4j_load()
 
 
-def make_rebuild_dag(tier: str, cron: str):
+def make_rebuild_dag(tier: str, cron: str, clusters: list[str] | None = None):
+    """`neo4j_rebuild_<tier>`: one mapped task per cluster (#232), each in that cluster's full
+    pool (`neo4j_full`, or `neo4j_<cluster>_full` for a named cluster, as the backups use)."""
+    pool_for = config.pool_for
+
+    clusters = clusters or ["default"]
+
     @dag(dag_id=f"neo4j_rebuild_{tier}", schedule=cron, start_date=datetime(2025, 1, 1),
          catchup=False, max_active_runs=1, tags=["neo4j-backup", "rebuild", tier])
     def _rebuild():
         @task
-        def groups() -> list[str]:
+        def groups(cluster: str) -> list[str]:
             pol = load_policy(config.policy_path())
-            return [g.id for g in pol.groups_for_tier(tier) if g.load.mode == "rebuild"]
+            return [g.id for g in pol.groups_for_tier(tier)
+                    if g.load.mode == "rebuild" and (g.cluster or "default") == cluster]
 
-        @task(pool="neo4j_full")
+        @task
         def rebuild(group_id: str) -> dict:
             return load_one(group_id)
 
-        rebuild.expand(group_id=groups())
+        for cluster in clusters:
+            rebuild.override(task_id=f"rebuild_{cluster}", pool=pool_for(cluster, "full")).expand(
+                group_id=groups.override(task_id=f"groups_{cluster}")(cluster))
 
     return _rebuild()
 
@@ -88,4 +99,6 @@ _pol = load_policy_at_startup(config.policy_path(), configured="NEO4J_BACKUP_POL
 if _pol is not None:
     for _tier, _t in _pol.tiers.items():
         if _t.rebuild_cron:
-            globals()[f"neo4j_rebuild_{_tier}"] = make_rebuild_dag(_tier, _t.rebuild_cron)
+            _cls = sorted({g.cluster or "default" for g in _pol.groups_for_tier(_tier)
+                           if g.load.mode == "rebuild"}) or ["default"]
+            globals()[f"neo4j_rebuild_{_tier}"] = make_rebuild_dag(_tier, _t.rebuild_cron, _cls)

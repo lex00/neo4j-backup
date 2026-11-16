@@ -492,7 +492,7 @@ def _recorded(cmd):
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="neo4j-backup",
                                 description="Scheduler-agnostic Neo4j backup/restore over the "
-                                            "policy-driven core. Honours the #60 CLI contract.")
+                                            "policy-driven core. See CLI-CONTRACT.md for output and exit codes.")
     p.add_argument("--json", action="store_true", help="emit the result as one JSON object (stdout)")
     p.add_argument("--debug", action="store_true",
                    help="print the traceback of an unexpected error to stderr (or set "
@@ -516,7 +516,7 @@ def build_parser() -> argparse.ArgumentParser:
     b.set_defaults(func=_by_tenant(cmd_backup, "backup"))
 
     rp = selectable(sub.add_parser("restore-points",
-                                   help="what each member can be restored to (read-only, #113)"))
+                                   help="what each member can be restored to (read-only)"))
     rp.set_defaults(func=_by_tenant(cmd_restore_points, "restore-points"))
 
     v = selectable(sub.add_parser("verify", help="non-destructively check the latest backups of a group"))
@@ -529,7 +529,7 @@ def build_parser() -> argparse.ArgumentParser:
     r = guarded(sub.add_parser("restore", help="restore a group (alias-swap or by-name)"))
     r.add_argument("group", nargs="?")
     r.add_argument("--to-cluster", metavar="ID",
-                   help="restore into another cluster of the policy (#115)")
+                   help="restore into another cluster of the policy")
     r.add_argument("--from-cluster", metavar="ID",
                    help="with --to-cluster: every group of this cluster in one plan")
     r.add_argument("--fence-source", action="store_true",
@@ -542,33 +542,33 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--replace", action="store_true", help="by-name: DROP+recreate an existing target")
     src = r.add_mutually_exclusive_group()
     src.add_argument("--from-load", action="store_true",
-                     help="seed every member from its newest load artifact (_seed/, #144)")
+                     help="seed every member from its newest load artifact (_seed/)")
     src.add_argument("--from-dump", action="append", metavar="MEMBER=KEY_OR_URI",
                      help="seed a member from a dump: a key in its _seed/ folder, or a URI the "
-                          "servers can read (an external dump, #159); repeat per member")
+                          "servers can read (an external dump); repeat per member")
     r.add_argument("--member", action="append", metavar="ALIAS_OR_DATABASE",
-                   help="restore only this member (repeatable); the rest of the group stays (#121)")
+                   help="restore only this member (repeatable); the rest of the group stays")
     r.add_argument("--check", action="store_true",
-                   help="run the group's load.checks on the new databases before the swap (#111)")
+                   help="run the group's load.checks on the new databases before the swap")
     r.add_argument("--keep-failed", action="store_true",
                    help="with --check: keep the new databases when a check fails")
     r.add_argument("--no-baseline", action="store_true",
-                   help="skip the full backup of each restored database (taken by default, #97)")
+                   help="skip the full backup of each restored database (taken by default)")
     r.set_defaults(func=_recorded(cmd_restore))
 
     ld = guarded(sub.add_parser("load", help="load or rebuild a group from its policy build "
-                                             "(#107)"))
+                                             ""))
     ld.add_argument("group")
     ld.add_argument("--replace", action="store_true", help="by-name: DROP+recreate existing")
     ld.add_argument("--keep-failed", action="store_true",
                     help="keep the new databases when a step before the swap fails")
     ld.add_argument("--no-baseline", action="store_true", help="skip the baseline backup")
     ld.add_argument("--reapply-access", action="store_true",
-                    help="only apply the policy's `writes` to the current databases (#112)")
+                    help="only apply the policy's `writes` to the current databases")
     ld.set_defaults(func=_recorded(cmd_load))
 
     ad = guarded(sub.add_parser("adopt", help="bring existing databases under the alias model "
-                                              "(#92)"))
+                                              ""))
     ad.add_argument("group")
     ad.add_argument("--migrate", action="store_true",
                     help="same-name members: back up, seed a new physical, DROP the original, "
@@ -576,7 +576,7 @@ def build_parser() -> argparse.ArgumentParser:
     ad.add_argument("--replace", action="store_true", help="allow the DROP in --migrate")
     ad.set_defaults(func=_recorded(cmd_adopt))
 
-    cu = guarded(sub.add_parser("cleanup", help="drop superseded databases of a group (#93)"))
+    cu = guarded(sub.add_parser("cleanup", help="drop superseded databases of a group"))
     cu.add_argument("group")
     cu.add_argument("--keep", type=int, default=1,
                     help="previous databases kept for rollback (default 1)")
@@ -585,14 +585,14 @@ def build_parser() -> argparse.ArgumentParser:
     cu.set_defaults(func=_recorded(cmd_cleanup))
 
     rb = guarded(sub.add_parser("rollback", help="point each alias back at the database it "
-                                                 "targeted before the last swap (#122)"))
+                                                 "targeted before the last swap"))
     rb.add_argument("group")
     rb.add_argument("--member", action="append", metavar="ALIAS",
                     help="only this member (repeatable)")
     rb.set_defaults(func=_recorded(cmd_rollback))
 
     ex = guarded(sub.add_parser("export", help="a portable .dump of each member, at --until or "
-                                               "the latest backup (#160)"))
+                                               "the latest backup"))
     ex.add_argument("group")
     ex.add_argument("--until", type=_until_arg, help="ISO-8601 point in time, UTC if no offset")
     ex.set_defaults(func=_recorded(cmd_export))
@@ -611,12 +611,12 @@ def build_parser() -> argparse.ArgumentParser:
     t.set_defaults(func=cmd_targets)
 
     stt = selectable(sub.add_parser("status", help="freshness of each target against its "
-                                                   "rpo_minutes (#123)"))
+                                                   "rpo_minutes"))
     stt.add_argument("--stale", action="store_true",
                      help="exit 1 when any target is stale (for cron or CI alerts)")
     stt.set_defaults(func=cmd_status)
 
-    im = sub.add_parser("import", help="bulk-import raw data into an offline store on the loader (#16)")
+    im = sub.add_parser("import", help="bulk-import raw data into an offline store on the loader")
     im.add_argument("database", help="the physical database name to import into (see IMPORT.md)")
     im.add_argument("--to-dump", metavar="GROUP/MEMBER",
                     help="then dump the offline store into that member's load folder (_seed/)")
@@ -625,11 +625,11 @@ def build_parser() -> argparse.ArgumentParser:
     im.set_defaults(func=cmd_import)
 
     po = sub.add_parser("policy", help="inspect or check the policy (no cluster or store access)")
-    posub = po.add_subparsers(dest="policy_command", required=True, metavar="<show|validate>")
+    posub = po.add_subparsers(dest="policy_command", required=True, metavar="<show|validate|check>")
     ps = posub.add_parser("show", help="a group's effective settings and where each came from")
     ps.add_argument("group")
     ps.set_defaults(func=cmd_policy_show)
-    pc = posub.add_parser("check", help="can the tool list and write each store? (#105)")
+    pc = posub.add_parser("check", help="can the tool list and write each store?")
     pc.set_defaults(func=cmd_policy_check)
     pv = posub.add_parser("validate", help="load and validate a policy file; exit 0 or 2")
     pv.add_argument("file")
@@ -663,10 +663,13 @@ def _emit(result_env: dict, as_json: bool) -> None:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)  # argparse exits 2 (USAGE) on bad args
     try:
+        policy_mod.check_upload_mode()  # #218
         result_env, code = args.func(args)
     except ops.OpError as e:
         extra = ({"result": {"dropped": e.dropped, "kept": e.kept}}
-                 if isinstance(e, ops.SeedError) else {})
+                 if isinstance(e, ops.SeedError) else
+                 {"result": {"moved": e.moved, "not_moved": e.not_moved}}
+                 if isinstance(e, ops.CutoverError) else {})
         result_env, code = envelope(args.command, ok=False, **extra,
                                     error=make_error(getattr(e, "kind", "op_failed"),
                                                      str(e))), Exit.FAILURE

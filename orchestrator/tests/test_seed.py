@@ -7,6 +7,8 @@ from neo4j_backup_core.policy import Topology
 
 class _CaptureClient(Neo4jClient):
     def run_system(self, cypher, **params):  # don't hit a real server
+        if cypher.startswith("SHOW DATABASE"):
+            return [{"currentStatus": "online"}]
         self.last = cypher
         return []
 
@@ -19,7 +21,7 @@ def _seed(**kw) -> str:
 
 def test_default_no_prefix_no_existing_data():
     s = _seed()
-    assert s == "CREATE DATABASE `orders-t1` OPTIONS { seedURI: 's3://b/k.backup' } WAIT"
+    assert s == "CREATE DATABASE `orders-t1` OPTIONS { seedURI: 's3://b/k.backup' } WAIT 3600 SECONDS"
     assert "existingData" not in s and "CYPHER" not in s
 
 

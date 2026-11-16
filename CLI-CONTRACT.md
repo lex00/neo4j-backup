@@ -2,9 +2,8 @@
 
 The `neo4j-backup` CLI is the interface a **coding/ops agent drives without MCP** (and the surface
 CI schedules). For that to be safe and scriptable, every subcommand honours one contract: a stable
-machine-readable result, documented exit codes, and explicit guards on anything destructive. The
-optional MCP server ([#58](https://github.com/lex00/neo4j-backup/issues/58) Phase 5) is a thin
-wrapper over this same contract, not a separate interface.
+machine-readable result, documented exit codes, and explicit guards on anything destructive. The optional [MCP server](MCP.md)
+returns the same results.
 
 The contract is executable: [`neo4j_backup_core/cli_contract.py`](orchestrator/neo4j_backup_core/cli_contract.py)
 is the single source of truth, and [`tests/cli_contract.py`](orchestrator/tests/cli_contract.py) is
@@ -20,7 +19,7 @@ Human-readable output is the default. `--json` switches stdout to a single JSON 
   "ok": true,
   "op": "backup",
   "group": "demo",
-  "result": { "key": "demo/orders/orders-20260711t120000/full.backup" },
+  "result": { "key": "demo/orders/orders-20260711t120000/orders-20260711t120000-2026-07-11T12-00-05.backup" },
   "error": null
 }
 ```
@@ -51,12 +50,12 @@ gate on meaning rather than a bare non-zero:
 
 ## Safety: dry-run, blast radius, confirm
 
-- **`--dry-run`** on every mutating command: print the planned actions, exit `0`, touch neither
-  Neo4j nor the object store.
+- **`--dry-run`** on every mutating command: print the planned actions, exit `0`, change neither
+  Neo4j nor the object store (it reads both to make the plan).
 - **Blast radius** for destructive ops (`restore --replace`, `prune`): before acting — and always
   under `--dry-run` — the `result` echoes what will be dropped/created (physical names, alias swaps,
   artifact keys). The MCP layer surfaces this same structure.
-- **`--confirm` (or `--yes`) required for destructive ops. No interactive prompts, ever** — an
+- **`--confirm` required for destructive ops. No interactive prompts, ever** — an
   agent/CI can't answer one, so a missing confirmation is a `GUARD` refusal, not a hang. Read-only
   is the default posture.
 - **`--ticket` / `--reason`** on every mutating command: one line each (at most 500 characters),
@@ -64,7 +63,7 @@ gate on meaning rather than a bare non-zero:
   dry-run and refusal envelopes too. With `NEO4J_BACKUP_REQUIRE_TICKET=true`, an applied change
   without `--ticket` is a `GUARD` refusal with error kind `ticket_required`; `--dry-run` never
   needs one.
-- **Every failure is an envelope** (#140): an unexpected exception still gives one JSON object
+- **Every failure is an envelope**: an unexpected exception still gives one JSON object
   with `ok: false` and exit `1`. Error kinds: `op_failed` (a refused or failed operation),
   `admin_failed` (neo4j-admin exited non-zero), `seed_failed` (a group restore failed while
   seeding; `result.dropped` lists the members already seeded, which were dropped since no alias
@@ -75,7 +74,5 @@ gate on meaning rather than a bare non-zero:
 
 Build each subcommand on `envelope(...)` / `make_error(...)` and return an `Exit` code; do not
 hand-roll result dicts. In tests, call the harness (`assert_conformant`, `assert_exit`,
-`assert_dry_run_is_inert`, `assert_destructive_refused`) rather than re-checking fields. See
-[#60](https://github.com/lex00/neo4j-backup/issues/60) for scope and
-[#59](https://github.com/lex00/neo4j-backup/issues/59) for the agent-facing `AGENTS.md` that
-summarises this contract.
+`assert_dry_run_is_inert`, `assert_destructive_refused`) rather than re-checking fields.
+[AGENTS.md](AGENTS.md) summarises this contract for agents.

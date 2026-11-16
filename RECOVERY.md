@@ -1,46 +1,23 @@
 # Recovery
 
-Recovery is **pure Cypher over Bolt** — no agent on the database nodes. You seed a fresh,
-uniquely-named physical database from a backup artifact (`seedURI`), verify it, then
-repoint the stable **alias** to it (the alias-swap cutover). The cluster pulls the seed
-itself. Diagram: [restore-cutover](diagrams/restore-cutover.dot).
+This page is the Cypher a restore runs, for understanding it and for recovering by hand. The
+runbook for a customer's request (restore points, preview, `--ticket`, the baseline, reporting
+back, `rollback`) is in [OPERATOR.md](OPERATOR.md#restore-on-a-customers-request); the CLI,
+the MCP server, Dagster's `restore_group` job and Airflow's `neo4j_restore` DAG all run the
+statements below.
 
-**The one thing to understand:** the seed artifact can be a **full** *or* a
-**differential**. You point `seedURI` at a single `.backup` file; if it's a differential,
-Neo4j's CloudSeedProvider finds its full + the intervening diffs in the same prefix and
-applies them automatically. You never assemble the chain by hand.
+A restore creates a new database seeded from a backup (`CREATE DATABASE … OPTIONS { seedURI }`),
+checks it is online, then points the alias at it (`ALTER ALIAS`). The Neo4j servers fetch the
+seed themselves; nothing runs on them. Diagram: [restore-cutover](diagrams/restore-cutover.dot).
 
-> **Privileges ([#117](https://github.com/lex00/neo4j-backup/issues/117)).** Neo4j stores
-> privileges against the database, not the alias. The tool's restore copies them to the new
-> database before the switch. When you run the Cypher below by hand, copy them yourself before the
-> `ALTER ALIAS`: run each command from
-> `SHOW PRIVILEGES AS COMMANDS` whose `ON GRAPH` / `ON DATABASE` names the old database, with the
-> new database's name in its place. Then take a full backup of the restored group
-> (`neo4j-backup backup <group> --kind FULL`); the tool's restore does that itself (#97).
+The seed can be a full or a differential backup. Point `seedURI` at one `.backup` file; for a
+differential, Neo4j finds its full and the diffs in between in the same folder and applies them.
 
-**Driving it.** This runbook is the raw Cypher — useful for understanding and for a fully manual
-recovery. In practice the same seed-and-cutover is driven for a whole group by an orchestrator
-(Dagster `restore_group` / the Airflow restore DAG) or, without one, by
-`neo4j-backup restore <group>` — run `--dry-run` first to see the plan/blast radius, then
-`--confirm` (add `--until <iso>` for PITR). An operator can also drive it through an agent via the
-[MCP server](MCP.md). All of these run the exact commands below; see [CLI-CONTRACT.md](CLI-CONTRACT.md).
-
-## A customer's request, in short
-
-The full runbook is in [OPERATOR.md](OPERATOR.md#restore-on-a-customers-request). The steps:
-
-1. Agree the group (or members), the time in UTC or "latest", and the ticket.
-2. `neo4j-backup --json restore-points <group>`: what each member can be restored to, and gaps.
-3. `neo4j-backup restore <group> --until <T> --dry-run`: the backups chosen per member, the
-   privileges carried over, anything dropped.
-4. `neo4j-backup --json restore <group> --until <T> --confirm --ticket <ref> --reason "..."`
-   (#119). The ticket and reason go to the log and the result.
-5. The restore takes a full backup of each new database (the baseline, #97), so the next
-   differential has a base. Check `result.baseline`.
-6. Report back: the time restored to, the new database names, the baseline, and that writes
-   after the time are gone.
-7. To undo: `neo4j-backup rollback <group> --confirm` points every alias back at the database it
-   served before (#122), as long as cleanup hasn't dropped it.
+Privileges are stored against the database, not the alias. The tool's restore copies them to
+the new database before the switch. By hand, copy them yourself before `ALTER ALIAS`: run each
+command from `SHOW PRIVILEGES AS COMMANDS` whose `ON GRAPH` / `ON DATABASE` names the old
+database, with the new name in its place. Afterwards take a full backup of the restored group
+(`neo4j-backup backup <group> --kind FULL`); the tool's restore does that itself.
 
 ## The three recovery modes
 
@@ -48,8 +25,8 @@ All three are the same `CREATE DATABASE … seedURI` command; they differ only i
 artifact you point at and whether you add `seedRestoreUntil`. (No `seedConfig` — rejected;
 region + endpoint come from the server's `AWS_REGION` / `AWS_ENDPOINT_URL_S3` env.)
 
-**Cypher version.** `existingData: 'use'` is **required in Cypher 5** and **deprecated in
-Cypher 25**, so the orchestrator couples it to the pinned language: `SEED_CYPHER_VERSION`
+Cypher version. `existingData: 'use'` is required in Cypher 5 and deprecated in
+Cypher 25, so the orchestrator couples it to the pinned language: `SEED_CYPHER_VERSION`
 unset (Cypher-25 default) omits it — the examples below; `SEED_CYPHER_VERSION=5` emits
 `CYPHER 5 CREATE DATABASE … OPTIONS { seedURI: …, existingData: 'use' }`. Set it to match
 your cluster's Cypher version.
@@ -76,8 +53,8 @@ CREATE DATABASE `orders-20260629t120500`
 
 ### 3. Point-in-time recovery (PITR)
 
-Add `seedRestoreUntil` to replay the chain up to a timestamp (or transaction id). **Requires
-a differential chain** — a lone full errors with *"can only be fully restored."*
+Add `seedRestoreUntil` to replay the chain up to a timestamp (or transaction id). Requires
+a differential chain — a lone full errors with *"can only be fully restored."*
 
 ```cypher
 CREATE DATABASE `orders-20260629t120900`
@@ -89,7 +66,7 @@ After any of these: bring the new database online, optionally verify it, then cu
 `ALTER ALIAS \`orders\` SET DATABASE TARGET \`orders-<ts>\``. Roll back by repointing the
 alias to the previous physical; drop the old one after a soak.
 
-**Pluggable cutover.** The alias swap is the default strategy. Teams that route apps through
+Pluggable cutover. The alias swap is the default strategy. Teams that route apps through
 an external layer (proxy / service discovery / DNS / router) set `CUTOVER_STRATEGY=external`
 and `CUTOVER_HOOK=<url|command>`; the orchestrator calls the hook with the new/old physical so
 that layer repoints, and the Neo4j alias is left untouched. Rollback is then the router's
@@ -98,33 +75,33 @@ concern (repoint back to the old physical). Default `CUTOVER_STRATEGY=alias-swap
 ## By-name restore (no alias)
 
 Teams that don't use aliases set a group's `restore_mode: by-name` (POLICY.md) and list
-`databases:` (names, not aliases). Restore then targets each database by its **own name**:
+`databases:` (names, not aliases). Restore then targets each database by its own name:
 
-- **Create-if-absent** (default, non-destructive) — for DR / a fresh cluster / a dropped DB:
+- Create-if-absent (default, non-destructive) — for DR / a fresh cluster / a dropped DB:
   `CREATE DATABASE <name> OPTIONS { seedURI: … }`. Nothing is dropped.
-- **Replace** (destructive, opt-in) — an existing database is replaced with `DROP DATABASE
+- Replace (destructive, opt-in) — an existing database is replaced with `DROP DATABASE
   <name>` then `CREATE … seedURI`. Requires `replace=true` on the restore (Dagster op config /
   Airflow `replace` param). There is a window where the database is gone; the Dagster op
-  pre-validates every artifact + target across the group **before** any drop, and you should run
+  pre-validates every artifact + target across the group before any drop, and you should run
   `verify` first for restorability assurance.
 
-**There is no non-destructive in-place restore for a named database** — Neo4j has no
+There is no non-destructive in-place restore for a named database — Neo4j has no
 `RENAME DATABASE` ([Ops Manual](https://neo4j.com/docs/operations-manual/current/database-administration/standard-databases/alter-databases/)),
 so swapping a freshly-restored copy into an existing name isn't possible without an alias.
 If you need non-destructive restore, use `alias-swap` (that indirection is the whole point).
 
 ## Seed from a local file (`file://`)
 
-`seedURI` also accepts a **local/mounted** artifact — `CREATE DATABASE foo OPTIONS { seedURI:
+`seedURI` also accepts a local/mounted artifact — `CREATE DATABASE foo OPTIONS { seedURI:
 'file:/seed/foo.backup' }` (FileSeedProvider; enable it via
 `dbms.databases.seed_from_uri_providers`, absolute path). The `.backup` is byte-identical
 regardless of which cloud produced it, so this is both a DR path (restore from a mounted backup)
-and how the pipeline validates restore **cloud-agnostically**: download the artifact from any
+and how the pipeline validates restore cloud-agnostically: download the artifact from any
 backend (S3/Azure/GCS) to the node's filesystem, then seed via `file://` — no cloud fetch, no
-per-cloud emulator needed (`just file-restore-smoke`, #52). PITR (`seedRestoreUntil`) works on
+per-cloud emulator needed (`just file-restore-smoke`). PITR (`seedRestoreUntil`) works on
 `file://` too.
 
-**Cluster topology.** When the group declares a `topology:` (POLICY.md), the orchestrator
+Cluster topology. When the group declares a `topology:` (POLICY.md), the orchestrator
 adds it to the seed so the restored physical comes up with the intended redundancy rather
 than the DBMS default — otherwise a restore after losing servers can silently reduce your
 primary count. The three commands above gain a clause before `OPTIONS`:
@@ -142,34 +119,35 @@ value and restoring reshapes the store on cutover (e.g. `primaries: 3 → 5`).
 
 | Mode | `seedURI` points at | Extra option | Recovers to | Needs a chain? |
 |---|---|---|---|---|
-| **Full** | a full `.backup` | — | that full's point | no |
-| **Differential (HEAD)** | a differential `.backup` | — | newest backed-up state | resolves the chain |
-| **PITR** | a differential `.backup` | `seedRestoreUntil: datetime(T)` | the chain replayed to **T** | **yes** |
+| Full | a full `.backup` | — | that full's point | no |
+| Differential (HEAD) | a differential `.backup` | — | newest backed-up state | resolves the chain |
+| PITR | a differential `.backup` | `seedRestoreUntil: datetime(T)` | the chain replayed to T | yes |
 
 ## In the pipeline
 
-The `restore_group` job does this for a whole group, **group-aligned** (the same
-`restore_until` across every alias in the group, so referencing databases land on one
-point):
+`neo4j-backup restore <group>` (and the Dagster job and Airflow DAG) does this for every member
+of a group:
 
-- it seeds each alias from its **chain head** (`latest_artifact_key` — full or diff, the
-  CloudSeedProvider resolves it), with optional `restore_until` for PITR, then
-- repoints all the aliases.
+- Without `--until`, the group goes back to the newest instant every member covers: the member
+  whose newest backup is oldest is restored whole, the others to that time. The dry-run shows
+  the point under `point`, or says why the members can't be aligned.
+- With `--until T`, each member is seeded from the chain whose window covers T (an older
+  database's chain if the alias has moved since), with `seedRestoreUntil` T.
+- Every new database must be online on every server (within the group's `rto_minutes`) before
+  any alias moves; privileges are copied, then the aliases move one by one, each recorded for
+  `rollback`.
 
-Run config: `{ group_id, restore_until? }`. Locally:
+Locally:
 
 ```bash
-just restore demo                       # mode 1/2 — restore each alias to HEAD
-just restore demo "2026-06-29T11:00:00Z"  # mode 3 — group-aligned PITR
-just demo-pitr                          # builds a full→change→diff chain and PITRs it
+just restore demo                          # the shell script: newest backup of each alias
+just restore demo "2026-06-29T11:00:00Z"   # to a point in time
+just demo-pitr                             # builds a full, change, diff chain and restores into it
 ```
-
-**Validated end to end:** `smoke_phase6` restores from a **differential** head and
-reproduces the exact state; `just demo-pitr` recovers to a point inside a full→diff chain.
 
 ## The metadata layer (users, roles, privileges, aliases)
 
-The three modes above recover **database data**. They do not recover the DBMS-wide metadata
+The three modes above recover database data. They do not recover the DBMS-wide metadata
 that lives in the `system` database — users, roles, privileges, and alias definitions —
 because seed-from-URI cannot target `system` (you cannot `CREATE DATABASE system`).
 
@@ -180,28 +158,28 @@ There are two ways to recover it, with different trade-offs.
 Capture the metadata as replayable Cypher and replay it against `system` over Bolt on a
 rebuilt cluster — no node access, the same agentless surface as data restore.
 
-- **Backup** — `metadata_export` (Dagster) / `neo4j_dbms_metadata_default` (Airflow) writes one
-  `_dbms/metadata-<ts>.cypher` artifact (SSE-KMS, same bucket).
-- **Restore** — `metadata_restore` / `neo4j_metadata_restore` replays the latest (or a given
+- Backup — `metadata_export` (Dagster) / `neo4j_dbms_metadata_default` (Airflow) writes one
+  `_dbms/metadata-<ts>.cypher` artifact in the cluster's store (with `S3_SSE`, written with that header).
+- Restore — `metadata_restore` / `neo4j_metadata_restore` replays the latest (or a given
   `key`): `CREATE ROLE/USER … IF NOT EXISTS`, `GRANT ROLE …`, the `SHOW PRIVILEGES AS
   COMMANDS` statements, and `CREATE ALIAS … IF NOT EXISTS` — idempotent and additive.
 
-Limits (verified, by design): **native passwords are not exported** — Cypher redacts them
-(`SHOW USERS` → `***`) and raw system reads are rejected, so users come back with a random
-placeholder + `CHANGE REQUIRED` (reset them post-restore). **SSO/LDAP users carry no local
-secret, so external-auth teams lose nothing here.** Remote-alias driver credentials aren't
+Limits (verified, by design): native passwords are not exported — Cypher redacts them
+(`SHOW USERS` → `*`) and raw system reads are rejected, so users come back with a random
+placeholder + `CHANGE REQUIRED` (reset them post-restore). SSO/LDAP users carry no local
+secret, so external-auth teams lose nothing here. Remote-alias driver credentials aren't
 returned either (`<<SUPPLY>>` placeholder, skipped on replay). Alias→physical targets are a
 point-in-time snapshot — in a full DR the data restore repoints user-database aliases itself.
 
 ### Option A — binary `system` backup (exact, offline)
 
-For **native-auth** teams that need exact password/role/privilege recovery. Back up the
+For native-auth teams that need exact password/role/privilege recovery. Back up the
 binary `system` store and restore it offline.
 
-- **Backup** — `system_backup` (Dagster) / `neo4j_dbms_system_default` (Airflow) runs
+- Backup — `system_backup` (Dagster) / `neo4j_dbms_system_default` (Airflow) runs
   `neo4j-admin database backup system` (FULL) to `_dbms/system/` (SSE-KMS, retained).
-- **Restore** — offline + node-local (path B): `system` cannot be seed-from-URI'd or
-  `STOP`ped, so the DBMS must be **down**. `bootstrap/restore_system.sh` (`just
+- Restore — offline + node-local (path B): `system` cannot be seed-from-URI'd or
+  `STOP`ped, so the DBMS must be down. `bootstrap/restore_system.sh` (`just
   restore-system`) reads the latest artifact straight from object storage
   (`neo4j-admin database restore --from-path=s3://…`), restores with the DBMS offline,
   restarts, and applies the `restore_metadata.cypher` neo4j-admin emits (database-access
@@ -212,30 +190,26 @@ binary `system` store and restore it offline.
 | | Option B (logical) | Option A (binary `system`) |
 |---|---|---|
 | Surface | agentless, pure Cypher over Bolt | offline, node-local (DBMS down) |
-| Native passwords | reset (placeholder + CHANGE REQUIRED) | **exact** |
+| Native passwords | reset (placeholder + CHANGE REQUIRED) | exact |
 | External auth (SSO/LDAP) | fully sufficient | unnecessary |
 | Runs as | a DAG / asset | a runbook, not a DAG |
 
-Many teams run **both**: B for routine agentless metadata snapshots, A as the exact-restore
-escalation. **Validated:** `smoke_metadata` round-trips B through both adapters;
+Many teams run both: B for routine agentless metadata snapshots, A as the exact-restore
+escalation. Validated: `smoke_metadata` round-trips B through both adapters;
 `bootstrap/restore_system.sh` round-trips A end to end — a dropped native user returns and
-its **exact password authenticates**.
+its exact password authenticates.
 
-**Full-cluster restore order:** re-provision nodes → restore the metadata layer (replay B,
+Full-cluster restore order: re-provision nodes → restore the metadata layer (replay B,
 or offline-restore A) → restore each user database (seed-from-URI, modes 1–3).
 With the replacement in the policy's `clusters:`, `restore --from-cluster <lost> --to-cluster
-<new>` does the replay of B and every group's restore in one plan (#115; see
+<new>` does the replay of B and every group's restore in one plan (see
 [OPERATOR.md](OPERATOR.md#recover-after-losing-a-cluster-or-move-a-group)).
 
 ## Caveats
 
-- **PITR needs differentials.** Point-in-time is only reachable if the chain has the diffs
-  covering T — so the diff cadence in your [policy](POLICY.md) is what makes PITR possible,
-  not just an RPO nicety.
-- **The pipeline restores the chain HEAD.** To recover an *older* point, use
-  `seedRestoreUntil` with that timestamp (mode 3), not an older artifact directly.
-- **Aggregation trades intra-chain PITR.** `neo4j-admin backup aggregate` collapses a
-  full+diff chain into one recovered full; after that you can full-restore that point but
-  lose point-in-time *within* the collapsed range. Run it on a retention cadence.
-- **Non-cloud seeds** (http/ftp) or whole-store operations fall back to node-local
+- PITR needs differentials. A point in time is reachable only if a chain has diffs covering
+  it, so the tier's `diff_cron` decides how fine-grained restores can be.
+- Aggregation removes point-in-time restore inside the chain it collapses. `aggregate_cron`
+  has no default for that reason.
+- Non-cloud seeds (http/ftp) or whole-store operations fall back to node-local
   `neo4j-admin database restore --restore-until` (DESIGN §3, path B).

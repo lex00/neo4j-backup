@@ -44,12 +44,15 @@ def test_unknown_member_is_refused():
 
 def test_baseline_only_for_the_restored_member():
     seen = []
+    st = store()
 
     def run(cmd, env=None):
         seen.append(cmd)
+        if "backup" in cmd and "inspect" not in cmd:  # the backup writes an artifact
+            st.add("g/audit/audit-2/audit-2-2026-11-16T00-00-00.backup")
         return "neo4j 2026.05.0\n[]"
     sub = ops.only_members(G(), ["audit"])
     from neo4j_backup_core.clients import BackupRunner
-    done = ops.baseline_after_restore(run, Neo(), store(), BackupRunner(), L, sub,
+    done = ops.baseline_after_restore(run, Neo(), st, BackupRunner(), L, sub,
                                       [{"alias": "audit", "newdb": "audit-2"}])
     assert [d["member"] for d in done] == ["audit"]

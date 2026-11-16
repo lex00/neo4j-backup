@@ -16,11 +16,12 @@ from neo4j_backup_core.policy import Policy, load_policy
 REPO = Path(__file__).resolve().parents[2]
 
 
-def test_tier_maintenance_defaults_are_todays_crons():
+def test_tier_maintenance_defaults():
     t = load_policy(REPO / "policies" / "demo.yaml").tiers["gold"]
+    # no default aggregate (#219): it would collapse the chain and lose point-in-time restore
     assert (t.verify_cron, t.aggregate_cron, t.prune_cron, t.cleanup_cron) == \
-        ("0 6 * * *", "0 5 * * 0", "0 7 * * 0", None)
-    nightly = load_policy(REPO / "policies" / "demo.yaml").tiers["nightly"]
+        ("0 6 * * *", None, "0 7 * * 0", None)
+    nightly = load_policy(REPO / "policies" / "demo.yaml").tiers["rebuild_nightly"]
     assert nightly.crons() == {"rebuild": "0 1 * * *"}  # rebuild-only: no maintenance by default
 
 
@@ -47,13 +48,14 @@ def test_dagster_lists_every_policy_schedule():
     pytest.importorskip("dagster")
     s = _schedules(REPO / "policies" / "demo.yaml")
     for tier in ("gold", "silver", "bronze"):
-        for lane in ("full", "diff", "verify", "aggregate", "prune"):
+        for lane in ("full", "diff", "verify", "prune"):
             assert f"{tier}_{lane}" in s
+        assert f"{tier}_aggregate" not in s  # only when the tier sets aggregate_cron (#219)
     assert s["gold_verify"] == ["0 6 * * *", "STOPPED"]
     assert s["default_dbms_metadata"][0] == "0 2 * * *"
     assert s["default_dbms_system"][0] == "0 1 * * *"
     # the rebuild-only tier gets only its rebuild schedule (#108), no backups or maintenance
-    assert [k for k in s if k.startswith("nightly")] == ["nightly_rebuild"]
+    assert [k for k in s if k.startswith("rebuild_nightly")] == ["rebuild_nightly_rebuild"]
 
 
 def test_schedules_running_setting(tmp_path):

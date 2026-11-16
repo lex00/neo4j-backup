@@ -19,7 +19,7 @@ testing; the verified config is parked at the bottom of this file for that day.
 just fresh        # up + bootstrap: boots the stack and the demo group from scratch
 just backup demo  # online backup of the demo group to object storage
 just artifacts    # list what landed in the bucket
-just restore demo # restore the group via seed-from-URI into <db>_restored
+just restore demo # seed a new database per alias from its newest backup, then swap the aliases
 just urls         # Neo4j Browser link and the local S3 endpoint
 ```
 
@@ -42,7 +42,7 @@ just restore demo "2026-06-28T12:00:00Z"
 | `bootstrap` | create the demo group's databases, load demo data |
 | `fresh` | `up` + `bootstrap` |
 | `backup [group]` | `neo4j-admin database backup` of each db in the group to `s3://…` |
-| `restore [group] [until]` | seed-from-URI restore (optional PITR) into `<db>_restored` |
+| `restore [group] [until]` | seed a new database per alias from its newest backup (or to `until`), then swap the aliases |
 | `artifacts [prefix]` | list backup artifacts in object storage |
 | `logs` / `ps` / `urls` | observe the stack |
 
@@ -64,9 +64,9 @@ credentials. In a real cluster every member needs that object-store egress to re
 `policies/demo.yaml` defines group `demo` (tier gold) over three databases that
 reference each other logically (shared customer/product ids):
 
-- `acme_orders` — customers and orders
-- `acme_graph` — products
-- `acme_audit` — append-only event log
+- `acme-orders`: customers and orders
+- `acme-graph`: products
+- `acme-audit`: an append-only event log
 
 The PITR alignment story uses this group: one `seedRestoreUntil` timestamp across all
 three so they restore to a single consistent instant.
@@ -75,7 +75,7 @@ three so they restore to a single consistent instant.
 
 The local object store is [floci](https://hub.docker.com/r/floci/floci) (`floci/floci:1.5.34`), a
 LocalStack-compatible AWS emulator, with the AWS CLI (`amazon/aws-cli`) for setup and listing. It
-replaced MinIO in 2026-11, when MinIO's images stopped being publicly pullable (#127). Inside the
+replaced MinIO in 2026-11, when MinIO's images stopped being publicly pullable. Inside the
 compose network the endpoint is `http://s3:4566`; on the host it is `http://localhost:9000`. It
 accepts any credentials.
 
@@ -105,27 +105,26 @@ Remaining notes:
   HEAD restores 3. Confirms `seedRestoreUntil` needs a differential chain (a lone full
   errors with "can only be fully restored").
 
-## Parked: cluster topology (for later)
+## A three-server cluster
 
-When topologies earn their keep, add `docker/compose.cluster.yaml` based on the
-verified current-version config below (3 primaries + 1 secondary). Key points:
+`docker/compose.cluster.yaml` adds three Neo4j servers (`core1`-`core3`) beside the base
+stack:
 
-- Image tag `>= 2025.01` (current discovery model).
-- Discovery is unified under `dbms.cluster.endpoints` (NOT the old
-  `dbms.cluster.discovery.v2.endpoints`); the official tutorial uses a shared network
-  alias with `dbms.cluster.discovery.resolver_type=DNS` and
-  `dbms.cluster.endpoints=neo4j-network:6000`.
-- Per-server env: `NEO4J_initial_server_mode__constraint=PRIMARY` (or `SECONDARY`).
-- `dbms.cluster.minimum_initial_system_primaries_count` defaults to 3 (set to 2 for a
-  two-server cluster).
-- Default ports: cluster/discovery 6000, Raft 7000, routing 7688, backup 6362.
-- Back up from a **secondary/follower**: set `NEO4J_BACKUP_SOURCE` to that member's
-  `:6362`. The resolution order already prefers secondary → follower → writer.
+```bash
+docker compose --env-file .env -f docker/compose.yaml -f docker/compose.cluster.yaml \
+  --profile cluster up -d --wait core1 core2 core3
+just cluster-smoke
+```
 
-Source: Neo4j "Deploying a Neo4j cluster in a Docker container" tutorial and the
-clustering discovery / ports references (current docs).
+Host clients use `neo4j://localhost:7691` (7691-7693 are the three servers' Bolt ports); the
+runner reaches the backup ports as `core1:6362`, `core2:6362`, `core3:6362`. Discovery is
+`dbms.cluster.endpoints`, each server advertises its own name, and the health check queries
+`system` because the default database lives on only some of the servers. `just cluster-smoke`
+backs up a database hosted as 1 primary and 2 secondaries, restores it with that topology and
+checks every server sees the alias on the new database. `just down` removes these containers
+too.
 
-## A second cluster (#115)
+## A second cluster
 
 `docker compose --env-file .env -f docker/compose.yaml --profile multi up -d --wait neo4j-b`
 starts a second, independent Neo4j (Bolt on host port 7688, backup port `neo4j-b:6362` on the

@@ -1,138 +1,152 @@
-# Airflow adapter
+# Airflow
 
-Airflow 3.x DAGs over `neo4j_backup_core` — the same backup/restore engine the
-[Dagster adapter](../orchestrator/README.md) drives, exposed as Airflow DAGs instead of a
-Dagster code location. **Pick one**, Dagster *or* Airflow: both shell out to standard
-`neo4j-admin` and run standard Cypher, both read the same [policy](../POLICY.md) and write
-ordinary `.backup` files. Same **just tooling, no lock-in** story — remove it and you still
-have standard Neo4j backups.
+Airflow 3 DAGs for the policy's backups, verification, retention, loads and restores. They use
+the same core (`neo4j_backup_core`) as the CLI, the MCP server and the
+[Dagster code location](../orchestrator/README.md), so policy, bucket layout and behaviour are
+the same; pick the orchestrator you already run. Validated with Airflow 3.2.2.
 
-The logic lives once in `neo4j_backup_core` (naming, policy, Bolt client, object store,
-runner command-building + pod spec); each adapter is a thin binding. Architecture:
-[`../DESIGN.md`](../DESIGN.md) §6.
+## The DAGs
 
-## What's here
+DAG files are in `airflow/dags/`; the shared code they import (`neo4j_backup_airflow`: the
+environment, `run_admin` for subprocess or Kubernetes pods, upload helpers) is in
+`orchestrator/neo4j_backup_airflow/`. The scheduled DAGs are generated from the policy when the
+DAG file is parsed.
 
-| Path | Role |
-|---|---|
-| `dags/backup_dag.py` | One backup DAG per **(tier, lane)** — `neo4j_backup_<tier>_<full\|diff>`. Fans out over the tier's `(group, alias)` via dynamic task mapping. |
-| `dags/restore_dag.py` | `neo4j_restore` — manual, params `group_id` + `restore_until`. Group-aligned seed-from-URI then alias swap (pure Cypher). |
-| `dags/avp_dags.py` | `neo4j_aggregate_<tier>`, `neo4j_verify_<tier>` (non-destructive), `neo4j_prune_<tier>` on each tier's crons (#104). |
-| `dags/metadata_dag.py` | `neo4j_dbms_metadata_default` / `neo4j_metadata_restore` — agentless DBMS metadata export/replay (#14). |
-| `dags/system_dag.py` | `neo4j_dbms_system_default` — binary `system` backup for exact restore (#15); restore via `bootstrap/restore_system.sh`. |
-| `dags/scaffold_dag.py` | Trivial policy-loading DAG (smoke of the wiring). |
-| `neo4j_backup_airflow/config.py` | Env → core clients (the [Dagster env table](../orchestrator/README.md#environment-variables), verbatim). |
-| `neo4j_backup_airflow/execution.py` | `run_admin` — subprocess or KubernetesPodOperator per `RUNNER_MODE`. |
-
-## The DAG set
-
-| DAG(s) | Schedule | What it does |
+| DAG | Schedule | What it does |
 |---|---|---|
-| `neo4j_backup_<tier>_full` | tier's `full_cron` | `neo4j-admin database backup --type FULL` of each alias's live physical, into its per-store prefix. |
-| `neo4j_backup_<tier>_diff` | tier's `diff_cron` | same, `--type DIFF` — extends the chain in that physical's prefix. |
-| `neo4j_restore` | manual (`-c '{"group_id":"demo"}'`) | seed a fresh physical per alias from the latest artifact (optionally `restore_until` for PITR), then swap each alias. |
-| `neo4j_aggregate_<tier>` | tier's `aggregate_cron` (default Sundays 05:00) | collapse each chain into one recovered full (in place). |
-| `neo4j_verify_<tier>` | tier's `verify_cron` (default daily 06:00) | **non-destructive** consistency check — copy chain to a scratch prefix, aggregate + `neo4j-admin database check`, then delete the copy. |
-| `neo4j_prune_<tier>` | tier's `prune_cron` (default Sundays 07:00) | chain-aware retention over the tier's groups (#73). |
-| `neo4j_dbms_metadata_default` | `dbms.metadata_cron` (default daily 02:00) | export users/roles/privileges/aliases as replayable Cypher to `_dbms/` (pure Bolt), then keep `dbms.keep_metadata` / `keep_system`. |
-| `neo4j_load` | manual (`-c '{"group_id": "catalog"}'`) | load or rebuild one group from its policy build (#107). |
-| `neo4j_rebuild_<tier>` | tier's `rebuild_cron` | one load per `load.mode: rebuild` group of the tier (#108); each takes the group's lock, as backups do. |
-| `neo4j_metadata_restore` | manual | replay the latest (or a given `key`) against `system` over Bolt. |
-| `neo4j_dbms_system_default` | `dbms.system_backup_cron` (default daily 01:00) | binary `system` backup (exact metadata, native passwords) to `_dbms/system/`, then the same sweep. Restore is offline — `just restore-system`. |
+| `neo4j_backup_<tier>_full`, `neo4j_backup_<tier>_diff` | the tier's `full_cron`, `diff_cron` | Back up every member of the tier. The diff DAG takes a full of members that need one. A skipped backup (no full to build on) shows as a skipped task. |
+| `neo4j_verify_<tier>` | `verify_cron` (default daily 06:00) | Copy each member's newest chain aside in the bucket, aggregate the copy, `neo4j-admin database check`, delete the copy. |
+| `neo4j_aggregate_<tier>` | `aggregate_cron` (no default) | Collapse each chain into one full, in place; removes point-in-time restore inside the chain. |
+| `neo4j_prune_<tier>` | `prune_cron` (default Sundays 07:00) | Delete backups past `retention_days`, whole chains only. |
+| `neo4j_cleanup_<tier>` | `cleanup_cron` | Drop superseded databases the tool created (keeps the tier's `cleanup_keep`, and anything younger than `cleanup_older_than_days`). |
+| `neo4j_rebuild_<tier>` | `rebuild_cron` | Load each `load.mode: rebuild` group of the tier. |
+| `neo4j_dbms_metadata_<cluster>`, `neo4j_dbms_system_<cluster>` | `dbms.metadata_cron`, `dbms.system_backup_cron` | Export users, roles, privileges and aliases as Cypher; binary backup of `system`. |
+| `neo4j_status` | `dbms.status_cron` (default every 15 minutes) | Fails when any target is past its `rpo_minutes`. Alert on its failures. |
+| `neo4j_restore` | manual | Restore a group (Params below). |
+| `neo4j_rollback` | manual | Point a group's aliases back at their previous databases. Params: `group_id`, `members`, `ticket`, `reason`. |
+| `neo4j_restore_to_cluster` | manual | Restore groups into another cluster. Params: `to_cluster`, `group_id` or `from_cluster`, `until`, `fence_source`, `skip_metadata`, `baseline`, `ticket`, `reason`. |
+| `neo4j_load` | manual | Load or rebuild one group. Params: `group_id`, `replace`, `keep_failed`, `baseline`, `ticket`, `reason`. |
+| `neo4j_metadata_restore` | manual | Replay a metadata export. Params: `cluster`, `key`. |
+| `neo4j_backup_scaffold` | manual | Loads the policy and prints the targets; for checking a deployment. |
 
-Each backup DAG runs a named cluster's members in the pools `neo4j_<cluster>_full` /
-`neo4j_<cluster>_diff` (the default cluster keeps `neo4j_full` / `neo4j_diff`), and the DBMS
-DAGs exist once per cluster (#106); create the extra pools when you add a cluster.
+A tier that has no groups still gets its DAGs. Members of a named cluster run in the pools
+`neo4j_<cluster>_full` / `neo4j_<cluster>_diff` (the default cluster: `neo4j_full` /
+`neo4j_diff`), and the rebuild DAGs use the cluster's full pool. The manual restore and load
+DAGs always use `neo4j_full` for their baseline and load tasks: the group is a run parameter
+and Airflow fixes a task's pool when it parses the DAG.
 
-Every scheduled DAG is generated from the policy at parse time (#104), so adding a tier or
-changing a cron is a policy edit, with no DAG code changes. The fixed `neo4j_verify`,
-`neo4j_aggregate`, `neo4j_prune`, `neo4j_metadata_backup` and `neo4j_system_backup` DAGs of
-v0.5.0 and earlier are gone; their run history isn't carried over to the new ids.
+`neo4j_restore` Params:
 
-## How it maps to the Dagster adapter
-
-| Concept | Dagster | Airflow |
+| Param | Default | |
 |---|---|---|
-| Per-(group, alias) fan-out | dynamic partitions | dynamic task mapping (`.expand()`) |
-| Full/diff concurrency lanes | `tag_concurrency_limits` | **pools** `neo4j_full` (1) / `neo4j_diff` (N) |
-| In-process validation | `execute_in_process` | `dag.test()` |
-| `neo4j-admin` execution | Pipes (subprocess / `PipesK8sClient`) | `run_admin` (subprocess / `KubernetesPodOperator`) |
-| Restore | `restore_group` job | `neo4j_restore` DAG |
+| `group_id` | required | the group |
+| `restore_until` | none | ISO-8601 time (UTC if no offset); without it the group goes back to the newest instant every member covers |
+| `members` | `[]` | only these members |
+| `check` | `false` | run the group's `load.checks` on the new databases before the swap |
+| `keep_failed` | `false` | with `check`: keep the new databases when a check fails |
+| `replace` | `false` | by-name groups: drop and recreate an existing database |
+| `from_load` | `false` | seed each member from its newest load |
+| `from_dump` | `{}` | `{member: key or URI}` |
+| `baseline` | `true` | take a full backup of each new database afterwards |
+| `ticket`, `reason` | none | recorded in the log and the result |
 
-Two Airflow shapes worth knowing: the restore DAG maps `seed` over a **separate** `aliases`
-task (Airflow can `.expand()` only over a whole task's output, not a sub-key of one), and
-the alias `swap` is a single barrier task downstream of all seeds.
+Triggering it applies the restore: there's no preview in Airflow. Preview with the CLI
+(`neo4j-backup restore <group> --dry-run`, `neo4j-backup restore-points <group>`; see below).
 
-## Configuration
+## Deploying in production
 
-Same four surfaces and the **same environment variables** as the Dagster adapter —
-see the [Orchestrator config section](../orchestrator/README.md#configuration-what-you-edit-and-where)
-and [env table](../orchestrator/README.md#environment-variables). The only Airflow-specific
-difference is concurrency: lanes are Airflow **pools**, set once per environment —
+### Install into your Airflow image
+
+The Python package (`neo4j-backup-dagster`) lists Dagster as a dependency; install it without
+dependencies and add the core's own:
 
 ```bash
-airflow pools set neo4j_full 1   "serialize full backups"
-airflow pools set neo4j_diff 6   "diff backup parallelism"
+pip install --no-deps \
+  "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0.6.0#subdirectory=orchestrator"
+pip install "neo4j>=5" "boto3>=1.34" "pydantic>=2" "pyyaml>=6" \
+  --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.2.2/constraints-3.12.txt"
+# providers: cncf.kubernetes for RUNNER_MODE=k8s; azure-storage-blob / google-cloud-storage
+# for CLOUD=azure / gcp
 ```
 
-(`just airflow-standalone` and the smokes create these for you.) The policy, recovery
-model, and per-group encryption are identical and documented once on the
-[Policy](../POLICY.md) and [Recovery](../RECOVERY.md) pages.
+Copy `airflow/dags/*.py` into the deployment's DAGs folder (they import only
+`neo4j_backup_airflow` and `neo4j_backup_core` from the package).
 
-## Execution modes
+### Environment and policy
 
-`neo4j-admin` (backup / aggregate / verify) runs via `neo4j_backup_airflow.execution.run_admin`:
+Everything is environment variables ([ENVIRONMENT.md](../ENVIRONMENT.md)); Airflow
+Connections and Variables aren't used. Set them on the scheduler, the DAG processor and every
+worker. The DAG processor builds the DAGs from the policy, so it must read
+`NEO4J_BACKUP_POLICY`: use an `s3://` path (the DAG processor then needs read access to it) or
+a file mounted at the same path everywhere. Always set it: the default `policies/demo.yaml` is
+relative to the process's working directory. A policy that doesn't load makes every
+policy-generated DAG file show an import error.
 
-- `RUNNER_MODE=subprocess` (default, validated) — runs on the Airflow worker, which needs
-  `neo4j-admin`, the scratch volume, network to 6362, and S3/KMS access. (Locally the
-  smokes set `RUNNER_EXEC_PREFIX` to run it inside the demo container.)
-- `RUNNER_MODE=k8s` — each command runs in its own `KubernetesPodOperator` pod with a fresh
-  ephemeral scratch PVC, built from the same core `BackupRunner` fields the Dagster adapter
-  feeds `PipesK8sClient` (`RUNNER_IMAGE` + the k8s vars in the env table). Validated against
-  k3d by `smoke_k8s.py`. The `KubernetesPodOperator` import is **lazy** (only when
-  `RUNNER_MODE=k8s`), so EC2/VM (subprocess) deployments parse the DAGs without the
-  `cncf.kubernetes` provider — drop it from the install extras if you never use k8s.
-
-Restore is always pure Cypher over Bolt — no runner needed.
-
-## Install (uv, Python 3.13)
-
-Airflow needs its constraints file; it goes in its own venv, isolated from Dagster:
+### Pools
 
 ```bash
-just airflow-install          # uv venv + pinned Airflow + adapter (no deps) + neo4j + pytest
+airflow pools set neo4j_full 1 "full backups, verifies, aggregates, loads"
+airflow pools set neo4j_diff 6 "differential backups"
+# per named cluster: neo4j_<cluster>_full and neo4j_<cluster>_diff
 ```
 
-Override the pins with `AIRFLOW_VERSION=… PYTHON_VERSION=… just airflow-install`. See
-`airflow/install.sh` for the underlying steps.
+Each DAG run also takes a per-group lock in the bucket (`_locks/<group>.lock`), so a member's
+backup, verify, aggregate and its group's rebuild never overlap; a task waits up to
+`NEO4J_BACKUP_LOCK_WAIT` seconds for it.
+
+### Running neo4j-admin
+
+- `RUNNER_MODE=subprocess` (default): neo4j-admin runs on the worker. The worker image then
+  needs a JDK and the Neo4j Enterprise distribution of your cluster's version, a scratch
+  volume at `SCRATCH_PATH` big enough for the largest full, and network to the backup port
+  (6362) and the bucket.
+- `RUNNER_MODE=k8s`: each command runs in its own pod (`KubernetesPodOperator`, started from
+  inside the task). Set `RUNNER_IMAGE` (the Neo4j Enterprise image), `RUNNER_NAMESPACE`
+  (default `default`), and the sizes: `RUNNER_SCRATCH_STORAGE` (default `6Ti` per pod),
+  `RUNNER_MEMORY_LIMIT` (default `4Gi`), `RUNNER_CPU_REQUEST`, `RUNNER_MEMORY_REQUEST`,
+  `RUNNER_TOLERATIONS`, `RUNNER_NODE_SELECTOR`. The worker's service account needs to create,
+  watch and delete pods, read pod logs and create PVCs in that namespace (a Role with `pods`,
+  `pods/log`, `pods/exec` and `persistentvolumeclaims`, bound to the worker's service account).
+  The pod image needs `sh`, `mkdir`, `printf` and `base64` (the Neo4j image has them). Give
+  the pods cloud credentials through IRSA or workload identity (`RUNNER_SERVICE_ACCOUNT`), or
+  map secrets with `RUNNER_SECRET_ENV`; credentials are never written into a pod spec as plain
+  text. `BACKUP_UPLOAD=pipeline` is refused in this mode.
+
+Restores, aliases and privileges are Cypher over Bolt from the worker.
+
+### Turn it on
+
+1. Check the deployment: trigger `neo4j_backup_scaffold`; it prints the policy's targets.
+2. Unpause `neo4j_backup_<tier>_full` for one tier and trigger it; then `neo4j_verify_<tier>`.
+3. Unpause the remaining scheduled DAGs you use, and `neo4j_status`. Set an
+   `on_failure_callback` or email on failures (for example in a cluster policy), so a failed
+   backup and a stale target reach someone.
+4. Unpause the manual DAGs too (`neo4j_restore`, `neo4j_rollback`, `neo4j_load`, ...): a
+   triggered run of a paused DAG waits until it's unpaused.
+
+### The operator CLI host
+
+Previews and read-only checks are CLI commands: `restore --dry-run`, `restore-points`,
+`status`, `targets`, and backing up a single group (the Airflow backup DAGs run per tier). Run
+them from a host or pod with the package, the same environment, and for `backup`/`verify`,
+`neo4j-admin` and scratch (the worker image works: `kubectl exec` into a worker, or run a pod
+from it). See [OPERATOR.md](../OPERATOR.md).
 
 ## Run it locally
 
-Against the Compose stack (`just up && just bootstrap`):
+Against the Compose stack (`just fresh`):
 
 ```bash
-just airflow-smoke        # backup → verify → restore → prune (dag.test, in-process)
-just airflow-pitr         # real full+diff chain + point-in-time restore (seedRestoreUntil)
+just airflow-install      # its own venv (uv, Python 3.13) with pinned Airflow
+just airflow-smoke        # backup, verify, restore, prune (dag.test, in-process)
+just airflow-pitr         # a real full + diff chain and a point-in-time restore
 just airflow-k8s-smoke    # KubernetesPodOperator mode against k3d (needs `just k3d-up`)
-just airflow-standalone   # scheduler + UI on :8080, DAGs wired to the stack
+just airflow-standalone   # scheduler and UI on :8080
 ```
 
-`dag.test()` runs a DAG in-process against the live stack — the Airflow analogue of
-Dagster's `execute_in_process`, and how the smokes validate without a running scheduler.
-The smokes live in `airflow/smoke_e2e.py`, `smoke_pitr.py`, `smoke_k8s.py`.
-
-## Validate DAGs parse (no stack needed)
+Check that every DAG parses (no stack needed):
 
 ```bash
 AIRFLOW_HOME=/tmp/af NEO4J_BACKUP_POLICY=policies/demo.yaml \
   airflow/.venv/bin/python -m pytest airflow/tests/
 ```
-
-This is the same DagBag import-error check CI runs.
-
-## Choosing Dagster or Airflow
-
-They are interchangeable over the same core and policy. Pick the one you already run.
-Dagster gives asset lineage and the partition UI out of the box; Airflow gives pools,
-the operator ecosystem, and dynamic task mapping. Migrating later means re-pointing the
-same env at the other adapter — the artifacts, policy, and naming don't change.
