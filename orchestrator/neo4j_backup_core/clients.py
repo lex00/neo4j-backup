@@ -118,6 +118,16 @@ class Neo4jClient:
         t = min(times)
         return t.to_native() if hasattr(t, "to_native") else t
 
+    def database_access(self, name: str) -> str | None:
+        """`read-write` or `read-only` (SHOW DATABASES `access`), or None if absent (#112)."""
+        rows = self.run_system("SHOW DATABASE $n YIELD name, access RETURN access", n=name)
+        return rows[0]["access"] if rows else None
+
+    def set_read_only(self, name: str, read_only: bool = True):
+        """ALTER DATABASE … SET ACCESS READ ONLY / READ WRITE (#112)."""
+        mode = "READ ONLY" if read_only else "READ WRITE"
+        self.run_system(f"ALTER DATABASE {quote(name)} SET ACCESS {mode}")
+
     def stop_database(self, name: str):
         self.run_system(f"STOP DATABASE {quote(name)} WAIT")
 

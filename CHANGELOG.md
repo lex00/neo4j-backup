@@ -14,6 +14,11 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **`writes` and `protect_writes` enforced** (#112). A `writes: read-only` group's new databases
+  are set read-only before the swap (restores included). Backups follow the live access mode and
+  `protect_writes`: a read-only database, or a group whose writes are disposable, is skipped with
+  `by_design` in the result (CLI, MCP, Dagster metadata, Airflow); a database that is still
+  read-write keeps its backups until a load makes it read-only.
 - **Checks before a swap** (#111): `load.checks` in the policy (Cypher returning one number, with
   `== n`, `>= n`, `<= n` or `between a b`), plus default checks (online, non-zero counts, counts
   equal to the import's). `restore --check` runs them before the swap; a failure drops the new

@@ -234,8 +234,8 @@ arrive with #107 and #108, write enforcement with #112. `baseline` is used today
 | Field | Type | Required / default | Status | Meaning |
 |---|---|---|---|---|
 | `mode` | `live` \| `once` \| `rebuild` | `live` | decl | `live`: data written by the application. `once`: loaded once (by hand per IMPORT.md, or by the tool with `build`). `rebuild`: rebuilt in full every `rebuild_cron` |
-| `writes` | `read-write` \| `read-only` | `read-write` | decl | whether the database accepts writes between loads |
-| `protect_writes` | bool | `true` for read-write; n/a for read-only | decl | back up writes made after a load (full/diff schedules). `false` only for rebuild groups whose writes are disposable |
+| `writes` | `read-write` \| `read-only` | `read-write` | used | whether the database accepts writes between loads. `read-only`: every new physical (load, rebuild, restore) gets `ALTER DATABASE … SET ACCESS READ ONLY` before the swap (#112) |
+| `protect_writes` | bool | `true` for read-write; n/a for read-only | used | back up writes made after a load (full/diff schedules). `false` only for rebuild groups whose writes are disposable. A member is backed up only while its live database is read-write and its writes are protected; the others show `by_design` in the backup result (#112) |
 | `keep_loads` | int (≥1) | `14` | used | how many load artifacts (dumps in the member's `_seed/` folder) prune keeps per member, newest first; not age-based (#157) |
 | `baseline` | bool | `true` | used | full backup right after a restore (and, later, a load) |
 | `source` | `{storage, prefix}` | the group's store, `<group>/_source/` | decl | where rebuild input files live; `storage` names a store (#105) |
