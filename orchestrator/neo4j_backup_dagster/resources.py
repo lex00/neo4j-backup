@@ -75,6 +75,12 @@ class Neo4jResource(dg.ConfigurableResource):
     def list_aliases(self, *a, **k):
         return self._core().list_aliases(*a, **k)
 
+    def for_group(self, group_id: str):
+        """The client for the group's cluster (#106); this resource is the `default` cluster."""
+        from neo4j_backup_core.env import Neo4jSet, policy_path
+
+        return Neo4jSet(self._core(), policy_source=policy_path()).for_group(group_id)
+
     def privilege_commands(self, *a, **k):
         return self._core().privilege_commands(*a, **k)
 
@@ -178,6 +184,12 @@ class RunnerResource(dg.ConfigurableResource):
 
     def check_command(self, *a, **k):
         return self._core().check_command(*a, **k)
+
+    def for_group(self, group_id: str):
+        """The runner for the group's cluster (its `backup_source`, #106)."""
+        from neo4j_backup_core.env import RunnerSet, policy_path
+
+        return RunnerSet(self._core(), policy_source=policy_path()).for_group(group_id)
 
     def with_env(self, *a, **k):
         return self._core().with_env(*a, **k)

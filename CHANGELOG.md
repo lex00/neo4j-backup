@@ -14,6 +14,13 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Several clusters in one policy** (#106, first part). `clusters:` names each Neo4j DBMS
+  (`bolt_uri`, `user`, `password_ref`, `backup_source` (one or a list), `storage`, `topology`,
+  `cypher_version`, `cutover`, `backup_upload`); a group sets `cluster:` (else `default`, from the
+  environment as before). The Neo4j client, runner and store are resolved per group in every op;
+  `targets` and the MCP status show each group's cluster. New validation: group ids must be
+  unique (`Policy.group` used to return the first match), and an alias or database belongs to
+  one group per cluster.
 - **Per-store settings for neo4j-admin, secret references, `policy check`** (#105). A named S3
   store's `credentials_ref` (a key pair) and `region` / `runner_endpoint` reach both the tool and
   neo4j-admin (`run_admin` takes an `env`; with a `docker … exec` prefix the names are passed as

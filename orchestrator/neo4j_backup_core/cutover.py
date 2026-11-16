@@ -69,3 +69,12 @@ def from_env() -> CutoverStrategy:
     if name == "external":
         return ExternalRoutingCutover(os.environ.get("CUTOVER_HOOK", ""))
     raise RuntimeError(f"unknown CUTOVER_STRATEGY {name!r}; known: alias-swap, external")
+
+
+def for_cluster(cfg) -> CutoverStrategy:
+    """A cluster's `cutover:` setting (#106), else the environment's."""
+    if cfg is None:
+        return from_env()
+    if cfg.strategy == "external":
+        return ExternalRoutingCutover(cfg.hook or "")
+    return AliasSwapCutover()

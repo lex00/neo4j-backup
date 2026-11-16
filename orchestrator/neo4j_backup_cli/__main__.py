@@ -62,6 +62,7 @@ def cmd_targets(args):
     keys = [f"{g.id}/{n}" for g in groups for n in g.names]
     return envelope("targets", ok=True, result={
         "targets": keys, "tenants": {g.id: g.tenant for g in groups},
+        "clusters": {g.id: getattr(g, "cluster", None) or "default" for g in groups},
         "warnings": policy.warnings()}), Exit.OK
 
 

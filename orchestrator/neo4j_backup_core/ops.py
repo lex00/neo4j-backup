@@ -49,9 +49,25 @@ class BaselineError(OpError):
 
 
 def _store(store, group_id: str):
-    """The store for `group_id` (#105): a StoreSet resolves the group's named store; a plain
-    store (tests, single-store callers) is used as is."""
+    """The handle for `group_id`: a StoreSet resolves the group's named store (#105), a Neo4jSet
+    or RunnerSet its cluster's client or runner (#106); a plain handle (tests, single-cluster
+    callers) is used as is."""
     return store.for_group(group_id) if hasattr(store, "for_group") else store
+
+
+_per = _store
+
+
+def _cypher(neo4j, cypher_version):
+    return getattr(neo4j, "cypher_version", None) or cypher_version
+
+
+def _upload(runner, upload):
+    return getattr(runner, "backup_upload", None) or upload
+
+
+def _topology(neo4j, group, name):
+    return group.topology_for(name) or getattr(neo4j, "cluster_topology", None)
 
 
 def _admin(run_admin: RunAdmin, cmd: list, store) -> str:
@@ -157,6 +173,7 @@ def base_full(neo4j, store, layout, group_id: str, alias: str) -> dict:
     after the database's creation counts (sidecar times, #118). Returns `physical`, `full` (the
     newest such full's key, or None) and `unknown` (backups in the folder without a sidecar, which
     might be a base; callers treat those as "maybe")."""
+    neo4j = _per(neo4j, group_id)
     store = _store(store, group_id)
     physical = neo4j.resolve_physical(alias)
     if not physical:
@@ -194,6 +211,8 @@ def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: s
     is the type neo4j-admin actually wrote (an AUTO can be either), from the sidecar. `physical`
     names the database explicitly (a restore's new physical, even when an external router, not
     the alias, points at it)."""
+    neo4j, runner = _per(neo4j, group_id), _per(runner, group_id)
+    upload = _upload(runner, upload)
     store = _store(store, group_id)
     physical = physical or neo4j.resolve_physical(alias)
     if not physical:
@@ -229,6 +248,8 @@ def aggregate_target(run_admin: RunAdmin, store, runner, layout, group_id: str, 
                      log: Log = _NOLOG, skip_missing: bool = False) -> dict:
     """Collapse the live physical's chain into one recovered full, IN PLACE (RTO/retention).
     `skip_missing` (scheduled runs, #104): a member with no backups yet is skipped, not failed."""
+    runner = _per(runner, group_id)
+    upload = _upload(runner, upload)
     store = _store(store, group_id)
     if skip_missing and not store.latest_artifact_key(layout.alias_prefix(group_id, alias)):
         log(f"{group_id}/{alias}: no backups yet; aggregate skipped")
@@ -245,6 +266,8 @@ def verify_target(run_admin: RunAdmin, store, runner, layout, group_id: str, ali
                   skip_missing: bool = False, log: Log = _NOLOG) -> dict:
     """Non-destructive consistency check of the latest backup for the alias. `skip_missing`
     (scheduled runs, #104): a member with no backups yet is skipped, not failed."""
+    runner = _per(runner, group_id)
+    upload = _upload(runner, upload)
     store = _store(store, group_id)
     if skip_missing and not store.latest_artifact_key(layout.alias_prefix(group_id, alias)):
         log(f"{group_id}/{alias}: no backups yet; verify skipped")
@@ -262,6 +285,7 @@ def artifact_chains(store, layout, group_id: str, alias: str, *, run_admin: RunA
     """The backup chains for one member, per physical, from the sidecars (#118). With `run_admin`
     and `runner`, artifacts that have no sidecar (taken before #118) are inspected once and
     backfilled first; without, they are reported under `unknown`."""
+    runner = _per(runner, group_id) if runner is not None else None
     store = _store(store, group_id)
     prefix = layout.alias_prefix(group_id, alias)
     if run_admin is not None and runner is not None:
@@ -513,7 +537,7 @@ def _restore_by_name(neo4j, group, name: str, key: str, existed: bool, *, store,
         neo4j.drop_database(name)
         log(f"dropped {name} (replace)")
     neo4j.seed_database(name, store.uri(key), restore_until=restore_until,
-                        topology=group.topology_for(name), cypher_version=cypher_version,
+                        topology=_topology(neo4j, group, name), cypher_version=cypher_version,
                         store_base=store.uri(""))
     log(f"restored {name} <= {key}")
     try:
@@ -534,6 +558,8 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
     the caller cuts the alias over afterwards (`cutover_seeded`, which copies privileges first).
     Returns a plan entry tagged with `mode`. The artifact (and whether `restore_until` applies)
     comes from `choose_seed` (#114), or `seed` when the caller chose already."""
+    neo4j = _per(neo4j, group.id)
+    cypher_version = _cypher(neo4j, cypher_version)
     store = _store(store, group.id)
     seed = seed or choose_seed(store, layout, group.id, name, restore_until)
     key, until = seed["key"], seed["until"]
@@ -547,11 +573,11 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
     old = neo4j.alias_target(name)  # captured before cutover (for external routing #17)
     newdb = naming.physical(name, ts or naming.ts())
     neo4j.seed_database(newdb, store.uri(key), restore_until=until,
-                        topology=group.topology_for(name), cypher_version=cypher_version,
+                        topology=_topology(neo4j, group, name), cypher_version=cypher_version,
                         store_base=store.uri(""))
     log(f"seeded {newdb} <= {key}" + (f" until {until}" if until else ""))
     return {"mode": "alias-swap", "alias": name, "newdb": newdb, "old": old, "key": key,
-            "seed": seed}
+            "seed": seed, "group": group.id}
 
 
 def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG) -> None:
@@ -561,15 +587,18 @@ def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG) -> None:
     (a rollback needs them; DROP DATABASE removes them). by-name entries are no-ops here."""
     swaps = [s for s in seeded if s.get("mode") != "by-name"]
     for s in swaps:
+        neo = _per(neo4j, s["group"]) if s.get("group") else neo4j  # its cluster (#106)
         try:
-            s["privileges"] = regrant(neo4j, _privileges_of(neo4j, s.get("old")),
+            s["privileges"] = regrant(neo, _privileges_of(neo, s.get("old")),
                                       old=s.get("old"), new=s["newdb"], log=log)
         except OpError as e:
             raise OpError(f"{s['alias']}: copying privileges {s.get('old')} -> {s['newdb']} "
                           f"failed, no alias was moved: {e}") from e
-    strategy = cutover.from_env()  # alias-swap (default) or external routing (#17)
     for s in swaps:
-        strategy.cutover(neo4j, s["alias"], s["newdb"], s.get("old"))
+        neo = _per(neo4j, s["group"]) if s.get("group") else neo4j
+        # alias-swap (default) or external routing (#17); a cluster may set its own (#106)
+        strategy = cutover.for_cluster(getattr(neo, "cutover_config", None))
+        strategy.cutover(neo, s["alias"], s["newdb"], s.get("old"))
         log(f"cutover {s['alias']}: {s.get('old')} -> {s['newdb']}")
 
 
@@ -579,6 +608,8 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
     across tasks instead). by-name pre-validates every artifact + existing-target precondition BEFORE
     any drop, so a missing artifact or an unreplaceable target fails before anything is destroyed.
     alias-swap seeds every fresh physical, then cuts all aliases over. Returns the member plan."""
+    neo4j = _per(neo4j, group.id)
+    cypher_version = _cypher(neo4j, cypher_version)
     store = _store(store, group.id)
     members: list[dict] = []
     seeds = choose_seeds(store, layout, group, restore_until)  # every member, before any change
@@ -612,6 +643,7 @@ def baseline_after_restore(run_admin: RunAdmin, neo4j, store, runner, layout, gr
     (#74) and point-in-time coverage of the new database starts now rather than at the next full
     schedule. alias-swap members are backed up by their new physical; by-name members by name.
     Raises BaselineError (the restore stays applied) at the first failure."""
+    neo4j, runner = _per(neo4j, group.id), _per(runner, group.id)
     done: list[dict] = []
     for m in members:
         alias = m.get("alias") or m["name"]
@@ -636,6 +668,7 @@ def plan_restore(neo4j, store, group, layout, *, replace: bool = False,
     the same preconditions (missing artifact, unreplaceable existing target) so a dry-run fails the
     same way a real restore would. `drops` is the destructive surface (databases to be DROPped).
     With `until`, each member's `seed` shows the chosen chain and window (#114)."""
+    neo4j = _per(neo4j, group.id)
     members: list[dict] = []
     seeds = choose_seeds(store, layout, group, until)
     for name in group.names:

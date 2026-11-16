@@ -29,7 +29,7 @@ def policy_path() -> str:
     return os.environ.get("NEO4J_BACKUP_POLICY", "policies/demo.yaml")
 
 
-def neo4j() -> Neo4jClient:
+def env_neo4j() -> Neo4jClient:
     # Credential via a secret provider (#18), resolved lazily per connect. Default
     # SECRET_PROVIDER=env reads NEO4J_PASSWORD; aws-sm uses NEO4J_PASSWORD_REF (secret id/ARN).
     provider = secrets.from_env()
@@ -168,7 +168,7 @@ def store() -> StoreSet:
     return StoreSet(env_store(), policy_source=policy_path())
 
 
-def runner(exec_prefix=None) -> BackupRunner:
+def env_runner(exec_prefix=None) -> BackupRunner:
     return BackupRunner(
         backup_source=os.environ.get("NEO4J_BACKUP_SOURCE", "neo4j:6362"),
         scratch_path=os.environ.get("SCRATCH_PATH", "/scratch"),
@@ -187,3 +187,80 @@ def runner(exec_prefix=None) -> BackupRunner:
         service_account=os.environ.get("RUNNER_SERVICE_ACCOUNT", ""),
         extra_env_json=os.environ.get("RUNNER_EXTRA_ENV", "{}"),
     )
+
+
+# --- clusters (#106) --------------------------------------------------------------------------
+
+class _PerGroup:
+    """Acts as the `default` cluster's handle (attributes forwarded) and gives each group its
+    cluster's handle with `for_group`. Shared by Neo4jSet and RunnerSet."""
+
+    def __init__(self, default, policy_source=None, policy=None):
+        self._default, self._source, self._policy = default, policy_source, policy
+        self._built: dict[str, object] = {}
+
+    def _pol(self):
+        if self._policy is not None:
+            return self._policy
+        if not self._source:
+            return None
+        from .policy import load_policy
+        try:
+            return load_policy(self._source)
+        except Exception:  # noqa: BLE001 - no loadable policy: only the env default exists
+            return None
+
+    def named(self, name: str):
+        if name not in self._built:
+            pol = self._pol()
+            cfg = pol.clusters.get(name) if pol is not None else None
+            self._built[name] = self._build(cfg) if cfg else self._default
+        return self._built[name]
+
+    def for_group(self, group_id: str):
+        pol = self._pol()
+        try:
+            name = pol.cluster_name(group_id) if pol is not None else "default"
+        except KeyError:
+            name = "default"
+        return self.named(name)
+
+    def __getattr__(self, attr):
+        return getattr(self.named("default"), attr)
+
+
+def _cluster_attrs(obj, cfg):
+    obj.cluster_topology = cfg.topology
+    obj.cypher_version = cfg.cypher_version
+    obj.cutover_config = cfg.cutover
+    obj.backup_upload = cfg.backup_upload
+    return obj
+
+
+class Neo4jSet(_PerGroup):
+    def _build(self, cfg):
+        ref = cfg.password_ref
+        provider = secrets.from_env()
+        pw = (lambda: secrets.resolve_ref(ref)) if ref else (
+            lambda: provider.resolve(os.environ.get("NEO4J_PASSWORD_REF")))
+        return _cluster_attrs(Neo4jClient(cfg.bolt_uri, cfg.user, pw), cfg)
+
+
+class RunnerSet(_PerGroup):
+    def _build(self, cfg):
+        import copy
+
+        r = copy.copy(self._default)
+        r.backup_source = cfg.backup_sources
+        return _cluster_attrs(r, cfg)
+
+
+def neo4j():
+    """The Neo4j client per cluster (#106): the `default` cluster (policy `clusters.default`,
+    else the environment) plus each group's cluster, resolved per group."""
+    return Neo4jSet(env_neo4j(), policy_source=policy_path())
+
+
+def runner(exec_prefix=None):
+    """The neo4j-admin runner per cluster (#106): each cluster's `backup_source`."""
+    return RunnerSet(env_runner(exec_prefix), policy_source=policy_path())
