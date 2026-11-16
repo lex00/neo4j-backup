@@ -219,6 +219,8 @@ this release have no metadata sidecar; the next backup or prune of each database
   clusters work unchanged.
 
 ### Fixed
+- The `mcp` extra pins `mcp<2` (#203): mcp 2.x renamed `FastMCP` and the server couldn't start.
+  CI now installs the extra, so the MCP server tests run there.
 - `kind: command` builds: relative `import_args` files are passed to neo4j-admin as absolute
   paths in the work dir, which neo4j-admin needs (#109; found by the stack smoke).
 - Docs (#116): README says who the tool is for (a platform team serving other teams from one

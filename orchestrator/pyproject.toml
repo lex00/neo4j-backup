@@ -27,7 +27,7 @@ azure = ["azure-storage-blob>=12"]
 gcp = ["google-cloud-storage>=2"]
 # Operator MCP server (#58 P5) — only needed to run `neo4j-backup-mcp`; the tool logic itself
 # (neo4j_backup_mcp.tools) is pure and needs none of this.
-mcp = ["mcp>=1.2"]
+mcp = ["mcp>=1.2,<2"]  # 2.x renamed FastMCP (#203)
 # Airflow adapter deps are installed with Airflow's constraints (see airflow/README.md);
 # this extra documents them. neo4j_backup_core needs only neo4j/boto3/pydantic/pyyaml.
 airflow = [
