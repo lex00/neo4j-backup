@@ -185,3 +185,43 @@ def test_main_op_error_maps_to_failure(monkeypatch, capsys):
     assert code == int(Exit.FAILURE)
     out = json.loads(capsys.readouterr().out)
     assert out["ok"] is False and out["error"]["kind"] == "op_failed"
+
+
+# --- restore --to-cluster (#115) --------------------------------------------------------------
+
+def test_restore_needs_a_group_or_a_cluster():
+    env, code = run(["restore", "--dry-run"])
+    assert_exit(code, Exit.USAGE)
+    env, code = run(["restore", "--from-cluster", "east", "--dry-run"])
+    assert_exit(code, Exit.USAGE)
+    assert "--to-cluster" in env["error"]["msg"]
+
+
+def test_restore_to_cluster_refuses_restore_only_flags():
+    env, code = run(["restore", "demo", "--to-cluster", "west", "--member", "orders",
+                     "--dry-run"])
+    assert_exit(code, Exit.USAGE)
+    assert "--member" in env["error"]["msg"]
+
+
+def test_restore_to_cluster_dry_run_and_apply(monkeypatch):
+    from neo4j_backup_core import move
+    seen = {}
+    monkeypatch.setattr(move, "groups_for", lambda pol, g, fc: ([_Group()], "east"))
+    monkeypatch.setattr(cli.load_policy("x"), "cluster_names", lambda: ["east", "west"],
+                        raising=False)
+    plan = {"source": "east", "target": "west", "groups": [], "_security": ["x"],
+            "policy": "set `cluster: west`"}
+    monkeypatch.setattr(move, "plan_move", lambda *a, **k: dict(plan))
+
+    def do_move(*a, **k):
+        seen["move"] = k
+        return dict(plan)
+    monkeypatch.setattr(move, "move", do_move)
+    env, code = run(["restore", "demo", "--to-cluster", "west", "--dry-run"])
+    assert_exit(code, Exit.OK)
+    assert "_security" not in env["result"]["plan"] and "move" not in seen
+    env, code = run(["restore", "demo", "--to-cluster", "west", "--fence-source", "--confirm",
+                     "--no-baseline"])
+    assert_exit(code, Exit.OK)
+    assert seen["move"]["fence_source"] is True and env["result"]["policy"]

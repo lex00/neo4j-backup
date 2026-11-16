@@ -52,6 +52,7 @@ Mutating (only with `NEO4J_BACKUP_MCP_MODE=read-write`; each needs `confirm=true
 | `run_prune(confirm, dry_run, ticket, reason)` | delete backups past retention |
 | `run_rollback(group, members, confirm, dry_run, ticket, reason)` | point each alias back at its previous database (#122) |
 | `run_cleanup(group, keep, older_than_days, confirm, dry_run, ticket, reason)` | drop superseded databases the tool created, keeping the current one and `keep` before it (#93) |
+| `run_restore_to_cluster(to_cluster, group, from_cluster, until, fence_source, skip_metadata, baseline, confirm, dry_run, ticket, reason)` | restore a group, or every group of a cluster, into another cluster (#115) |
 | `run_load(group, confirm, dry_run, replace, keep_failed, baseline, reapply_access, ticket, reason)` | load or rebuild a group from its policy build: build, dump, seed, check, swap, baseline (#107) |
 
 ## Run it

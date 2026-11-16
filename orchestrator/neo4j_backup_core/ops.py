@@ -237,6 +237,7 @@ def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: s
     is the type neo4j-admin actually wrote (an AUTO can be either), from the sidecar. `physical`
     names the database explicitly (a restore's new physical, even when an external router, not
     the alias, points at it)."""
+    check_fence(neo4j, store, group_id)  # moved to another cluster (#115)
     neo4j, runner = _per(neo4j, group_id), _per(runner, group_id)
     upload = _upload(runner, upload)
     store = _store(store, group_id)
@@ -888,6 +889,47 @@ def record_swaps(store, group_id: str, swaps: list[dict], *, keep: int = 20) -> 
     store.put_text(key, json.dumps(state, indent=1))
 
 
+def _state(store, group_id: str) -> dict:
+    import json
+    try:
+        return json.loads(store.get_text(f"{STATE_PREFIX}{group_id}.json"))
+    except Exception:  # noqa: BLE001 - no state yet
+        return {"group": group_id, "swaps": []}
+
+
+def fence(store, group_id: str, source: str, target: str) -> None:
+    """Mark a group as moved off `source` (#115): its backups, restores and loads that resolve
+    to `source` refuse (`check_fence`) until the policy's `cluster:` names another cluster."""
+    import json
+    from datetime import datetime, timezone
+
+    state = _state(store, group_id)
+    state["fenced"] = {"cluster": source, "moved_to": target,
+                       "at": datetime.now(timezone.utc).isoformat()}
+    store.put_text(f"{STATE_PREFIX}{group_id}.json", json.dumps(state, indent=1))
+
+
+def check_fence(neo4j, store, group_id: str) -> None:
+    """Refuse when the policy puts `group_id` on a cluster it was moved off (#115). Only a
+    policy-aware handle (a Neo4jSet) knows the group's cluster; plain handles aren't checked."""
+    pol_of = getattr(neo4j, "_pol", None)
+    if pol_of is None:
+        return
+    try:
+        pol = pol_of()
+        cluster = pol.cluster_name(group_id) if pol is not None else None
+    except Exception:  # noqa: BLE001 - not a policy group (a probe)
+        return
+    if cluster is None:
+        return
+    fenced = _state(_store(store, group_id), group_id).get("fenced")
+    if fenced and fenced.get("cluster") == cluster:
+        raise OpError(f"{group_id} was moved from cluster {cluster!r} to "
+                      f"{fenced.get('moved_to')!r} at {fenced.get('at')}: set `cluster: "
+                      f"{fenced.get('moved_to')}` on the group in the policy (refusing to write "
+                      f"to {cluster!r}, so two clusters don't share one chain)")
+
+
 def last_swap(store, group_id: str) -> dict | None:
     import json
     try:
@@ -965,6 +1007,7 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
     across tasks instead). by-name pre-validates every artifact + existing-target precondition BEFORE
     any drop, so a missing artifact or an unreplaceable target fails before anything is destroyed.
     alias-swap seeds every fresh physical, then cuts all aliases over. Returns the member plan."""
+    check_fence(neo4j, store, group.id)  # moved to another cluster (#115)
     neo4j = _per(neo4j, group.id)
     cypher_version = _cypher(neo4j, cypher_version)
     store = _store(store, group.id)
