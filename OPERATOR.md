@@ -160,6 +160,10 @@ The same restore from the orchestrators:
 The result lists, per member, the old database (`old`), the new one (`newdb`) and the privileges
 granted on the new one (`privileges`). Keep it for the report.
 
+`--check` runs the group's `load.checks` (#111) on each new database before the swap; a failed
+check drops the new databases (keep them with `--keep-failed`) and moves no alias. The result has
+each member's check results under `checks`.
+
 To seed from a load artifact instead of the backups (#144, #159): `--from-load` (every member's
 newest dump in its `_seed/` folder), or `--from-dump <member>=<key-or-uri>` per member (a key under
 `_seed/`, or the URI of a dump a customer exported, in a bucket the servers can read). A dump

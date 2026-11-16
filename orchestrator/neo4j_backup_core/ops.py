@@ -731,6 +731,32 @@ def seed_member(neo4j, store, group, layout, name: str, *, restore_until: str | 
             "seed": seed, "group": group.id}
 
 
+def check_seeded(neo4j, group, seeded: list[dict], *, expect_counts: dict | None = None,
+                 keep_failed: bool = False, require_data: bool = True,
+                 log: Log = _NOLOG) -> None:
+    """Run the default and `load.checks` checks on every newly seeded physical (#111); results go
+    into each member entry under `checks`. A failure drops every new physical (unless
+    `keep_failed`) and raises OpError naming the check and value; no alias has moved."""
+    from . import checks
+
+    pol_checks = list(getattr(getattr(group, "load", None), "checks", []) or [])
+    for s in seeded:
+        db = s.get("newdb") or s.get("name")
+        try:
+            s["checks"] = checks.run(neo4j, db, pol_checks, require_data=require_data,
+                                     expect_counts=(expect_counts or {}).get(s.get("alias")
+                                                                             or s.get("name")))
+            log(f"checks passed on {db}: {len(s['checks'])}")
+        except (checks.CheckFailed, ValueError) as e:
+            if not keep_failed:
+                for t in seeded:
+                    if t.get("newdb"):
+                        neo4j.drop_database(t["newdb"])
+                log(f"dropped the new databases ({e})")
+            raise OpError(f"{e}; no alias was moved"
+                          + ("" if keep_failed else "; the new databases were dropped")) from e
+
+
 def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG) -> None:
     """Barrier after alias-swap seeds. First copy every member's privileges from its old physical
     to its new one (#117); only when all copies succeed, point each alias at its new physical. A
@@ -755,7 +781,8 @@ def cutover_seeded(neo4j, seeded: list[dict], *, log: Log = _NOLOG) -> None:
 
 def restore_group(neo4j, store, group, layout, *, restore_until: str | None = None,
                   replace: bool = False, cypher_version: str | None = None, log: Log = _NOLOG,
-                  loads: dict | str | None = None) -> dict:
+                  loads: dict | str | None = None, check: bool = False,
+                  keep_failed: bool = False) -> dict:
     """Restore a whole group in one process (used by the CLI and Dagster; Airflow maps `seed_member`
     across tasks instead). by-name pre-validates every artifact + existing-target precondition BEFORE
     any drop, so a missing artifact or an unreplaceable target fails before anything is destroyed.
@@ -785,6 +812,8 @@ def restore_group(neo4j, store, group, layout, *, restore_until: str | None = No
         members.append(seed_member(neo4j, store, group, layout, name, restore_until=restore_until,
                                    cypher_version=cypher_version, ts=ts, log=log,
                                    seed=seeds[name]))
+    if check:  # `restore --check` (#111): the policy's checks before any alias moves
+        check_seeded(neo4j, group, members, keep_failed=keep_failed, require_data=False, log=log)
     cutover_seeded(neo4j, members, log=log)
     return {"mode": "alias-swap", "members": members}
 
