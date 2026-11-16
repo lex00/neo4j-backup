@@ -35,6 +35,8 @@ runner command-building + pod spec); each adapter is a thin binding. Architectur
 | `neo4j_verify_<tier>` | tier's `verify_cron` (default daily 06:00) | **non-destructive** consistency check — copy chain to a scratch prefix, aggregate + `neo4j-admin database check`, then delete the copy. |
 | `neo4j_prune_<tier>` | tier's `prune_cron` (default Sundays 07:00) | chain-aware retention over the tier's groups (#73). |
 | `neo4j_dbms_metadata_default` | `dbms.metadata_cron` (default daily 02:00) | export users/roles/privileges/aliases as replayable Cypher to `_dbms/` (pure Bolt), then keep `dbms.keep_metadata` / `keep_system`. |
+| `neo4j_load` | manual (`-c '{"group_id": "catalog"}'`) | load or rebuild one group from its policy build (#107). |
+| `neo4j_rebuild_<tier>` | tier's `rebuild_cron` | one load per `load.mode: rebuild` group of the tier (#108); each takes the group's lock, as backups do. |
 | `neo4j_metadata_restore` | manual | replay the latest (or a given `key`) against `system` over Bolt. |
 | `neo4j_dbms_system_default` | `dbms.system_backup_cron` (default daily 01:00) | binary `system` backup (exact metadata, native passwords) to `_dbms/system/`, then the same sweep. Restore is offline — `just restore-system`. |
 

@@ -18,6 +18,7 @@ from neo4j_backup_core.policy import load_policy, load_policy_at_startup
 
 # storage-key layout instance (#21) — swappable via PATH_LAYOUT
 _layout = paths.get_layout()
+LOCK_WAIT = int(os.environ.get("NEO4J_BACKUP_LOCK_WAIT", "3600"))  # seconds (#108)
 
 
 def backup_one(group_alias: str, kind: str) -> dict:
@@ -25,10 +26,14 @@ def backup_one(group_alias: str, kind: str) -> dict:
     `neo4j_backup_core.ops.backup_target` (same code path as the Dagster asset and the CLI)."""
     group_id, alias = group_alias.split("/", 1)
     neo, store, runner = config.neo4j(), config.store(), config.runner()
+    from neo4j_backup_core import locks
     try:
-        return ops.backup_target(run_admin, neo, store, runner, _layout, group_id, alias, kind,
-                                 upload=upload.BACKUP_UPLOAD, staging=upload.STAGING, log=print,
-                                 group=load_policy(config.policy_path()).group(group_id))
+        # never at the same time as the group's rebuild (#108); wait for it rather than fail
+        with locks.group_lock(store, group_id, f"backup {alias}", wait=LOCK_WAIT):
+            return ops.backup_target(
+                run_admin, neo, store, runner, _layout, group_id, alias, kind,
+                upload=upload.BACKUP_UPLOAD, staging=upload.STAGING, log=print,
+                group=load_policy(config.policy_path()).group(group_id))
     except ops.OpError as e:
         raise RuntimeError(str(e))
 

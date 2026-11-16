@@ -21,6 +21,11 @@ concurrency:
         value:
           applyLimitPerUniqueValue: true
         limit: 4
+      # Per group (#108): a group's rebuild never overlaps its own backups or another rebuild.
+      - key: neo4j_group
+        value:
+          applyLimitPerUniqueValue: true
+        limit: 1
   pools:
     # Protect the Neo4j source member: the `backup` asset declares pool="neo4j".
     default_limit: 2

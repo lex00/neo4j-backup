@@ -86,6 +86,10 @@ mcp-smoke:
 sidecar-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_sidecars.py
 
+# Load (#107): CSV and Parquet builds, read-only and read-write groups
+load-smoke:
+    orchestrator/.venv/bin/python orchestrator/smoke_load.py
+
 # Dump path (#161): import -> dump -> seed -> baseline -> diff -> point-in-time -> export
 dump-smoke:
     orchestrator/.venv/bin/python orchestrator/smoke_dump.py

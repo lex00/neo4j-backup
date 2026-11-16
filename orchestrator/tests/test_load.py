@@ -139,3 +139,58 @@ def test_reapply_access():
     neo = N()
     out = L.reapply_access(neo, group(mode="once"))
     assert out == [{"member": "catalog", "physical": "catalog-1", "access": "read-only"}]
+
+
+# --- #108: rebuild lanes and the per-group lock ---------------------------------------------------
+
+def test_lock_excludes_and_expires(monkeypatch):
+    from neo4j_backup_core import locks
+
+    class S(MemStore):
+        def create_exclusive(self, key, text):
+            if key in self.objects:
+                return False
+            self.objects[key] = text
+            return True
+    s = S()
+    tok = locks.acquire(s, "cat", "load")
+    with pytest.raises(locks.Locked, match="busy: load"):
+        locks.acquire(s, "cat", "backup a")
+    waits = []
+    with pytest.raises(locks.Locked):
+        locks.acquire(s, "cat", "backup a", wait=25, poll=10, sleep=waits.append)
+    assert waits  # it polled before giving up
+    locks.release(s, "cat", tok)
+    with locks.group_lock(s, "cat", "backup a"):
+        pass
+    locks.acquire(s, "cat", "stuck", ttl=-1)            # an expired lock is cleared
+    assert locks.acquire(s, "cat", "load")
+
+
+def test_dagster_rebuild_schedule_requests_only_rebuild_groups(tmp_path):
+    dg = pytest.importorskip("dagster")
+    import json
+    import os
+    import subprocess
+    import sys
+
+    import yaml
+    raw = yaml.safe_load(open("policies/demo.yaml"))
+    raw["db_groups"].append({"id": "cat", "aliases": ["catalog"], "tier": "nightly",
+                             "load": {"mode": "rebuild", "writes": "read-only",
+                                      "build": {"kind": "import", "input_type": "csv"}}})
+    f = tmp_path / "p.yaml"
+    f.write_text(yaml.safe_dump(raw))
+    code = ("import json, dagster as dg; from neo4j_backup_dagster import definitions as D\n"
+            "s = next(x for x in D.defs.schedules if x.name == 'nightly_rebuild')\n"
+            "with dg.instance_for_test() as i:\n"
+            "    r = s.evaluate_tick(dg.build_schedule_context(instance=i, "
+            "repository_def=D.defs.get_repository_def())).run_requests\n"
+            "print(json.dumps([[x.tags, x.run_config] for x in r]))")
+    p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                       env={**os.environ, "NEO4J_PASSWORD": "x", "NEO4J_BACKUP_POLICY": str(f)})
+    assert p.returncode == 0, p.stderr
+    reqs = json.loads(p.stdout.splitlines()[-1])
+    assert len(reqs) == 1
+    tags, cfg = reqs[0]
+    assert tags["neo4j_group"] == "cat" and cfg["ops"]["load_group_op"]["config"]["group_id"] == "cat"

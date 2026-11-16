@@ -94,4 +94,4 @@ def test_dagster_dbms_schedules_and_cluster_tags(tmp_path):
     assert set(sched) == {"default_dbms_metadata", "default_dbms_system",
                           "eu_dbms_metadata", "eu_dbms_system"}
     assert sched["eu_dbms_system"] == {"neo4j_cluster": "eu"}
-    assert tags == {"backup_kind": "diff", "neo4j_cluster": "eu"}
+    assert tags == {"backup_kind": "diff", "neo4j_cluster": "eu", "neo4j_group": "shop"}
