@@ -259,6 +259,10 @@ def apply_access(neo4j, group, physical: str, *, log: Log = _NOLOG) -> str | Non
     return None
 
 
+# neo4j-admin's message when a DIFF meets a store whose id changed (#99, 2026.05)
+STORE_ID_CHANGED = "have different store ids"
+
+
 def needs_full(neo4j, store, layout, group_id: str, alias: str) -> bool:
     """True when a DIFF of this member would fail for want of a base full (#74). Unknown
     (pre-#118) backups count as a possible base, so this never forces a full on a guess."""
@@ -299,8 +303,21 @@ def backup_target(run_admin: RunAdmin, neo4j, store, runner, layout, group_id: s
                 f"skipping the diff, a full is needed")
             return {"group": group_id, "alias": alias, "physical": physical, "kind": kind,
                     "artifact": None, "taken": None, "skipped": True, "needs_full": True}
-    artifact = run_backup(run_admin, runner, store, physical, prefix, kind,
-                          upload=upload, staging=staging, log=log)
+    try:
+        artifact = run_backup(run_admin, runner, store, physical, prefix, kind,
+                              upload=upload, staging=staging, log=log)
+    except Exception as e:  # noqa: BLE001 - only a store-id change is turned into needs_full
+        text = f"{getattr(e, 'output', '') or ''}\n{e}"
+        if kind.upper() != "DIFF" or STORE_ID_CHANGED not in text:
+            raise
+        # The store was rewritten outside a transaction (an incremental import's merge, an
+        # offline load): its store id changed and the chain can't continue (#99). Like a
+        # missing base (#74): skip, and the full lane starts a new chain.
+        log(f"{group_id}/{alias}: {physical}'s store id changed since its last backup (an "
+            f"incremental import or offline load?); skipping the diff, a full is needed")
+        return {"group": group_id, "alias": alias, "physical": physical, "kind": kind,
+                "artifact": None, "taken": None, "skipped": True, "needs_full": True,
+                "reason": "store id changed"}
     metas, _unknown = artifacts.read(store, prefix)
     taken = (metas.get(artifact) or {}).get("type") if artifact else None
     return {"group": group_id, "alias": alias, "physical": physical, "kind": kind,
