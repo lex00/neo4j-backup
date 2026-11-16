@@ -144,6 +144,9 @@ class Neo4jClient:
         return {r["name"]: r["database"] for r in rows}
 
 
+LOAD_DIR = "/_seed/"  # load artifacts (#156) live in a `_seed/` folder under each member
+
+
 class DeleteError(RuntimeError):
     """Some keys could not be deleted. `deleted` is how many were; `failed` lists
     (key, code, message) for the rest."""
@@ -176,6 +179,7 @@ class ObjectStore(Protocol):
     def get_text(self, key: str) -> str: ...
     def list_text_keys(self, prefix: str, suffix: str = ".cypher"): ...
     def latest_text_key(self, prefix: str, suffix: str = ".cypher") -> str | None: ...
+    def list_load_artifacts(self, prefix: str): ...
 
 
 def object_store(bucket: str, endpoint_url: str | None = None, region: str = "us-east-1",
@@ -201,6 +205,16 @@ class _BaseObjectStore:
     def latest_artifact_key(self, prefix: str) -> str | None:
         arts = self.list_artifacts(prefix)
         return max(arts, key=lambda t: t[2])[0] if arts else None
+
+    def list_load_artifacts(self, prefix: str) -> list[tuple[str, object, str]]:
+        """Load artifacts under `prefix` (#98, #156): `.dump` and `.backup` files in a `_seed/`
+        folder, as (key, modified, kind) oldest first. Kept apart from `list_artifacts`, so a
+        load never becomes an alias's chain head."""
+        out = []
+        for suffix, kind in ((".dump", "dump"), (".backup", "backup")):
+            out += [(k, m, kind) for (k, m) in self.list_text_keys(prefix, suffix)
+                    if LOAD_DIR in k]
+        return sorted(out, key=lambda t: (t[1], t[0]))
 
     def admin_env(self) -> dict[str, str]:
         """Environment neo4j-admin needs to reach this store (#105): a named store's region,
@@ -305,7 +319,7 @@ class S3ObjectStore(_BaseObjectStore):
         paginator = self._client().get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             for o in page.get("Contents", []):
-                if o["Key"].endswith(".backup"):
+                if o["Key"].endswith(".backup") and LOAD_DIR not in o["Key"]:
                     out.append((o["Key"], o["Size"], o["LastModified"]))
         return out
 
@@ -401,7 +415,8 @@ class AzureObjectStore(_BaseObjectStore):
 
     def list_artifacts(self, prefix: str):
         return [(b.name, b.size, b.last_modified)
-                for b in self._c().list_blobs(name_starts_with=prefix) if b.name.endswith(".backup")]
+                for b in self._c().list_blobs(name_starts_with=prefix)
+                if b.name.endswith(".backup") and LOAD_DIR not in b.name]
 
     def object_size(self, key: str) -> int:
         return self._c().get_blob_client(key).get_blob_properties().size
@@ -475,7 +490,8 @@ class GcsObjectStore(_BaseObjectStore):
 
     def list_artifacts(self, prefix: str):
         return [(b.name, b.size, b.updated)
-                for b in self._b().list_blobs(prefix=prefix) if b.name.endswith(".backup")]
+                for b in self._b().list_blobs(prefix=prefix)
+                if b.name.endswith(".backup") and LOAD_DIR not in b.name]
 
     def object_size(self, key: str) -> int:
         return self._b().get_blob(key).size

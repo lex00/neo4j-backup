@@ -295,6 +295,14 @@ def artifact_chains(store, layout, group_id: str, alias: str, *, run_admin: RunA
     return artifacts.chains(store, prefix)
 
 
+def load_artifacts(store, layout, group_id: str, alias: str) -> list[dict]:
+    """A member's load artifacts (#156), oldest first: {key, kind, modified}."""
+    store = _store(store, group_id)
+    lp = layout.load_prefix(group_id, alias)
+    return [{"key": k, "kind": kind, "modified": m.isoformat() if hasattr(m, "isoformat") else m}
+            for (k, m, kind) in store.list_load_artifacts(lp)]
+
+
 def import_database(run_admin: RunAdmin, runner, database: str, source_args: list) -> dict:
     """Bulk-import raw data into an offline store on the loader (#16): the reusable tail's first step.
     Structures + runs `neo4j-admin database import full`; `source_args` is a passthrough. The rest of

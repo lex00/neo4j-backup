@@ -39,7 +39,11 @@ class MemStore:
 
     def list_artifacts(self, prefix):
         return [(k, 1, T) for k in sorted(self.objects)
-                if k.startswith(prefix) and k.endswith(".backup")]
+                if k.startswith(prefix) and k.endswith(".backup") and "/_seed/" not in k]
+
+    def list_load_artifacts(self, prefix):
+        from neo4j_backup_core.clients import _BaseObjectStore
+        return _BaseObjectStore.list_load_artifacts(self, prefix)
 
     def latest_artifact_key(self, prefix):
         arts = self.list_artifacts(prefix)

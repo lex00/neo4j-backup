@@ -61,6 +61,9 @@ class _Store:
     def list_artifacts(self, prefix):
         return self._arts.get(prefix, [])
 
+    def list_load_artifacts(self, prefix):
+        return []
+
     def object_size(self, key):
         return 123
 

@@ -621,6 +621,11 @@ In Dagster this is the `aggregate_chain` and `verify` jobs (validated end-to-end
 > end via `orchestrator/smoke_phase6.py`. (Diagram:
 > [storage-layout](diagrams/storage-layout.dot).)
 >
+> **Load artifacts (#156).** A load or seed artifact (a `.dump`, or a `.backup` kept as a
+> load) lives in `<group>/<slug>/_seed/`, beside the physical folders. `list_artifacts` never
+> returns anything there, so a load never becomes an alias's chain head; `list_load_artifacts`
+> lists them, oldest first, with their kind.
+>
 > **Artifact sidecars (#118).** Artifact names don't say whether a file is a full or a diff,
 > and LastModified is upload time, so after every backup and aggregate the tool runs
 > `neo4j-admin backup inspect --format=JSON --empty --verbose` on the physical's folder and

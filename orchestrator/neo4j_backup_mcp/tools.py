@@ -106,7 +106,9 @@ def show_chain(group: str, member: str) -> dict:
     chain = [{"key": k, "bytes": s, "modified": _iso(m)} for (k, s, m) in arts]
     read = ops.artifact_chains(store, layout, group, member)
     return {"group": group, "member": member, "count": len(chain), "artifacts": chain,
-            "chains": read["chains"], "unknown": read["unknown"]}
+            "chains": read["chains"], "unknown": read["unknown"],
+            # load artifacts (#156), separate from the backup chains
+            "loads": ops.load_artifacts(env.store(), layout, group, member)}
 
 
 def backup_status(tenant: str | None = None) -> dict:
@@ -126,9 +128,11 @@ def backup_status(tenant: str | None = None) -> dict:
                 continue
             k, _s, m = max(arts, key=lambda t: t[2])
             age = round((now - m.timestamp()) / 3600, 1) if hasattr(m, "timestamp") else None
+            loads = ops.load_artifacts(store, layout, g.id, a)
             rows.append({"target": f"{g.id}/{a}", "tenant": g.tenant,
                          "cluster": getattr(g, "cluster", None) or "default", "latest": k,
-                         "age_hours": age})
+                         "age_hours": age,
+                         "latest_load": loads[-1]["key"] if loads else None})
     return {"targets": rows}
 
 

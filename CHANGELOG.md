@@ -14,6 +14,10 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Load artifacts** (#156, part of #98). A `.dump` (or a `.backup` kept as a load) lives in
+  `<group>/<slug>/_seed/`; `PathLayout.load_prefix` names it and `list_load_artifacts` lists it
+  on every backend, while `list_artifacts` never returns anything under `_seed/`, so a load
+  never becomes a chain head. MCP `show_chain` returns `loads`; `backup_status` shows the latest.
 - **DBMS jobs and concurrency per cluster** (#106). The metadata export, `system` backup,
   metadata restore and DBMS sweep run per cluster (CLI `--cluster`; Dagster
   `<cluster>_dbms_*` schedules; Airflow `neo4j_dbms_*_<cluster>` DAGs). The default cluster keeps
