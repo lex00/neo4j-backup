@@ -40,6 +40,27 @@ db_groups:
       secondaries: 0
     overrides: {}                   # [decl] per-alias cadence overrides; not wired
                                     #        (may carry `topology:` per alias — that IS wired)
+    load:                           # [decl] how data arrives and what is kept (omit: live)
+      mode: live                    #        live | once | rebuild
+      writes: read-write            #        read-write | read-only
+      protect_writes: true          #        back up writes made after a load
+      keep_loads: 14                #        load artifacts kept restorable
+      baseline: true                # [used] full backup right after a restore (#97)
+
+  # ----- a group rebuilt from source files every night, read-only in between -----
+  - id: catalog
+    aliases: [catalog]
+    tier: nightly
+    s3_prefix: s3://backups/catalog/
+    load:
+      mode: rebuild
+      writes: read-only
+      keep_loads: 14
+      source: { storage: default, prefix: catalog/_source/ }   # default: <group>/_source/
+      build:
+        kind: import                # import | command (a command or container in the runner)
+        input_type: parquet         # csv | parquet (import only)
+        args: [--nodes=Product=products/*.parquet, --relationships=IN=in/*.parquet]
 
   # ----- a second group on a lighter tier (minimal: only the [used] fields + s3_prefix) -----
   - id: globex
@@ -56,6 +77,8 @@ tiers:
   bronze:
     full_cron: "0 4 * * 0"          #   weekly full (Sundays 04:00)
     diff_cron: "0 0 * * *"          #   daily differential
+  nightly:                          # a tier for load-only groups may have only rebuild_cron
+    rebuild_cron: "0 1 * * *"       # [decl] when rebuilds run (#108)
 ```
 
 The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, and
@@ -80,6 +103,38 @@ The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, a
 | `encryption` | object | `{mode: sse-kms}` | decl | recorded intent; SSE-KMS applied by your bucket |
 | `topology` | object | `null` | used | cluster shape seeded on restore/import; omit for standalone |
 | `overrides` | map | `{}` | decl | per-alias cadence overrides; not wired (but `overrides[alias].topology` **is** — it overrides the group topology for that alias) |
+| `load` | object | `{mode: live}` | decl (see below) | how the group's data arrives and what is kept (#103) |
+
+**`db_groups[].load`** — chooses the customer's path. Validation runs now; loads and rebuilds
+arrive with #107 and #108, write enforcement with #112. `baseline` is used today (#97).
+
+| Customer | `mode` | `writes` | `protect_writes` |
+|---|---|---|---|
+| Live application | `live` | `read-write` | `true` |
+| Bulk loads on an interval only | `rebuild` | `read-only` | n/a |
+| Bulk loads, writes allowed but disposable | `rebuild` | `read-write` | `false` |
+| Bulk loads, writes kept within a cycle | `rebuild` | `read-write` | `true` |
+| Bulk load once, then live | `once` | `read-write` | `true` |
+| Static dataset | `once` | `read-only` | n/a |
+
+| Field | Type | Required / default | Status | Meaning |
+|---|---|---|---|---|
+| `mode` | `live` \| `once` \| `rebuild` | `live` | decl | `live`: data written by the application. `once`: loaded once (by hand per IMPORT.md, or by the tool with `build`). `rebuild`: rebuilt in full every `rebuild_cron` |
+| `writes` | `read-write` \| `read-only` | `read-write` | decl | whether the database accepts writes between loads |
+| `protect_writes` | bool | `true` for read-write; n/a for read-only | decl | back up writes made after a load (full/diff schedules). `false` only for rebuild groups whose writes are disposable |
+| `keep_loads` | int (≥1) | `14` | decl | how many load artifacts stay restorable |
+| `baseline` | bool | `true` | used | full backup right after a restore (and, later, a load) |
+| `source` | `{storage, prefix}` | the group's store, `<group>/_source/` | decl | where rebuild input files live; `storage` names a store (#105) |
+| `build.kind` | `import` \| `command` | `import` | decl | `import`: `neo4j-admin database import full`; `command`: a command or container in the runner (#109) |
+| `build.input_type` | `csv` \| `parquet` | required for `import` | decl | the import's input format |
+| `build.args` | list of string | `[]` | decl | passed through to the import (the tool puts the database name first) |
+| `build.command` / `build.image` / `build.env` | list / string / map | | decl | for `kind: command` (#109): one of `command` or `image` is required |
+
+Rejected at load, naming the group: `live` with `read-only`; `live` with `protect_writes: false`;
+`read-only` with `protect_writes: true`; `rebuild` without `build`, or on a tier without
+`rebuild_cron`; `keep_loads` below 1; `import` without `input_type`; `command` with neither
+`command` nor `image`; a group that backs up its writes on a tier without `full_cron` and
+`diff_cron`; unknown keys.
 
 **`db_groups[].encryption`**
 
@@ -101,8 +156,12 @@ instead of the DBMS default (see [RECOVERY.md](RECOVERY.md), DESIGN.md §3).
 
 | Field | Type | Required / default | Status | Meaning |
 |---|---|---|---|---|
-| `full_cron` | cron string | **required** | used | when full backups run (the full lane) |
-| `diff_cron` | cron string | **required** | used | when differential backups run (the diff lane) |
+| `full_cron` | cron string | required for groups that back up writes | used | when full backups run (the full lane) |
+| `diff_cron` | cron string | required for groups that back up writes | used | when differential backups run (the diff lane) |
+| `rebuild_cron` | cron string | required for `load.mode: rebuild` groups | decl | when rebuilds run (#108) |
+
+A tier needs at least one of the three. A tier for load-only groups (read-only, or
+`protect_writes: false`) may have only `rebuild_cron`; it gets no backup schedules.
 
 ## What you actually tune
 

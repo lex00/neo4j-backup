@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from . import cron, naming
 
@@ -36,6 +36,82 @@ class Topology(BaseModel):
     secondaries: int = Field(default=0, ge=0)
 
 
+class LoadSource(BaseModel):
+    """Where a rebuild's input files live (#103): a named store (#105) and a prefix. Default:
+    the group's own store under `<group>/_source/`."""
+    model_config = ConfigDict(extra="forbid")
+    storage: str = "default"
+    prefix: str | None = None
+
+
+class LoadBuild(BaseModel):
+    """How a load is built. `import`: `neo4j-admin database import full` with `args` passed
+    through (the tool puts the database name first, as `import_command` does). `command`: a
+    command or container run in the runner (#109)."""
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["import", "command"] = "import"
+    input_type: Literal["csv", "parquet"] | None = None
+    args: list[str] = Field(default_factory=list)
+    command: list[str] = Field(default_factory=list)
+    image: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _kind_fields(self) -> "LoadBuild":
+        if self.kind == "import" and self.input_type is None:
+            raise ValueError("build.kind 'import' needs input_type (csv or parquet)")
+        if self.kind == "command" and not (self.command or self.image):
+            raise ValueError("build.kind 'command' needs a command or an image")
+        return self
+
+
+class Load(BaseModel):
+    """How a group's data arrives and what is kept (#103). Schema only here; loads, rebuilds and
+    write protection are #107, #108 and #112.
+
+    | customer                                  | mode    | writes     | protect_writes |
+    | live application                          | live    | read-write | true           |
+    | bulk loads on an interval only            | rebuild | read-only  | n/a            |
+    | bulk loads, writes allowed but disposable | rebuild | read-write | false          |
+    | bulk loads, writes kept within a cycle    | rebuild | read-write | true           |
+    | bulk load once, then live                 | once    | read-write | true           |
+    | static dataset                            | once    | read-only  | n/a            |
+    """
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["live", "once", "rebuild"] = "live"
+    writes: Literal["read-only", "read-write"] = "read-write"
+    protect_writes: bool | None = None  # default: true for read-write; n/a for read-only
+    keep_loads: int = 14
+    baseline: bool = True  # full backup right after a load or restore (#97)
+    source: LoadSource | None = None
+    build: LoadBuild | None = None
+
+    @model_validator(mode="after")
+    def _combinations(self) -> "Load":
+        explicit = "protect_writes" in self.model_fields_set
+        if self.keep_loads < 1:
+            raise ValueError("load.keep_loads must be >= 1")
+        if self.mode == "live" and self.writes == "read-only":
+            raise ValueError("load.mode 'live' can't be read-only (nothing would write to it)")
+        if self.mode == "live" and explicit and self.protect_writes is False:
+            raise ValueError("load.mode 'live' always backs up its writes; protect_writes: false "
+                             "is only for rebuild groups")
+        if self.writes == "read-only":
+            if explicit and self.protect_writes is True:
+                raise ValueError("load.protect_writes: true needs writes: read-write")
+            self.protect_writes = None  # n/a
+        elif self.protect_writes is None:
+            self.protect_writes = True
+        if self.mode == "rebuild" and self.build is None:
+            raise ValueError("load.mode 'rebuild' needs a build (how each cycle's data is made)")
+        return self
+
+    @property
+    def backs_up_writes(self) -> bool:
+        """Whether the group's databases get scheduled full/diff backups."""
+        return self.writes == "read-write" and bool(self.protect_writes)
+
+
 class DbGroup(BaseModel):
     id: str
     owner: str | None = None
@@ -53,6 +129,21 @@ class DbGroup(BaseModel):
     encryption: Encryption = Field(default_factory=Encryption)
     topology: Topology | None = None
     overrides: dict[str, dict] = Field(default_factory=dict)
+    load: Load = Field(default_factory=Load)  # absent: mode live, as before (#103)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _load_names_the_group(cls, data):
+        # validate `load:` here so its errors name the group (#103)
+        if isinstance(data, dict) and isinstance(data.get("load"), dict):
+            try:
+                data = {**data, "load": Load.model_validate(data["load"])}
+            except ValidationError as e:
+                msgs = "; ".join(f"{'.'.join(str(x) for x in err['loc']) or 'load'}: "
+                                 f"{err['msg'].removeprefix('Value error, ')}"
+                                 for err in e.errors())
+                raise ValueError(f"group {data.get('id')!r}: load: {msgs}") from None
+        return data
 
     @model_validator(mode="after")
     def _validate_members(self) -> "DbGroup":
@@ -88,8 +179,17 @@ class DbGroup(BaseModel):
 
 
 class Tier(BaseModel):
-    full_cron: str
-    diff_cron: str
+    # Each optional (#103): a tier for load-only groups (read-only, or protect_writes: false)
+    # may have only rebuild_cron. Groups that back up their writes need full_cron and diff_cron.
+    full_cron: str | None = None
+    diff_cron: str | None = None
+    rebuild_cron: str | None = None
+
+    @model_validator(mode="after")
+    def _some_cron(self) -> "Tier":
+        if not (self.full_cron or self.diff_cron or self.rebuild_cron):
+            raise ValueError("a tier needs at least one of full_cron, diff_cron, rebuild_cron")
+        return self
 
 
 class Policy(BaseModel):
@@ -101,6 +201,13 @@ class Policy(BaseModel):
         for g in self.db_groups:
             if g.tier not in self.tiers:
                 raise ValueError(f"group {g.id!r} references unknown tier {g.tier!r}")
+            t = self.tiers[g.tier]
+            if g.load.mode == "rebuild" and not t.rebuild_cron:
+                raise ValueError(f"group {g.id!r}: load.mode 'rebuild' needs tier {g.tier!r} "
+                                 f"to have a rebuild_cron")
+            if g.load.backs_up_writes and not (t.full_cron and t.diff_cron):
+                raise ValueError(f"group {g.id!r} backs up its writes, so tier {g.tier!r} needs "
+                                 f"full_cron and diff_cron")
         for w in self.warnings():
             _log.warning("policy: %s", w)
         return self
@@ -112,6 +219,8 @@ class Policy(BaseModel):
         `retention_days` (up to the full interval) and the policy reads as shorter than it is."""
         out = []
         for g in self.db_groups:
+            if not self.tiers[g.tier].full_cron:
+                continue
             try:
                 gap = cron.max_gap(self.tiers[g.tier].full_cron)
             except ValueError:

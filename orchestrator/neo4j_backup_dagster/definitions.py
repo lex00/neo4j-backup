@@ -404,7 +404,8 @@ def _build_schedules() -> list:
         return []
     return [_make_schedule(tier_name, lane, cron)
             for tier_name, tier in policy.tiers.items()
-            for lane, cron in (("full", tier.full_cron), ("diff", tier.diff_cron))]
+            for lane, cron in (("full", tier.full_cron), ("diff", tier.diff_cron))
+            if cron]  # a load-only tier may have neither (#103)
 
 
 defs = dg.Definitions(
