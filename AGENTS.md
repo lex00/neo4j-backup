@@ -46,6 +46,8 @@ Configuration is environment + policy (`NEO4J_PASSWORD`, `NEO4J_BOLT_URI`, `BACK
 | Command | What it does | Mutates? | Key flags |
 |---|---|---|---|
 | `targets` | List the policy's group/member targets | no | |
+| `policy show <group>` | A group's effective settings after profiles, and where each came from | no | |
+| `policy validate <file>` | Validate a policy file (no cluster or store); exit `2` if invalid | no | |
 | `backup <group>` | Back up every database in a group | writes artifacts | `--kind AUTO\|FULL\|DIFF` |
 | `verify <group>` | Consistency-check the latest backups (non-destructive) | no | |
 | `aggregate <group>` | Collapse each chain into one recovered full, in place | **yes** | `--dry-run`, `--confirm`, `--ticket`, `--reason` |
