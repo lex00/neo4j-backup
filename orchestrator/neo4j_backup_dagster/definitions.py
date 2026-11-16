@@ -11,7 +11,7 @@ import tempfile
 
 import dagster as dg
 
-from neo4j_backup_core import capture, ops, paths
+from neo4j_backup_core import capture, ops, paths, record
 from neo4j_backup_core.policy import load_policy, load_policy_at_startup, parse_partition_key
 from neo4j_backup_core.until import UntilError, parse_until
 from .resources import Neo4jResource, ObjectStoreResource, RunnerResource
@@ -251,6 +251,8 @@ class RestoreConfig(dg.Config):
     restore_until: str | None = None  # ISO-8601; needs a differential chain
     replace: bool = False  # by-name mode only: DROP+recreate a target that already exists
     baseline: bool = True  # take a FULL of each restored database afterwards (#97)
+    ticket: str | None = None  # the change ticket; recorded in the log and as run tags (#119)
+    reason: str | None = None
 
 
 @dg.op
@@ -262,8 +264,13 @@ def restore_group_op(
 ):
     try:
         until = parse_until(config.restore_until)  # ISO-8601, UTC if no offset (#77)
-    except UntilError as e:
+        rec = record.fields(config.ticket, config.reason, applying=True)
+    except (UntilError, record.TicketError) as e:
         raise dg.Failure(str(e))
+    context.log.info(record.describe("restore", rec))
+    tags = {f"neo4j_backup/{k}": v for k, v in rec.items() if v}
+    if tags:
+        context.instance.add_run_tags(context.run_id, tags)
     group = load_policy(POLICY_PATH).group(config.group_id)
     try:
         out = ops.restore_group(
@@ -272,7 +279,8 @@ def restore_group_op(
         )
     except ops.OpError as e:
         raise dg.Failure(str(e))
-    return {"group_id": config.group_id, "baseline": config.baseline, "members": out["members"]}
+    return {"group_id": config.group_id, "baseline": config.baseline, "members": out["members"],
+            **rec}
 
 
 @dg.op(pool="neo4j")

@@ -23,6 +23,7 @@ import os
 import sys
 
 from neo4j_backup_core import ops
+from neo4j_backup_core.record import TicketError
 from neo4j_backup_core.until import UntilError
 from neo4j_backup_mcp import tools
 
@@ -53,6 +54,9 @@ def _audited(fn):
         except UntilError as e:  # a bad `until` from the agent (#77), before any Neo4j call
             log.warning("tool %s refused: %s", fn.__name__, e)
             return {"ok": False, "error": {"kind": "usage", "msg": str(e)}}
+        except TicketError as e:  # missing/invalid ticket or reason (#119)
+            log.warning("tool %s refused: %s", fn.__name__, e)
+            return {"ok": False, "error": {"kind": e.kind, "msg": str(e)}}
         log.info("tool %s ok", fn.__name__)
         return result
     return wrapper

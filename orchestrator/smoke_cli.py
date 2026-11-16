@@ -142,7 +142,9 @@ def main() -> None:
     assert any("smoke117" in c for c in orders["privileges"]), orders
 
     run_cli("aggregate", "demo", "--confirm")
-    restored = run_cli("restore", "demo", "--confirm")
+    restored = run_cli("restore", "demo", "--confirm", "--ticket", "CHG-SMOKE",
+                       "--reason", "cli smoke")
+    assert restored["result"]["ticket"] == "CHG-SMOKE", restored  # recorded (#119)
     base = restored["result"]["baseline"]  # a FULL of each new database (#97)
     assert [b["taken"] for b in base] == ["full"] * 3, base
     after = _customer_reads("acme-orders")  # raises 42NFF if the privileges were dropped

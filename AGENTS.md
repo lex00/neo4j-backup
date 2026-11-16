@@ -48,11 +48,11 @@ Configuration is environment + policy (`NEO4J_PASSWORD`, `NEO4J_BOLT_URI`, `BACK
 | `targets` | List the policy's group/member targets | no | |
 | `backup <group>` | Back up every database in a group | writes artifacts | `--kind AUTO\|FULL\|DIFF` |
 | `verify <group>` | Consistency-check the latest backups (non-destructive) | no | |
-| `aggregate <group>` | Collapse each chain into one recovered full, in place | **yes** | `--dry-run`, `--confirm` |
-| `restore <group>` | Restore a group (alias-swap or by-name) | **yes** | `--until <iso>`, `--replace`, `--dry-run`, `--confirm` |
-| `prune` | Delete backups past each group's retention | **yes** | `--dry-run`, `--confirm` |
+| `aggregate <group>` | Collapse each chain into one recovered full, in place | **yes** | `--dry-run`, `--confirm`, `--ticket`, `--reason` |
+| `restore <group>` | Restore a group (alias-swap or by-name) | **yes** | `--until <iso>`, `--replace`, `--no-baseline`, `--dry-run`, `--confirm`, `--ticket`, `--reason` |
+| `prune` | Delete backups past each group's retention | **yes** | `--dry-run`, `--confirm`, `--ticket`, `--reason` |
 | `metadata export` | Export users/roles/privileges/aliases as replayable Cypher | writes artifact | |
-| `metadata restore` | Replay a metadata export into `system` | **yes** | `--key <k>`, `--dry-run`, `--confirm` |
+| `metadata restore` | Replay a metadata export into `system` | **yes** | `--key <k>`, `--dry-run`, `--confirm`, `--ticket`, `--reason` |
 | `system-backup` | Binary FULL backup of the `system` database | writes artifact | |
 
 Backup detail: each entry in `result.backups` has `taken` (what neo4j-admin actually wrote: `full` or

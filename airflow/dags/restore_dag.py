@@ -18,7 +18,7 @@ from airflow.sdk import Param, dag, get_current_context, task
 
 from neo4j_backup_airflow import config, upload
 from neo4j_backup_airflow.execution import run_admin
-from neo4j_backup_core import naming, ops, paths
+from neo4j_backup_core import naming, ops, paths, record
 from neo4j_backup_core.policy import load_policy
 from neo4j_backup_core.until import parse_until
 
@@ -38,6 +38,8 @@ _SEED_CYPHER_VERSION = os.environ.get("SEED_CYPHER_VERSION") or None
         "restore_until": Param(None, type=["null", "string"]),  # ISO-8601, needs a chain
         "replace": Param(False, type="boolean"),  # by-name only: DROP+recreate an existing target
         "baseline": Param(True, type="boolean"),  # FULL of each restored database afterwards (#97)
+        "ticket": Param(None, type=["null", "string"]),  # change ticket, recorded (#119)
+        "reason": Param(None, type=["null", "string"]),
     },
     tags=["neo4j-backup", "restore"],
 )
@@ -47,6 +49,9 @@ def neo4j_restore():
         ctx = get_current_context()
         gid = ctx["params"]["group_id"]
         until = parse_until(ctx["params"]["restore_until"])
+        rec = record.fields(ctx["params"].get("ticket"), ctx["params"].get("reason"),
+                            applying=True)  # also in the DAG run's conf (#119)
+        print(record.describe("restore", rec))
         # every member's seed (and the chain covering `until`) is chosen here, so a time no
         # chain covers fails before any seed task runs (#114)
         ops.choose_seeds(config.store(), _layout, load_policy(config.policy_path()).group(gid),
@@ -57,6 +62,7 @@ def neo4j_restore():
             "restore_until": parse_until(ctx["params"]["restore_until"]),
             "replace": bool(ctx["params"].get("replace")),
             "baseline": bool(ctx["params"].get("baseline", True)),
+            **rec,
             "mode": load_policy(config.policy_path()).group(gid).restore_mode,
             "ts": naming.ts(),               # one timestamp for the whole group
         }

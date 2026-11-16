@@ -87,7 +87,8 @@ def main() -> None:
 
     expected = neo.count_nodes(phys)
     print("== RESTORE via dag.test(run_conf=group_id=demo), with the baseline (#97) ==")
-    run = rd.neo4j_restore_dag.test(run_conf={"group_id": "demo"})
+    run = rd.neo4j_restore_dag.test(run_conf={"group_id": "demo", "ticket": "CHG-SMOKE",
+                                              "reason": "airflow smoke"})
     assert _ok(run), f"restore DAG state={getattr(run,'state',run)}"
     n = neo.count_nodes("acme-orders")
     assert n == expected, f"restored {n} != expected {expected}"
