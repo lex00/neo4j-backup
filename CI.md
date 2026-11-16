@@ -78,7 +78,9 @@ command on the same cron:
   refused guard (`3`); a scheduled job fails loudly on any of these. Use `--json` for
   machine-readable logs.
 - **Serialize a lane.** Never overlap two backups of one group. GitLab's `resource_group` is the
-  cleanest fit; GitHub/Forgejo use a `concurrency` group. Drive full vs differential from separate
+  cleanest fit; GitHub and Forgejo use a `concurrency` group (Forgejo supports workflow-level
+  `concurrency` from runner v11.1, late 2025; on an older Forgejo, register the backup runner with
+  `capacity: 1` so its jobs run one at a time). Drive full vs differential from separate
   schedules (a `LANE`/`kind` variable), the CI analogue of the orchestrators' full/diff pools.
 - **Destructive commands in automation.** `prune` (and `restore --replace`) require `--confirm`; in
   a scheduled job you pass it because the schedule is the operator's standing approval. Run

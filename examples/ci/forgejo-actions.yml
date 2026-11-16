@@ -15,6 +15,13 @@ on:
     - cron: "17 3 * * 0"    # weekly full + maintenance
   workflow_dispatch:
 
+# One lane per group: never overlap two backups of the same group (as in the GitHub recipe).
+# Workflow-level `concurrency` needs a Forgejo with runner v11.1 or later (late 2025); on older
+# instances register the backup runner with capacity 1 instead (see docs/CI.md).
+concurrency:
+  group: neo4j-backup-demo
+  cancel-in-progress: false
+
 env:
   NEO4J_BOLT_URI: ${{ vars.NEO4J_BOLT_URI }}
   NEO4J_BACKUP_SOURCE: ${{ vars.NEO4J_BACKUP_SOURCE }}   # db-host:6362
