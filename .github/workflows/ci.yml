@@ -4,10 +4,11 @@ on:
   push:
   pull_request:
 
-# Cheap checks that need no Docker/Neo4j: naming parity (naming.py == naming.sh), that
-# the Dagster code location resolves, and that every Airflow DAG parses with no import
-# errors. The full end-to-end smokes need the local stack (see STACK.md) and run on a
-# developer machine, not CI.
+# Checks that need no Docker or Neo4j: the unit suite (core ops, policy, CLI contract, MCP
+# tools, cloud backends against fakes, naming.py == naming.sh parity, doc guards), that the
+# Dagster code location resolves, and that every Airflow DAG parses with no import errors.
+# The end-to-end smokes need the local stack (see STACK.md) and run on a developer machine,
+# not CI.
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,7 +18,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e 'orchestrator[dev,azure,gcp]'
-      - name: naming parity (naming.py == naming.sh)
+      - name: unit tests
         run: pytest orchestrator/tests/ -q
       - name: validate Dagster definitions
         env:
