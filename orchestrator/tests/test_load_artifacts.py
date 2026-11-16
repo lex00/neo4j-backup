@@ -69,15 +69,18 @@ def test_azure_and_gcs_backends(monkeypatch):
         assert [k for k, _m, _kind in st.list_load_artifacts("g/orders/")] == NAMES[1:], cls
 
 
-def test_import_to_dump_runs_import_then_dump_into_the_load_folder():
+def test_import_to_dump_is_one_step_that_cleans_up():
+    # #167: import, dump and removal in one runner command (pod-per-command safe)
     from neo4j_backup_core.clients import BackupRunner
     calls = []
     out = ops.import_to_dump(lambda cmd: calls.append(cmd) or "", BackupRunner(), MemStore(), L,
                              "g", "orders", "loaddb", ["--nodes=/n.csv"])
-    assert calls[0][:4] == ["neo4j-admin", "database", "import", "full"]
-    assert calls[1][:3] == ["neo4j-admin", "database", "dump"] and calls[1][-1] == "loaddb"
+    assert len(calls) == 1 and calls[0][:2] == ["sh", "-c"]
+    script = calls[0][2]
+    assert script.startswith("neo4j-admin database import full loaddb --nodes=/n.csv && ")
+    assert "neo4j-admin database dump" in script and "rm -rf /data/databases/loaddb" in script
     assert out["key"].startswith("g/orders/_seed/") and out["key"].endswith("/loaddb.dump")
-    assert f"--to-path=s3://bucket/{out['key'][:-len('loaddb.dump')]}" in calls[1]
+    assert f"--to-path=s3://bucket/{out['key'][:-len('loaddb.dump')]}" in script
 
 
 def test_export_command_is_one_shell_step():

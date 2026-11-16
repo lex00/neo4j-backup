@@ -313,20 +313,22 @@ def import_to_dump(run_admin: RunAdmin, runner, store, layout, group_id: str, me
     store, runner = _store(store, group_id), _per(runner, group_id)
     upload = _upload(runner, upload)
     prefix = f"{layout.load_prefix(group_id, member)}{naming.ts()}/"
-    imported = import_database(run_admin, runner, database, source_args)
+    # import, dump and remove the store in one runner step (#167)
     if upload == "pipeline":
         stage = _stage(runner, "_dump", database, staging)
         os.makedirs(stage, exist_ok=True)
-        _admin(run_admin, runner.dump_command(database, stage), store)
+        cmd = runner.import_dump_command(database, source_args, stage)
+        _admin(run_admin, cmd, store)
         key = store.upload_file(os.path.join(stage, f"{database}.dump"),
                                 f"{prefix}{database}.dump")
         shutil.rmtree(stage, ignore_errors=True)
     else:
-        _admin(run_admin, runner.dump_command(database, store.uri(prefix)), store)
+        cmd = runner.import_dump_command(database, source_args, store.uri(prefix))
+        _admin(run_admin, cmd, store)
         key = f"{prefix}{database}.dump"
     log(f"imported {database} and dumped it to {key}")
     return {"database": database, "group": group_id, "member": member, "key": key,
-            "uri": store.uri(key), "argv": imported["argv"]}
+            "uri": store.uri(key), "argv": cmd}
 
 
 def export_dumps(run_admin: RunAdmin, runner, store, layout, group, *, until: str | None = None,

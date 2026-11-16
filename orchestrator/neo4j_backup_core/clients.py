@@ -588,6 +588,21 @@ class BackupRunner:
             f"--to-path={to_path}", "--overwrite-destination=true", database,
         ]
 
+    def import_dump_command(self, database: str, source_args: list, to_path: str,
+                            data_root: str = "/data") -> list:
+        """One shell step (#167): import into an offline store, dump it to `to_path`, then remove
+        the store, keeping the exit code. One step, so it works pod-per-command, and the loader
+        is left clean for the next load under the same name."""
+        import shlex
+
+        imp = [self.neo4j_admin, "database", "import", "full", database, *source_args]
+        dump = [self.neo4j_admin, "database", "dump", f"--to-path={to_path}",
+                "--overwrite-destination=true", database]
+        clean = ["rm", "-rf", *(f"{data_root}/{d}/{database}"
+                                for d in ("databases", "transactions"))]
+        script = f"{shlex.join(imp)} && {shlex.join(dump)}; rc=$?; {shlex.join(clean)}; exit $rc"
+        return [*self.exec_prefix, "sh", "-c", script]
+
     def export_command(self, from_path: str, database: str, to_path: str,
                        until: str | None = None, data_root: str = "/data") -> list:
         """One shell step (#160), so it also works when each command is its own pod: restore
