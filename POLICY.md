@@ -215,6 +215,29 @@ template fails there rather than at a restore. `cleanup` recognises names made f
 template. A `NAMING=module.Class` hook (#89) takes precedence over the block. The shell
 scripts under `bootstrap/` use the default names only.
 
+Per member, `overrides` can pin the storage folder and the name base (#90):
+
+```yaml
+overrides:
+  Orders:
+    prefix: legacy/orders/   # this member's folder in the store, used as is
+    physical_base: orders    # stands in for {slug} and {alias} in its database names
+```
+
+`prefix` must end in `/`, can't be a tool folder (`_dbms/`, `_state/`, `_verify/`, `_seed/`
+or any other leading `_`), and no two members of one store may share a prefix or nest one
+inside another. `physical_base` must give a legal database name with the timestamp.
+
+**Renaming an alias without losing its history.** Backups live under `<group>/<slug>/`, so a
+new alias name would start an empty folder. First pin the member to its current folder, then
+rename:
+
+1. Add `overrides: {orders: {prefix: shop/orders/}}` and ship the policy (nothing changes).
+2. Rename the alias in Neo4j and in the policy, moving the override to the new name:
+   `aliases: [orders-v2]`, `overrides: {orders-v2: {prefix: shop/orders/}}`.
+
+Restore, prune, verify and `status` keep reading `shop/orders/`.
+
 ## Field reference
 
 **`db_groups[]`**
@@ -232,6 +255,7 @@ scripts under `bootstrap/` use the default names only.
 | `s3_prefix` | string | `null` | deprecated | never read; logs a warning. Use `storage` |
 | `tenant` | string | `null` | used | a label for selecting a customer's groups: `backup`, `verify`, `aggregate` and `targets` take `--tenant <t>` instead of a group, and MCP read and backup tools take `tenant` (#102). **It is a label, not an access control**: the deployment can reach every database in its clusters whatever the tenant. Settable in a profile. `restore` stays per group |
 | `owner` | string | `null` | deprecated | the old name for `tenant`; still read as the tenant, with a warning |
+| `overrides[alias].prefix`, `overrides[alias].physical_base` | string | none | wired | a member's storage folder, used as is, and the base of its database names (#90); see [Database names](#database-names) |
 | `naming` | map | `null` | wired | `physical_template`, `ts_format` for new database names (#88); see [Database names](#database-names). Also settable at the top level and in a profile |
 | `state` | `active` \| `retired` | `active` | wired | offboarding (#124): a retired group has no schedules; its artifacts stay restorable until `retired_on` + `retire_after_days`, then prune deletes them |
 | `retired_on` | date | `null` | wired | required with `state: retired`: the day the retention period starts |

@@ -250,38 +250,43 @@ def check_ts_format(fmt: str) -> None:
         raise NamingError(f"ts_format {fmt!r} contains {JOIN!r}, the join character")
 
 
-def render(template: str, alias: str, group_id: str, ts_val: str) -> str:
+def _fields(alias: str, group_id: str, base: str | None) -> dict:
+    return {"alias": base or sanitize(alias) or "db", "slug": base or slug(alias),
+            "group": sanitize(group_id) or "g"}
+
+
+def render(template: str, alias: str, group_id: str, ts_val: str,
+           base: str | None = None) -> str:
     """A physical name from a template; the default template is `physical()` itself, so
-    today's names are unchanged."""
-    if template == DEFAULT_TEMPLATE:
+    today's names are unchanged. `base` (a member's `physical_base`, #90) stands in for
+    {slug} and {alias}."""
+    if template == DEFAULT_TEMPLATE and not base:
         return physical(alias, ts_val)
-    name = template.format(alias=sanitize(alias) or "db", slug=slug(alias),
-                           group=sanitize(group_id) or "g", ts=ts_val)
-    return validate_db(name)
+    return validate_db(template.format(ts=ts_val, **_fields(alias, group_id, base)))
 
 
 class TemplateNaming:
     """The scheme a group's `naming:` block describes (#88)."""
 
-    def __init__(self, group_id: str, template: str):
-        self.group_id, self.template = group_id, template
+    def __init__(self, group_id: str, template: str, bases: dict | None = None):
+        self.group_id, self.template, self.bases = group_id, template, bases or {}
 
     def slug(self, alias: str) -> str:
         return slug(alias)
 
     def physical(self, alias: str, ts_val: str, current: str | None = None) -> str:
-        return render(self.template, alias, self.group_id, ts_val)
+        return render(self.template, alias, self.group_id, ts_val, self.bases.get(alias))
 
     def owns(self, alias: str, name: str) -> bool:
-        if self.template == DEFAULT_TEMPLATE:  # with a custom ts_format: rebuild and compare
+        base = self.bases.get(alias)
+        if self.template == DEFAULT_TEMPLATE and not base:  # custom ts_format: rebuild, compare
             t = name.rpartition(JOIN)[2]
             try:
                 return bool(t) and physical(alias, t) == name
             except NamingError:
                 return False
         pattern = re.escape(self.template)
-        for f, v in (("alias", sanitize(alias) or "db"), ("slug", slug(alias)),
-                     ("group", sanitize(self.group_id) or "g")):
+        for f, v in _fields(alias, self.group_id, base).items():
             pattern = pattern.replace(re.escape("{" + f + "}"), re.escape(v))
         pattern = pattern.replace(re.escape("{ts}"), r"[a-z0-9.]+")
         return re.fullmatch(pattern, name) is not None
@@ -299,9 +304,11 @@ def for_group(group):
     import os
 
     template, fmt = _group_naming(group)
-    if os.environ.get("NAMING") or (template == DEFAULT_TEMPLATE and not fmt):
+    bases = {a: ov["physical_base"] for a, ov in (getattr(group, "overrides", None) or {}).items()
+             if isinstance(ov, dict) and ov.get("physical_base")}
+    if os.environ.get("NAMING") or (template == DEFAULT_TEMPLATE and not fmt and not bases):
         return scheme()
-    return _Validated(TemplateNaming(group.id, template))
+    return _Validated(TemplateNaming(group.id, template, bases))
 
 
 def ts_for(group, now: datetime | None = None) -> str:

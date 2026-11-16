@@ -38,8 +38,13 @@ class DefaultPathLayout:
     fixed to "system").
     """
 
+    # (group_id, alias) -> a member's `overrides.<alias>.prefix`, or None (#90). get_layout()
+    # sets it from the policy; a custom layout gets the same attribute.
+    prefix_for = None
+
     def alias_prefix(self, group_id: str, alias: str) -> str:
-        return f"{group_id}/{naming.scheme().slug(alias)}/"  # the configured scheme (#89)
+        pinned = self.prefix_for(group_id, alias) if self.prefix_for else None
+        return pinned or f"{group_id}/{naming.scheme().slug(alias)}/"  # (#89)
 
     def physical_prefix(self, group_id: str, alias: str, physical: str) -> str:
         return f"{self.alias_prefix(group_id, alias)}{physical}/"
@@ -69,18 +74,54 @@ class DefaultPathLayout:
         return "_dbms/system/" if cluster == "default" else f"_dbms/{cluster}/system/"
 
 
+def prefixes_of(policy) -> dict[tuple[str, str], str]:
+    """{(group, alias): prefix} for every `overrides.<alias>.prefix` in a policy (#90)."""
+    return {(g.id, a): ov["prefix"] for g in policy.db_groups
+            for a, ov in (g.overrides or {}).items()
+            if isinstance(ov, dict) and ov.get("prefix")}
+
+
+def prefix_from(policy):
+    """A `prefix_for` callable over a fixed policy (tests, one-off callers)."""
+    pinned = prefixes_of(policy)
+    return lambda group_id, alias: pinned.get((group_id, alias))
+
+
+def _policy_prefix(group_id: str, alias: str) -> str | None:
+    """`prefix_for` over the configured policy, read through load_policy's cache (#90). No
+    loadable policy: no overrides."""
+    try:
+        from .policy import load_policy
+
+        pol = load_policy(os.environ.get("NEO4J_BACKUP_POLICY", "policies/demo.yaml"))
+    except Exception:  # noqa: BLE001 - no policy (bootstrap, a probe): the default layout
+        return None
+    try:
+        ov = pol.group(group_id).overrides.get(alias) or {}
+    except KeyError:
+        return None
+    return ov.get("prefix") if isinstance(ov, dict) else None
+
+
 def get_layout() -> PathLayout:
     """The configured layout: `DefaultPathLayout`, or the class named by `PATH_LAYOUT`
-    (e.g. ``mypkg.CustomLayout``). Adapters call this once and inject the instance."""
+    (e.g. ``mypkg.CustomLayout``). Adapters call this once and inject the instance. Either way
+    the layout's `prefix_for` gives members' `overrides.<alias>.prefix` from the policy (#90)."""
     spec = os.environ.get("PATH_LAYOUT")
     if not spec:
-        return DefaultPathLayout()
-    import importlib
+        layout = DefaultPathLayout()
+    else:
+        import importlib
 
-    module, _, cls = spec.rpartition(".")
-    if not module:
-        raise RuntimeError(f"PATH_LAYOUT must be 'module.Class', got {spec!r}")
-    return getattr(importlib.import_module(module), cls)()
+        module, _, cls = spec.rpartition(".")
+        if not module:
+            raise RuntimeError(f"PATH_LAYOUT must be 'module.Class', got {spec!r}")
+        layout = getattr(importlib.import_module(module), cls)()
+    try:
+        layout.prefix_for = _policy_prefix
+    except AttributeError:  # a layout with __slots__: it doesn't take overrides
+        pass
+    return layout
 
 
 # Module-level shims delegate to the configured layout — back-compat and core-internal use
