@@ -78,3 +78,29 @@ def test_import_to_dump_runs_import_then_dump_into_the_load_folder():
     assert calls[1][:3] == ["neo4j-admin", "database", "dump"] and calls[1][-1] == "loaddb"
     assert out["key"].startswith("g/orders/_seed/") and out["key"].endswith("/loaddb.dump")
     assert f"--to-path=s3://bucket/{out['key'][:-len('loaddb.dump')]}" in calls[1]
+
+
+def test_export_command_is_one_shell_step():
+    from neo4j_backup_core.clients import BackupRunner
+    cmd = BackupRunner(exec_prefix=["docker", "exec", "r"]).export_command(
+        "s3://b/g/o/p/d.backup", "export-o-1", "s3://b/g/o/_seed/1/", until="2026-11-16 05:12:46")
+    assert cmd[:5] == ["docker", "exec", "r", "sh", "-c"]
+    script = cmd[5]
+    assert "database restore" in script and "'--restore-until=2026-11-16 05:12:46'" in script
+    assert "database dump" in script and "rm -rf /data/databases/export-o-1" in script
+    assert script.endswith("exit $rc")
+
+
+def test_export_dumps_each_member_from_its_chain(monkeypatch):
+    from neo4j_backup_core.clients import BackupRunner
+
+    class Grp:
+        id, names = "g", ["orders"]
+    s = MemStore()
+    s.add("g/orders/orders-1/full.backup")
+    calls = []
+    out = ops.export_dumps(lambda cmd: calls.append(cmd) or "", BackupRunner(), s, L, Grp())
+    e = out["exports"][0]
+    assert e["from"] == "g/orders/orders-1/full.backup" and e["key"].endswith(".dump")
+    assert e["key"].startswith("g/orders/_seed/")
+    assert "--restore-until" not in calls[0][-1]  # latest: no until

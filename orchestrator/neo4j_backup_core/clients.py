@@ -588,6 +588,27 @@ class BackupRunner:
             f"--to-path={to_path}", "--overwrite-destination=true", database,
         ]
 
+    def export_command(self, from_path: str, database: str, to_path: str,
+                       until: str | None = None, data_root: str = "/data") -> list:
+        """One shell step (#160), so it also works when each command is its own pod: restore
+        the chain at `from_path` (optionally `--restore-until`) into a throwaway local store
+        `database` on the runner, dump it to `to_path`, then remove the local store. The cluster
+        is never touched."""
+        import shlex
+
+        restore = [self.neo4j_admin, "database", "restore", f"--from-path={from_path}",
+                   f"--temp-path={self.scratch_path}", "--overwrite-destination=true"]
+        if until:
+            restore.append(f"--restore-until={until}")
+        restore.append(database)
+        dump = [self.neo4j_admin, "database", "dump", f"--to-path={to_path}",
+                "--overwrite-destination=true", database]
+        clean = ["rm", "-rf", *(f"{data_root}/{d}/{database}"
+                                for d in ("databases", "transactions", "scripts"))]
+        script = (f"{shlex.join(restore)} && {shlex.join(dump)}; rc=$?; {shlex.join(clean)}; "
+                  f"exit $rc")
+        return [*self.exec_prefix, "sh", "-c", script]
+
     def import_command(self, database: str, source_args: list) -> list:
         """Off-cluster bulk import (#16): `neo4j-admin database import full <database> <source_args…>`.
         `source_args` (the `--nodes`/`--relationships`/options) is a **passthrough** — dataset-specific

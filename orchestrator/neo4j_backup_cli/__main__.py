@@ -208,6 +208,23 @@ def _guard(op, group, blast, confirmed, dry_run):
     return None
 
 
+def cmd_export(args):
+    """A portable dump per member, at --until or the latest backup (#160). Writes to `_seed/`;
+    never touches the cluster. Guarded like the other writes that act on a whole group."""
+    group = _group(args)
+    store, runner, layout = env.store(), env.runner(), paths.get_layout()
+    seeds = ops.choose_seeds(store, layout, group, args.until)  # fails before any work
+    plan = {"members": [{"member": n, "from": s["key"], "until": s["until"],
+                         "chain": s.get("chain"), "already_a_dump": bool(s.get("load"))}
+                        for n, s in seeds.items()]}
+    short = _guard("export", group.id, {"plan": plan}, args.confirm, args.dry_run)
+    if short:
+        return short
+    out = ops.export_dumps(_run_admin(runner), runner, store, layout, group, until=args.until,
+                           log=_log)
+    return envelope("export", ok=True, group=group.id, result=out), Exit.OK
+
+
 def _loads_arg(args):
     """--from-load (every member's newest load) or --from-dump MEMBER=KEY_OR_URI (#144, #159)."""
     if args.from_dump:
@@ -361,6 +378,12 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--no-baseline", action="store_true",
                    help="skip the full backup of each restored database (taken by default, #97)")
     r.set_defaults(func=_recorded(cmd_restore))
+
+    ex = guarded(sub.add_parser("export", help="a portable .dump of each member, at --until or "
+                                               "the latest backup (#160)"))
+    ex.add_argument("group")
+    ex.add_argument("--until", type=_until_arg, help="ISO-8601 point in time, UTC if no offset")
+    ex.set_defaults(func=_recorded(cmd_export))
 
     pr = guarded(sub.add_parser("prune", help="delete backups past each group's retention"))
     pr.set_defaults(func=_recorded(cmd_prune))
