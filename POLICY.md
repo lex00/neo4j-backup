@@ -173,7 +173,7 @@ defines `default` itself. Name more stores for customers whose data must be kept
 | `url` | `s3://<bucket>`, `gs://<bucket>`, `azb://<account>/<container>` | the bucket; key prefixes come from the path layout |
 | `region`, `endpoint` | string | for the tool's reads and writes, and (`region`) neo4j-admin's |
 | `runner_endpoint` | string | the endpoint as neo4j-admin on the runner sees it, when it differs from `endpoint` (default: `endpoint`) |
-| `sse`, `sse_kms_key_id`, `write_args` | string / string / map | encryption and extra arguments on the tool's writes |
+| `sse`, `sse_kms_key_id`, `write_args` | string / string / map | encryption and extra arguments on the tool's writes. `write_args` by cloud: S3, any PutObject/CopyObject argument (`BucketKeyEnabled`, `ACL`, ...); Azure, upload keyword arguments such as `encryption_scope` (which copies keep too, #80); GCS, `kms_key_name` (CMEK), `content_type`, `metadata`, `cache_control`, `storage_class`, and any other key is refused when the store is built (#81). `sse`/`sse_kms_key_id` are S3 only |
 | `credentials_ref` | secret reference | the store's own S3 key pair, for the tool and neo4j-admin (`s3://` stores only so far) |
 
 A group's backups go to its `storage` (else `default`); a group's precedence over a cluster's

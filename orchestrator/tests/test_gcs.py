@@ -13,11 +13,12 @@ from neo4j_backup_core.clients import GcsObjectStore
 class _FakeBucket:
     def __init__(self):
         self.blobs: dict[str, bytes] = {}
-        self.deleted, self.copied = [], []
+        self.deleted, self.copied, self.written = [], [], []
 
     class _Blob:
-        def __init__(self, b, key):
-            self._b, self.name = b, key
+        def __init__(self, b, key, **kw):
+            self._b, self.name, self.kw = b, key, kw
+            self.metadata = self.content_type = None
 
         @property
         def size(self):
@@ -27,12 +28,14 @@ class _FakeBucket:
         def updated(self):
             return list(self._b.blobs).index(self.name)
 
-        def upload_from_filename(self, path):
+        def upload_from_filename(self, path, content_type=None):
             with open(path, "rb") as f:
                 self._b.blobs[self.name] = f.read()
+            self._b.written.append(self)
 
         def upload_from_string(self, text, content_type=None):
             self._b.blobs[self.name] = text.encode() if isinstance(text, str) else text
+            self._b.written.append(self)
 
         def download_as_bytes(self):
             return self._b.blobs[self.name]
@@ -45,8 +48,8 @@ class _FakeBucket:
             self._b.blobs.pop(self.name)
             self._b.deleted.append(self.name)
 
-    def blob(self, key):
-        return _FakeBucket._Blob(self, key)
+    def blob(self, key, **kw):
+        return _FakeBucket._Blob(self, key, **kw)
 
     def get_blob(self, key):
         return _FakeBucket._Blob(self, key)
@@ -99,3 +102,23 @@ def test_base_composites_run_over_gcs(store, tmp_path):
     (s2 / "recovered.backup").write_bytes(b"R")
     store.sync_up(str(s2), "g/s/p/")
     assert sorted(k for k, _s, _m in store.list_artifacts("g/s/p/")) == ["g/s/p/recovered.backup"]
+
+
+def test_write_args_reach_the_blob(monkeypatch, tmp_path):
+    """#81: CMEK and the other write_args are applied, not dropped."""
+    s = GcsObjectStore("b", write_args_json='{"kms_key_name": "projects/p/keys/k", '
+                                           '"metadata": {"owner": "backup"}}')
+    fake = _FakeBucket()
+    monkeypatch.setattr(s, "_b", lambda: fake)
+    f = tmp_path / "x.backup"
+    f.write_bytes(b"x")
+    s.upload_file(str(f), "g/a/p/x.backup")
+    s.put_text("g/a/p/x.backup.meta.json", "{}")
+    assert [w.kw for w in fake.written] == [{"kms_key_name": "projects/p/keys/k"}] * 2
+    assert all(w.metadata == {"owner": "backup"} for w in fake.written)
+    assert fake.written[1].content_type == "text/plain; charset=utf-8"
+
+
+def test_unsupported_write_args_are_refused():
+    with pytest.raises(ValueError, match="ServerSideEncryption"):
+        GcsObjectStore("b", write_args_json='{"ServerSideEncryption": "aws:kms"}')
