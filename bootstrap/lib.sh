@@ -72,6 +72,16 @@ alias_target() {
 
 # Newest .backup artifact under a bucket prefix (its file name). The AWS CLI lists inside
 # the compose network; filtering happens on the host.
+# Full key of the newest .backup under prefix $1 (any physical folder below it), by modification
+# time; load folders (`_seed/`) are not backups (#131). Empty when there is none.
+latest_artifact_key() {
+  local prefix="$1"
+  $COMPOSE run --rm -T awscli s3api list-objects-v2 --bucket "$BUCKET" --prefix "$prefix" \
+    --query 'Contents[].[LastModified,Key]' --output text \
+    2>/dev/null | tr -d '\r' | awk -F'\t' '$2 ~ /\.backup$/ && $2 !~ /\/_seed\// {print $1"\t"$2}' \
+    | sort | tail -1 | cut -f2
+}
+
 latest_artifact() {
   local prefix="$1"
   $COMPOSE run --rm -T awscli s3api list-objects-v2 --bucket "$BUCKET" --prefix "$prefix" \
