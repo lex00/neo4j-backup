@@ -48,7 +48,6 @@ at every restore, because the name changes.
    - id: shop
      profile: app-live          # tier gold, 14 days; or data-interval, data-scratch, data-then-live
      aliases: [shop]
-     s3_prefix: s3://neo4j-backups/shop/
    ```
 
    Set anything that differs from the profile on the group (`retention_days: 30`, or one

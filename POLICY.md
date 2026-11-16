@@ -16,7 +16,12 @@ Copy this, delete what you don't need, and edit it. Every field is shown. Commen
 but not wired to behavior yet).
 
 ```yaml
-# Two top-level keys: db_groups (a list) and tiers (a map).
+# Required: db_groups (a list) and tiers (a map). Optional: storage, profiles, dbms, schedules.
+
+storage:                            # [used] named stores (#105); omit for the env's one store
+  finance:
+    url: s3://neo4j-backups-finance # s3://<bucket> | gs://<bucket> | azb://<account>/<container>
+    sse_kms_key_id: alias/finance-backups
 
 db_groups:
   # ----- one entry per backup group (the policy + PITR-alignment unit) -----
@@ -29,7 +34,7 @@ db_groups:
     retention_days: 30              # [used] prune deletes whole chains older than this (see below)
 
     tenant: acme-corp               # [used] label for selecting a customer's groups (--tenant)
-    s3_prefix: s3://backups/acme/   # [decl] not read yet; bucket comes from BACKUP_BUCKET env
+    storage: finance                # [used] the named store for this group's backups
     rpo_minutes: 60                 # [decl] target, not enforced
     rto_minutes: 120                # [decl] target, not enforced
     encryption:                     # [decl] recorded intent; SSE-KMS is applied by your bucket
@@ -51,7 +56,6 @@ db_groups:
   - id: catalog
     aliases: [catalog]
     tier: nightly
-    s3_prefix: s3://backups/catalog/
     load:
       mode: rebuild
       writes: read-only
@@ -62,12 +66,11 @@ db_groups:
         input_type: parquet         # csv | parquet (import only)
         args: [--nodes=Product=products/*.parquet, --relationships=IN=in/*.parquet]
 
-  # ----- a second group on a lighter tier (minimal: only the [used] fields + s3_prefix) -----
+  # ----- a second group on a lighter tier (minimal: only the required fields) -----
   - id: globex
     aliases: [globex-main]
     tier: bronze
     retention_days: 7
-    s3_prefix: s3://backups/globex/
 
 # ----- named schedules referenced by db_group.tier -----
 tiers:
@@ -81,8 +84,7 @@ tiers:
     rebuild_cron: "0 1 * * *"       # [decl] when rebuilds run (#108)
 ```
 
-The smallest valid group needs only `id`, `aliases`, `tier`, `retention_days`, and
-`s3_prefix` (the last is required by the schema even though it's declarative today).
+The smallest valid group needs only `id`, `aliases` and `tier`.
 
 ## Profiles
 
@@ -100,7 +102,6 @@ db_groups:
   - id: recs-sandbox
     profile: data-scratch
     aliases: [recs]
-    s3_prefix: s3://backups/recs/
     load: { keep_loads: 3, build: { kind: import, input_type: csv, args: [--nodes=Item=items.csv] } }
 ```
 
@@ -119,6 +120,30 @@ The four types in `policies/demo.yaml`: `app-live` (an application writing live,
 (rebuilt every night, writes allowed but not kept), `data-then-live` (loaded once, then written
 live and backed up). A group on `data-interval` or `data-scratch` adds its own `load.build`.
 
+## Storage
+
+One store, `default`, comes from the environment (`BACKUP_BUCKET`, `CLOUD`, `AWS_REGION`,
+`AWS_ENDPOINT_URL_S3`, `S3_SSE`, `S3_SSE_KMS_KEY_ID`, `S3_WRITE_ARGS`) unless `storage:`
+defines `default` itself. Name more stores for customers whose data must be kept apart:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `url` | `s3://<bucket>`, `gs://<bucket>`, `azb://<account>/<container>` | the bucket; key prefixes come from the path layout |
+| `region`, `endpoint` | string | for the tool's own reads and writes |
+| `sse`, `sse_kms_key_id`, `write_args` | string / string / map | encryption and extra arguments on the tool's writes |
+| `credentials_ref` | secret reference | declared; per-store credentials for the tool and neo4j-admin come with #105's second part |
+
+A group's backups go to its `storage` (else `default`); a group's precedence over a cluster's
+store arrives with clusters (#106). Each op (backup, verify, aggregate, prune, restore, the MCP
+status tools) resolves the store from the group. The DBMS objects (metadata exports, `system`
+backups) stay in `default`. An unknown store name fails policy load, naming the group.
+
+What the tool can't set for you: neo4j-admin (on the runner) and the Neo4j servers (which fetch
+seeds) use their own cloud configuration. A named store must be reachable with it: the same
+endpoint and credentials as the runner's and servers' environment, or a bucket their IAM role can
+read and write. #105's second part will pass per-store settings to neo4j-admin and add
+`neo4j-backup policy check`.
+
 ## Field reference
 
 **`db_groups[]`**
@@ -132,7 +157,8 @@ live and backed up). A group on `data-interval` or `data-scratch` adds its own `
 | `databases` | list of string | **required** (by-name) | used | database **names** to back up/restore directly (must be legal DB names). Use in `by-name` mode instead of `aliases`. |
 | `tier` | string | **required** | used | which `tiers` entry sets the schedule (must exist) |
 | `retention_days` | int | `7` | used | `prune` deletes backups older than this, whole chains only: per member it keeps the newest chain, any chain with a backup inside the window, and the chain that covers the start of the window (the newest full before it), so a point in time inside the window stays reachable. If the group's tier takes fulls further apart than this, policy load logs a warning and `neo4j-backup targets` lists it under `warnings`: backups are then kept up to the full interval plus `retention_days` |
-| `s3_prefix` | string | **required** | decl | not read; the bucket comes from `BACKUP_BUCKET` |
+| `storage` | string | `default` | used | the named store (under `storage:`) for the group's backups, sidecars and restores (#105) |
+| `s3_prefix` | string | `null` | deprecated | never read; logs a warning. Use `storage` |
 | `tenant` | string | `null` | used | a label for selecting a customer's groups: `backup`, `verify`, `aggregate` and `targets` take `--tenant <t>` instead of a group, and MCP read and backup tools take `tenant` (#102). **It is a label, not an access control**: the deployment can reach every database in its clusters whatever the tenant. Settable in a profile. `restore` stays per group |
 | `owner` | string | `null` | deprecated | the old name for `tenant`; still read as the tenant, with a warning |
 | `rpo_minutes` | int | `60` | decl | target, not enforced |
@@ -223,4 +249,4 @@ Dagster schedules generated from the policy. Airflow DAGs follow Airflow's own p
 The **used** fields: `id`, `aliases`, `tier`, `retention_days`, `topology` (on clusters),
 and the `tiers` crons.
 The **decl** fields are accepted and validated but don't change behavior yet — leave them
-at sane values. (`s3_prefix` would become live if per-group buckets are wired.)
+at sane values.

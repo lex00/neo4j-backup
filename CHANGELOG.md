@@ -14,6 +14,12 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 over; unpause the new DAGs.
 
 ### Added
+- **Named stores** (#105, first part). A `storage:` map names object stores (`url`, `region`,
+  `endpoint`, `sse`, `sse_kms_key_id`, `write_args`, `credentials_ref`); a group picks one with
+  `storage:`, else `default`, which is the environment's store unless the policy defines it. Every
+  op resolves the store from the group (backup, verify, aggregate, prune, restore, MCP status).
+  Unknown store names fail policy load. `s3_prefix` is optional and deprecated (a warning; never
+  read).
 - **Every schedule comes from the policy** (#104). Tiers gain `verify_cron`, `aggregate_cron`,
   `prune_cron` (defaulting to the old fixed crons on tiers that take backups) and `cleanup_cron`
   (for #93); a top-level `dbms:` block sets `metadata_cron`, `system_backup_cron`,

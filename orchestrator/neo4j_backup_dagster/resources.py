@@ -94,6 +94,13 @@ class ObjectStoreResource(dg.ConfigurableResource):
         return object_store(self.bucket, self.endpoint_url, self.region,
                             self.sse, self.sse_kms_key_id, self.write_args_json, self.cloud)
 
+    def for_group(self, group_id: str) -> ObjectStore:
+        """The store a group's policy names (#105); this resource is the `default` store unless
+        the policy defines one."""
+        from neo4j_backup_core.env import StoreSet, policy_path
+
+        return StoreSet(self._core(), policy_source=policy_path()).for_group(group_id)
+
     def list_artifacts(self, *a, **k):
         return self._core().list_artifacts(*a, **k)
 
