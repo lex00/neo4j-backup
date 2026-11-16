@@ -1,0 +1,4 @@
+# actionlint settings for this repo and the CI recipes in examples/ci/ (#94, #95)
+self-hosted-runner:
+  labels:
+    - neo4j-backup   # the backup runner label the recipes use

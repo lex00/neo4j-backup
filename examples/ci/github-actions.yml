@@ -35,7 +35,7 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   NEO4J_BACKUP_POLICY: policies/demo.yaml             # in the repo, or s3://… (#43)
   RUNNER_PAGECACHE: "512M"                             # MUST be explicit or neo4j-admin OOMs
-  SCRATCH_PATH: ${{ runner.temp }}/neo4j-scratch      # size for the largest full backup
+  # SCRATCH_PATH is set by the first step of each job: `runner` isn't available here
   # --- secrets ---
   NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -45,6 +45,9 @@ jobs:
   backup:
     runs-on: [self-hosted, neo4j-backup]
     steps:
+      # the `runner` context exists only inside steps, so SCRATCH_PATH comes from $RUNNER_TEMP
+      - name: Scratch path (size for the largest full backup)
+        run: echo "SCRATCH_PATH=$RUNNER_TEMP/neo4j-scratch" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4              # for the policy file
       - uses: actions/setup-python@v5
         with:
@@ -70,6 +73,9 @@ jobs:
     needs: backup
     runs-on: [self-hosted, neo4j-backup]
     steps:
+      # the `runner` context exists only inside steps, so SCRATCH_PATH comes from $RUNNER_TEMP
+      - name: Scratch path (size for the largest full backup)
+        run: echo "SCRATCH_PATH=$RUNNER_TEMP/neo4j-scratch" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
