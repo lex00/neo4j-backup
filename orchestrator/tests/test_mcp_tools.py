@@ -78,7 +78,7 @@ def stub_env(monkeypatch):
 
 def test_list_targets():
     assert tools.list_targets() == {"targets": ["demo/orders", "demo/customers"],
-                                    "tenants": {"demo": "acme"}}
+                                    "tenants": {"demo": "acme"}, "clusters": {"demo": "default"}}
 
 
 def test_backup_status_reports_age(monkeypatch):

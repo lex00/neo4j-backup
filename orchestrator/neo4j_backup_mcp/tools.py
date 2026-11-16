@@ -84,7 +84,8 @@ def list_targets(group: str | None = None, tenant: str | None = None) -> dict:
     policy = load_policy(env.policy_path())
     groups = policy.select(group, tenant) if (group or tenant) else policy.db_groups
     return {"targets": [f"{g.id}/{n}" for g in groups for n in g.names],
-            "tenants": {g.id: g.tenant for g in groups}}
+            "tenants": {g.id: g.tenant for g in groups},
+            "clusters": {g.id: getattr(g, "cluster", None) or "default" for g in groups}}
 
 
 def latest_artifact(group: str, member: str) -> dict:
@@ -119,12 +120,14 @@ def backup_status(tenant: str | None = None) -> dict:
         for a in g.names:
             arts = ops._store(store, g.id).list_artifacts(layout.alias_prefix(g.id, a))
             if not arts:
-                rows.append({"target": f"{g.id}/{a}", "tenant": g.tenant, "latest": None,
-                             "age_hours": None})
+                rows.append({"target": f"{g.id}/{a}", "tenant": g.tenant,
+                             "cluster": getattr(g, "cluster", None) or "default",
+                             "latest": None, "age_hours": None})
                 continue
             k, _s, m = max(arts, key=lambda t: t[2])
             age = round((now - m.timestamp()) / 3600, 1) if hasattr(m, "timestamp") else None
-            rows.append({"target": f"{g.id}/{a}", "tenant": g.tenant, "latest": k,
+            rows.append({"target": f"{g.id}/{a}", "tenant": g.tenant,
+                         "cluster": getattr(g, "cluster", None) or "default", "latest": k,
                          "age_hours": age})
     return {"targets": rows}
 

@@ -79,6 +79,33 @@ class StoreConfig(BaseModel):
         return self.url.split("://", 1)[1].split("/")[0] if self.cloud == "azure" else None
 
 
+class Cutover(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    strategy: Literal["alias-swap", "external"] = "alias-swap"
+    hook: str | None = None
+
+
+class Cluster(BaseModel):
+    """One Neo4j DBMS the policy covers (#106). `default` comes from the environment
+    (NEO4J_BOLT_URI, NEO4J_USER, NEO4J_PASSWORD_REF, NEO4J_BACKUP_SOURCE, …) unless defined."""
+    model_config = ConfigDict(extra="forbid")
+    bolt_uri: str
+    user: str = "neo4j"
+    password_ref: str | None = None  # secret reference (#105); None: SECRET_PROVIDER's default
+    backup_source: str | list[str] = "neo4j:6362"
+    storage: str | None = None       # the cluster's store; a group's `storage` wins (#105)
+    topology: Topology | None = None  # default for the cluster's groups
+    cypher_version: str | None = None
+    cutover: Cutover | None = None
+    backup_upload: Literal["admin", "pipeline"] | None = None
+
+    @property
+    def backup_sources(self) -> str:
+        """`--from` value: one address, or several comma-separated."""
+        return (",".join(self.backup_source) if isinstance(self.backup_source, list)
+                else self.backup_source)
+
+
 class LoadSource(BaseModel):
     """Where a rebuild's input files live (#103): a named store (#105) and a prefix. Default:
     the group's own store under `<group>/_source/`."""
@@ -169,7 +196,8 @@ class DbGroup(BaseModel):
     aliases: list[str] = Field(default_factory=list)      # alias-swap mode
     databases: list[str] = Field(default_factory=list)    # by-name mode (database names)
     tier: str
-    storage: str | None = None  # a name under `storage:` (#105); None: the `default` store
+    storage: str | None = None  # a name under `storage:` (#105); None: the cluster's, else default
+    cluster: str | None = None  # a name under `clusters:` (#106); None: `default`
     s3_prefix: str | None = None  # deprecated (#105): never read; the store comes from `storage`
     retention_days: int = 7
     rpo_minutes: int = 60
@@ -354,6 +382,8 @@ class Policy(BaseModel):
     # Named stores (#105). Without a `default` entry, the environment (BACKUP_BUCKET, CLOUD, …)
     # defines the `default` store, as before.
     storage: dict[str, StoreConfig] = Field(default_factory=dict)
+    # Neo4j clusters (#106). Without a `default` entry, the environment defines it, as before.
+    clusters: dict[str, Cluster] = Field(default_factory=dict)
     # initial status of the Dagster schedules generated from this policy (#104)
     schedules: Literal["stopped", "running"] = "stopped"
 
@@ -364,7 +394,27 @@ class Policy(BaseModel):
 
     @model_validator(mode="after")
     def _tiers_resolve(self) -> "Policy":
+        if "system" in self.clusters:
+            raise ValueError("cluster name 'system' is reserved")
+        for name, c in self.clusters.items():
+            if c.storage and c.storage != "default" and c.storage not in self.storage:
+                raise ValueError(f"cluster {name!r}: storage {c.storage!r} is not a store")
+        ids: set[str] = set()
+        members: dict[tuple[str, str], str] = {}
         for g in self.db_groups:
+            if g.id in ids:
+                raise ValueError(f"group id {g.id!r} is used twice (ids must be unique, #106)")
+            ids.add(g.id)
+            cl = g.cluster or "default"
+            if g.cluster and g.cluster != "default" and g.cluster not in self.clusters:
+                known = ", ".join(sorted({"default", *self.clusters}))
+                raise ValueError(f"group {g.id!r}: cluster {g.cluster!r} is not defined "
+                                 f"(clusters: {known})")
+            for n in g.names:
+                if (cl, n) in members:
+                    raise ValueError(f"{n!r} on cluster {cl!r} is in groups {members[(cl, n)]!r} "
+                                     f"and {g.id!r}; a database or alias belongs to one group")
+                members[(cl, n)] = g.id
             if g.tier not in self.tiers:
                 raise ValueError(f"group {g.id!r} references unknown tier {g.tier!r}")
             for what, name in (("storage", g.storage),
@@ -414,9 +464,18 @@ class Policy(BaseModel):
         raise KeyError(gid)
 
     def store_name(self, group_id: str) -> str:
-        """The store a group's backups use (#105): the group's `storage`, else `default`.
-        (Per-cluster `storage` sits between the two once clusters exist, #106.)"""
-        return self.group(group_id).storage or "default"
+        """The store a group's backups use (#105): the group's `storage`, else its cluster's
+        (#106), else `default`."""
+        g = self.group(group_id)
+        c = self.clusters.get(g.cluster or "default")
+        return g.storage or (c.storage if c else None) or "default"
+
+    def cluster_name(self, group_id: str) -> str:
+        return self.group(group_id).cluster or "default"
+
+    def cluster_names(self) -> list[str]:
+        return sorted({"default", *self.clusters, *(g.cluster for g in self.db_groups
+                                                     if g.cluster)})
 
     def tenants(self) -> list[str]:
         return sorted({g.tenant for g in self.db_groups if g.tenant})

@@ -120,6 +120,36 @@ The four types in `policies/demo.yaml`: `app-live` (an application writing live,
 (rebuilt every night, writes allowed but not kept), `data-then-live` (loaded once, then written
 live and backed up). A group on `data-interval` or `data-scratch` adds its own `load.build`.
 
+## Clusters
+
+One policy covers every Neo4j cluster (#106). The `default` cluster comes from the environment
+(`NEO4J_BOLT_URI`, `NEO4J_USER`, `NEO4J_PASSWORD_REF`, `NEO4J_BACKUP_SOURCE`, …) unless
+`clusters:` defines it. A group picks one with `cluster:`.
+
+```yaml
+clusters:
+  us-east:
+    bolt_uri: neo4j://neo4j-use1.internal:7687
+    user: neo4j
+    password_ref: aws-sm:neo4j/use1         # secret reference (see Storage)
+    backup_source: [use1-a:6362, use1-b:6362]
+    storage: default                         # the cluster's store; a group's `storage` wins
+    topology: { primaries: 3, secondaries: 0 }   # default for its groups
+    cypher_version: "5"
+    cutover: { strategy: alias-swap }        # or external, with `hook`
+    backup_upload: admin                     # or pipeline
+db_groups:
+  - id: orders
+    cluster: us-east
+    aliases: [orders]
+    tier: gold
+```
+
+Group ids are unique across the policy, and an alias or database belongs to one group per
+cluster (the same name on two clusters is fine). The cluster name `system` is reserved. Store
+precedence: the group's `storage`, then its cluster's, then `default`. `targets` and the MCP
+status show each group's cluster.
+
 ## Storage
 
 One store, `default`, comes from the environment (`BACKUP_BUCKET`, `CLOUD`, `AWS_REGION`,
