@@ -7,8 +7,8 @@ repo root) or `./render.sh` here. Both need graphviz (`brew install graphviz`).
 
 ![Architecture: execution surface](architecture.svg)
 
-Agentless instances; the runner runs `neo4j-admin` (backup); restore is pure Cypher; DB
-nodes pull seeds themselves. Source: [`architecture.dot`](architecture.dot).
+Neo4j servers stay agentless: the runner runs `neo4j-admin` backups, restores use Cypher, and
+servers pull seeds. Source: [`architecture.dot`](architecture.dot).
 
 ## Storage layout
 
@@ -21,7 +21,7 @@ nodes pull seeds themselves. Source: [`architecture.dot`](architecture.dot).
 
 ![Restore cutover](restore-cutover.svg)
 
-Seed a fresh physical, verify, `ALTER ALIAS`, then rollback or cleanup. Source:
+Seed a new physical, verify, `ALTER ALIAS`, then rollback or cleanup. Source:
 [`restore-cutover.dot`](restore-cutover.dot).
 
 ## Dagster pipeline
@@ -35,9 +35,9 @@ It also shows the schedules and the reconciliation sensor. Source: [`dagster-pip
 
 ![Naming authority](naming.svg)
 
-alias -> slug -> physical, the same contract in `naming.sh` and `naming.py`. Source:
+`alias -> slug -> physical`, the same rules in `naming.sh` and `naming.py`. Source:
 [`naming.dot`](naming.dot).
 
 ---
 
-SVGs are generated artifacts; re-render after editing a `.dot`.
+The SVGs are generated; re-render after editing a `.dot`.

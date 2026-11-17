@@ -32,7 +32,7 @@ def say(line=""):
 
 async def call(session, tool, args):
     shown = ", ".join(f"{k}={v!r}" for k, v in args.items())
-    print(f"{B}agent -> {tool}({shown}){N}")
+    print(f"{B}mcp> {tool}({shown}){N}")
     out = payload(await session.call_tool(tool, args))
     if out.get("ok") is False and not out.get("needs_confirmation"):
         print(json.dumps(out, indent=2))
@@ -52,40 +52,35 @@ async def main(group, until, ticket):
                 "group": group, "until": until, "ticket": ticket})
             steps = [ln for ln in prompt.messages[0].content.text.splitlines() if ln[:2] in
                      {f"{i}." for i in range(1, 10)}]
-            print(f"{B}operator:{N} \"put {group} back to just before the delete, {ticket}\"")
-            say(f"the agent loads the restore_request prompt: {len(steps)} steps, "
-                f"a stop for your yes before the restore")
+            say(f"prompt restore_request({group}, {until}, {ticket}): {len(steps)} steps, "
+                f"operator approval before run_restore")
 
             plan = await call(session, "restore_plan",
                               {"group": group, "until": until, "ticket": ticket})
             for m in plan["points"]["members"]:
                 for c in m["chains"]:
-                    say(f"{m['member']:12} can go back to any time from {short(c['from'])} "
-                        f"to {short(c['to'])}")
-            say(f"message for the customer: {plan['message']}")
+                    say(f"{m['member']:12} restorable from {short(c['from'])} to {short(c['to'])}")
+            say(f"customer message: {plan['message']}")
 
             prev = await call(session, "preview_restore", {"group": group, "until": until})
             members = prev["plan"]["members"]
             for m in members:
                 what = (f"replay to {short(m['seed']['until'])}" if m["seed"].get("until")
-                        else "no change after that time, seed its last backup")
-                say(f"{m['alias']:12} {what}; then move the alias off {m['old']}")
-            print(f"{B}agent:{N} \"This restores {len(members)} databases to {short(until)}. "
-                  f"Go ahead?\"")
-            print(f"{B}operator:{N} \"yes\"")
+                        else "seed from its last backup (unchanged since)")
+                say(f"{m['alias']:12} {what}, then swap the alias from {m['old']}")
+            say(f"approved by operator: restore {len(members)} databases to {short(until)}")
 
             done = await call(session, "run_restore", {
                 "group": group, "until": until, "confirm": True, "ticket": ticket,
                 "reason": "orders deleted by mistake"})
             for m in done["restored"]["members"]:
-                say(f"{m['alias']:12} alias moved: {m['old']} -> {m['newdb']}")
+                say(f"{m['alias']:12} alias {m['old']} -> {m['newdb']}")
             base = done.get("baseline") or []
             say(f"baseline full backups: {len(base)}")
 
-            print(f"{B}agent:{N} \"Done. If they want it undone, rollback points back:\"")
             rb = await call(session, "run_rollback", {"group": group, "dry_run": True})
             for m in rb["plan"]["members"] if "plan" in rb else rb.get("members", []):
-                say(f"{m['alias']:12} undo would point back at {m['newdb']}")
+                say(f"{m['alias']:12} rollback target {m['newdb']}")
 
 
 if __name__ == "__main__":

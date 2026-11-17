@@ -38,17 +38,17 @@ Logs go to stderr, so stdout stays parseable.
 | `0` | `OK` | The operation succeeded. |
 | `1` | `FAILURE` | The operation ran and failed, for example a refused restore. |
 | `2` | `USAGE` | Bad arguments or an unknown command. |
-| `3` | `GUARD` | A guard refused: no `--confirm` on a destructive op, or a failed precondition. |
+| `3` | `GUARD` | A guard refused: a destructive op lacks `--confirm`, or a precondition failed. |
 
 ## Guards
 
-- `--dry-run` on every mutating command prints the plan and exits `0`. It reads Neo4j and the store but changes neither.
+- `--dry-run` on every mutating command prints the plan and exits `0`. It reads Neo4j and the store and leaves both unchanged.
 - Destructive ops (`restore --replace`, `prune`) list in `result` what they drop, create, swap or delete.
-- Destructive ops need `--confirm`. There are no prompts: without it the command is a `GUARD` refusal.
+- Destructive ops need `--confirm` and skip interactive prompts. A run lacking it is a `GUARD` refusal.
 - `--ticket` and `--reason` (one line each, up to 500 characters) go to stderr and to `result.ticket` and `result.reason`.
   They also appear in dry-run and refusal envelopes.
-- With `NEO4J_BACKUP_REQUIRE_TICKET=true`, an applied change without `--ticket` is refused (`ticket_required`).
-  `--dry-run` never needs a ticket.
+- With `NEO4J_BACKUP_REQUIRE_TICKET=true`, an applied change needs `--ticket` or is refused (`ticket_required`).
+  `--dry-run` runs ticket-free.
 
 ## Error kinds
 

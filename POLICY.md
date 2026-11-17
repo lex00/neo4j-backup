@@ -1,26 +1,27 @@
 # Policy
 
 The policy is a YAML file that lists the database groups, their schedule tiers and their retention.
+Terms (group, member, alias, tier and seed): [GLOSSARY.md](GLOSSARY.md).
 
 - Loaded from `NEO4J_BACKUP_POLICY` (a path or `s3://bucket/key.yaml`).
 - Every field: [POLICY-FIELDS.md](POLICY-FIELDS.md). Schema: `orchestrator/neo4j_backup_core/policy.py`.
 - Unknown keys, tiers or stores and bad crons or names fail the load.
-  Check a file before shipping it with `neo4j-backup policy validate <file>`.
+  `neo4j-backup policy validate <file>` checks a file before shipping.
 
 ## Policy or environment
 
-The policy says what each customer gets. The environment says how this installation reaches things.
+The policy holds per-customer settings. The environment holds this installation's connections.
 
 | In the policy | In the environment ([ENVIRONMENT.md](ENVIRONMENT.md)) |
 |---|---|
 | groups, tiers, profiles, `load:` | `NEO4J_BACKUP_POLICY`, `POLICY_CACHE_TTL`, `POLICY_LOADER` |
-| named `clusters:` and `storage:` | the `default` cluster and store, unless the policy names them |
+| named `clusters:` and `storage:` | the `default` cluster and store, when the policy omits them |
 | secret references | the secrets, `SECRET_PROVIDER` and cloud credentials |
 | `naming:`, `overrides`, `dbms:`, `schedules:` | runner settings, `BACKUP_UPLOAD` and hooks (`NAMING`, `CUTOVER_STRATEGY`) |
 
 ## A complete policy
 
-Copy this and delete what you don't need.
+Copy this and trim it.
 
 ```yaml
 storage:                            # named stores; omit to use the environment's one store
@@ -97,8 +98,8 @@ db_groups:
 
 ## Clusters
 
-The `default` cluster comes from the environment (`NEO4J_BOLT_URI`, `NEO4J_BACKUP_SOURCE`, ...)
-unless `clusters:` defines it. A group picks a cluster with `cluster:`.
+The `default` cluster comes from the environment (`NEO4J_BOLT_URI`, `NEO4J_BACKUP_SOURCE`, ...).
+A `default` entry under `clusters:` replaces it. A group picks a cluster with `cluster:`.
 
 ```yaml
 clusters:
@@ -121,10 +122,11 @@ db_groups:
 
 ## Storage
 
-The `default` store comes from the environment (`BACKUP_BUCKET`, `CLOUD`) unless `storage:` defines it. Name more stores for customers whose data must be kept apart.
+The `default` store comes from the environment (`BACKUP_BUCKET`, `CLOUD`). A `default` entry under `storage:` replaces it.
+Name more stores to keep customers' data apart.
 A group's backups go to its `storage`, else its cluster's, else `default`.
 
-The Neo4j servers fetch seeds with their own cloud configuration, not the store's settings.
+The Neo4j servers fetch seeds with their own cloud configuration and ignore the store's settings.
 Every cluster must be able to read each store its groups use.
 `neo4j-backup policy check` writes a probe object to every store and exits 1 if one fails.
 
@@ -165,9 +167,9 @@ Pin a member's folder before renaming its alias or switching `slug_style`. Other
 - The `diff_cron` interval is the most a restore can lose. Use hourly for live writes, daily for reloadable data.
 - A restore replays the full and every diff after it. Weekly fulls with hourly diffs mean up to 168 diffs.
 - `retention_days` is how far back a customer can restore. Storage is about that plus one full interval.
-- `rpo_minutes` is when the freshness check pages you. Use the diff interval plus the longest backup and some slack.
+- `rpo_minutes` sets when the freshness check pages. Use the diff interval plus the longest backup and some slack.
 
-## What you usually set
+## Usual settings
 
 Per group: `id`, `aliases`, `tier` (or a `profile`) and `retention_days`. Add `topology` on a cluster.
 A group that is loaded rather than written also needs `load:`.

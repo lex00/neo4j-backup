@@ -1,0 +1,7 @@
+{
+  "name": "textlint-rule-plain-positive",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Site style: no sentence starts with What or That; positive framing (no negations in prose)",
+  "main": "index.js"
+}

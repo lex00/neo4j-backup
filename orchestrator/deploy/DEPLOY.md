@@ -1,7 +1,7 @@
 # Deploying on Dagster
 
-Run the code location on OSS Dagster (Helm or a VM) or Dagster+. See the [Dagster page](../README.md)
-for what it defines and [ENVIRONMENT.md](../../ENVIRONMENT.md) for every variable.
+The code location runs on OSS Dagster (Helm or a VM) or Dagster+. The [Dagster page](../README.md)
+lists its jobs and assets; [ENVIRONMENT.md](../../ENVIRONMENT.md) lists every variable.
 
 Requirements: Dagster 1.10 or later and Python 3.10 or later.
 Prepare the Neo4j servers as in [GETTING-STARTED.md](../../GETTING-STARTED.md#prepare-your-neo4j-servers).
@@ -40,7 +40,7 @@ helm upgrade --install dagster dagster/dagster -f your-values.yaml -f orchestrat
 
 Keep `includeConfigInLaunchedRuns`, which gives run pods the code server's environment and volumes.
 
-### Without Helm
+### Workspace file or Dagster+
 
 OSS `workspace.yaml` (the image's default command starts the code server):
 
@@ -58,7 +58,7 @@ locations:
     image: <registry>/neo4j-backup-dagster:0.7.0
 ```
 
-Without Helm, merge [`dagster.yaml`](dagster.yaml) into the instance's for the run limits. Check the
+Outside Helm, merge [`dagster.yaml`](dagster.yaml) into the instance's for the run limits. Check the
 location with `dagster definitions validate -m neo4j_backup_dagster.definitions`.
 
 ## 3. Concurrency
@@ -90,7 +90,7 @@ With `RUNNER_MODE=k8s` each neo4j-admin command is a pod (`PipesK8sClient`):
 2. Size the pods with the `RUNNER_*` variables.
 3. Give the pods credentials with `RUNNER_SERVICE_ACCOUNT` (IRSA, workload identity) or `RUNNER_SECRET_ENV`.
 
-`BACKUP_UPLOAD=pipeline` is refused here, so rely on bucket default encryption.
+This mode refuses `BACKUP_UPLOAD=pipeline`; use bucket default encryption.
 See [Permissions](../../ENVIRONMENT.md#permissions).
 
 ## 5. Encryption and per-group keys
@@ -103,7 +103,7 @@ The Neo4j servers need read access and `kms:Decrypt` on each of them.
 
 1. Set `NEO4J_BACKUP_ALERT_WEBHOOK` (and `DAGSTER_BASE_URL`) to get failed runs posted.
 2. Try one group: materialize the `backup` asset for its partitions (`<group>/<alias>`) with
-    kind `FULL`, then `verify`. Launch `restore_group` with `dry_run: true`, then without it on a test
+    kind `FULL`, then `verify`. Launch `restore_group` with `dry_run: true`, then with `dry_run: false` on a test
     group ([Try a test group](../../workflows/onboard.md#try-a-test-group)).
 
 3. Turn on `reconcile_registry`, the tier schedules and `status_check`, or set `schedules: running`
@@ -113,7 +113,7 @@ The Neo4j servers need read access and `kms:Decrypt` on each of them.
 
 ### Reloading
 
-Reload the location after cron, tier, cluster or `schedules:` changes. New groups need no reload.
+Reload the location after cron, tier, cluster or `schedules:` changes. New groups appear on their own.
 Use Reload in the UI, or on Helm:
 
 ```bash
@@ -132,7 +132,7 @@ kubectl run neo4j-backup-ops --rm -it --image=<registry>/neo4j-backup-dagster:0.
   --env=NEO4J_BACKUP_POLICY=s3://ops-config/neo4j-backup/policy.yaml -- bash
 ```
 
-In the second form also pass the secret's variables (or add `envFrom` to the overrides).
+The second form also needs the secret's variables (or `envFrom` in the overrides).
 
 ## Upgrading
 

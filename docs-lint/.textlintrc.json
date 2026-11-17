@@ -1,6 +1,14 @@
 {
   "rules": {
-    "sentence-length": { "max": 120, "skipPatterns": ["/`[^`]*`/"] },
-    "max-comma": { "max": 3 }
+    "sentence-length": {
+      "max": 120,
+      "skipPatterns": [
+        "/`[^`]*`/"
+      ]
+    },
+    "max-comma": {
+      "max": 3
+    },
+    "plain-positive": true
   }
 }

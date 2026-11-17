@@ -25,3 +25,6 @@ workflows/load.md
 workflows/change.md
 workflows/recover.md
 POLICY-FIELDS.md
+CHANGELOG.md
+RELEASING.md
+examples/ci/README.md

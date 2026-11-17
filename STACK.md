@@ -1,8 +1,8 @@
 # Local Dev Stack
 
 One Neo4j Enterprise server, the floci S3 and KMS emulator and a runner with `neo4j-admin`,
-driven by `just`. It needs Docker with Docker Compose.
-[Getting started](GETTING-STARTED.md) walks through it.
+driven by `just`. It needs Docker Compose.
+Walkthrough: [Getting started](GETTING-STARTED.md). Terms: [glossary](GLOSSARY.md).
 
 ## Recipes
 
@@ -40,8 +40,8 @@ any credentials. The endpoint is `http://s3:4566` inside the compose network and
 `http://localhost:9000` on the host.
 
 `docker/create-bucket.sh` creates the `neo4j-backups` bucket. Its default encryption is the KMS key
-`alias/demo-group-key`. floci records the default but doesn't apply it, so
-`neo4j-admin`'s direct writes are unencrypted locally. To see encrypted writes, run with
+`alias/demo-group-key`. floci records the default and skips applying it, so
+`neo4j-admin`'s direct writes stay unencrypted locally. To see encrypted writes, run with
 `BACKUP_UPLOAD=pipeline` and `S3_SSE=aws:kms`. Real S3 applies the default to every write.
 
 ## A three-server cluster
@@ -72,11 +72,11 @@ same bucket. `just move-smoke` uses it as cluster `west` to test `restore --to-c
 `just azure-smoke` starts Azurite (`--profile azure`) and tests the Azure backend: upload, copy and
 download. It needs a backup in the bucket first.
 
-## What's validated
+## Validation status
 
 Every smoke runs against a local stack: Neo4j 2026.05 Enterprise in Docker, S3 emulated by floci.
 
-| Area | Validated on | Not validated |
+| Area | Validated on | Next to validate |
 |---|---|---|
 | Neo4j topology | one server; a three-server cluster in Docker; two servers for a cross-cluster restore | a production cluster across hosts or zones |
 | Object store | S3 API on floci; Azure on Azurite; GCS against fakes | real S3, Azure Blob and GCS; SSE-KMS with a real key |

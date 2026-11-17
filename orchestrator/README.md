@@ -2,15 +2,16 @@
 
 The `neo4j_backup_dagster` code location runs the policy's jobs in Dagster. It shares
 `neo4j_backup_core` with the CLI, the MCP server and the [Airflow DAGs](../airflow/README.md).
-To run it in production, see [deploy/DEPLOY.md](deploy/DEPLOY.md).
+Production deployment: [deploy/DEPLOY.md](deploy/DEPLOY.md).
+Glossary: [group, member, tier and chain](../GLOSSARY.md).
 
-## What it defines
+## Definitions
 
 Assets partitioned by `group/member`, kept in step with the policy by the `reconcile_registry` sensor:
 
 | Asset | A materialization |
 |---|---|
-| `backup` | Backs up the member's database. The `backup_taken` check warns when nothing was written. |
+| `backup` | Backs up the member's database. The `backup_taken` check warns on an empty write. |
 | `verify` | Aggregates a copy of the newest chain, runs `neo4j-admin database check` on it, deletes it. |
 | `aggregate` | Collapses the chain into one full in place, removing point-in-time restore inside it. |
 
@@ -31,18 +32,18 @@ Schedules are built from the policy when the location loads:
 |---|---|
 | `<tier>_full`, `<tier>_diff` | `full_cron`, `diff_cron` |
 | `<tier>_verify` | `verify_cron` (default daily 06:00) |
-| `<tier>_aggregate` | `aggregate_cron` (no default) |
+| `<tier>_aggregate` | `aggregate_cron` (default: unset) |
 | `<tier>_prune`, `<tier>_cleanup` | `prune_cron` (default Sundays 07:00), `cleanup_cron` |
 | `<tier>_rebuild` | `rebuild_cron`, for `load.mode: rebuild` groups |
 | `<cluster>_dbms_metadata`, `<cluster>_dbms_system` | `dbms.metadata_cron`, `dbms.system_backup_cron` |
 | `status_check` | `dbms.status_cron` (default every 15 minutes) |
 
-Schedules and `reconcile_registry` start stopped unless the policy says `schedules: running`.
+Schedules and `reconcile_registry` start stopped; the policy key `schedules: running` starts them.
 Turn them on together: schedules only request partitions the sensor has created.
 
 ## Configuration
 
-| What | Where |
+| Setting | Where |
 |---|---|
 | Groups, tiers, crons, retention | the policy ([POLICY.md](../POLICY.md)), named by `NEO4J_BACKUP_POLICY` |
 | More clusters and stores | the policy's `clusters:` and `storage:` |
@@ -72,6 +73,6 @@ NEO4J_PASSWORD=x NEO4J_BACKUP_POLICY=policies/demo.yaml \
   dagster definitions validate -m neo4j_backup_dagster.definitions
 ```
 
-Smoke scripts against the [local stack](../STACK.md) are `orchestrator/smoke_*.py`, for example
+Smoke scripts for the [local stack](../STACK.md): `orchestrator/smoke_*.py`, such as
 `smoke_local.py` and `smoke_k8s.py`.
 `tests/test_naming_parity.py` checks that `naming.py` matches `bootstrap/naming.sh`.

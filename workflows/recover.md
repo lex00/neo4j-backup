@@ -1,7 +1,7 @@
 # Recover or move a group
 
-A cluster is lost, or a group moves to another cluster. Both clusters must be in the policy's `clusters:`.
-The source must be down, or fenced off with `fence_source`.
+Restore groups from a lost cluster, or move a group to another cluster.
+Both clusters must be in the policy's `clusters:`. The source must be down, or fenced off with `fence_source`.
 
 === "Agent (MCP)"
 
@@ -10,9 +10,9 @@ The source must be down, or fenced off with `fence_source`.
 
     1. Names the groups on the lost cluster with `list_targets`, and flags stale ones from `coverage_report`.
     2. Shows every group's seeds and the metadata it replays with `run_restore_to_cluster(dry_run=true)`.
-        If the source still answers it stops: fencing it is your call.
+        If the source still answers, it stops: fencing is the operator's call.
 
-    3. After your yes, calls it with `confirm=true` and shows the baseline per group.
+    3. After the operator approves, calls it with `confirm=true` and shows the baseline per group.
 
     For one group, call `run_restore_to_cluster(to_cluster, group)` directly, dry_run first.
 
@@ -42,11 +42,11 @@ First it checks that the target answers and every member has a seed (`until` wor
 
 2. It seeds every member. The target's servers must read the group's store.
 3. It grants privileges under the new names, creates or swaps the aliases, and takes baseline fulls.
-4. It fences the groups on the source in `_state/<group>.json`, so two clusters never write one chain.
+4. It fences the groups on the source in `_state/<group>.json`, so each chain has one writing cluster.
 
 A lost source needs a recent metadata export. The `<cluster>_dbms_metadata` schedule takes one.
 By hand: `neo4j-backup metadata export` or `run_metadata_export`.
 
-The policy isn't edited. For a permanent move, set `cluster: west` on the groups, which lifts the fence.
-`--member`, `--from-load`, `--from-dump`, `--replace` and `--check` don't combine with `--to-cluster`.
-See [RECOVERY.md](../RECOVERY.md) for rebuilding the cluster itself.
+The policy stays unchanged. For a permanent move, set `cluster: west` on the groups, which lifts the fence.
+`--member`, `--from-load`, `--from-dump`, `--replace` and `--check` conflict with `--to-cluster`.
+[RECOVERY.md](../RECOVERY.md) covers rebuilding the cluster.

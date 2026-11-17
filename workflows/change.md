@@ -2,13 +2,13 @@
 
 ## Change a tier
 
-Change the group's `tier` in the policy and it moves to that tier's schedules.
+Change the group's `tier` in the policy and it moves to that [tier's](../GLOSSARY.md) schedules.
 If the new tier's fulls are further apart than `retention_days`, backups are kept longer
 (see [POLICY.md](../POLICY.md#choosing-tiers-retention-and-rpo)).
 
 ## Offboard
 
-A customer leaves. Retire the group instead of removing it, so its backups stay restorable for a while:
+When a customer leaves, retire the group so its backups stay restorable for a set period:
 
 ```yaml
 - id: shop
@@ -19,7 +19,7 @@ A customer leaves. Retire the group instead of removing it, so its backups stay 
   retire_after_days: 90       # default: the group's retention_days
 ```
 
-Ship the policy. The group's schedules stop, but restores still work.
+Ship the policy. The group's schedules stop, and restores keep working.
 From the `deletes_on` day, prune deletes the members' folders.
 
 === "Agent (MCP)"
@@ -46,7 +46,7 @@ From the `deletes_on` day, prune deletes the members' folders.
 
     `neo4j_prune_<tier>` deletes the folders from `deletes_on`.
 
-The tool leaves two steps to you. Drop the aliases and databases after the last restore you might need.
+Two steps stay manual. Drop the aliases and databases after the last restore you might need.
 Once the data is gone, remove the group from the policy.
 
-A group removed without retiring keeps its backups. `status` lists its folder under `unmanaged`.
+A group removed from the policy before retiring keeps its backups. `status` lists its folder under `unmanaged`.

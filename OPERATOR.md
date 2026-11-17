@@ -1,23 +1,24 @@
 # Operator workflows
 
-For the platform team that runs Neo4j for other teams. When customers need a restore, they ask you.
-If you haven't run the tool yet, start with [Getting started](GETTING-STARTED.md).
+Six workflows cover the operator's work. Each has its own page, linked in the table below.
+New to the tool: start with [Getting started](GETTING-STARTED.md). Terms are in the [glossary](GLOSSARY.md).
 
 ## How it fits together
 
-- The [policy](POLICY.md) lists groups of databases, each with a tier (when backups run) and a retention.
+- The [policy](POLICY.md) lists groups of databases. Each group has a tier (the backup schedule) and a retention period.
   A group restores to one instant.
-- A runner with `neo4j-admin` pulls each backup into the bucket. Nothing runs on the database servers.
-- A restore seeds a new database from a backup and moves the customer's alias to it.
-  The old database stays until you drop it, so applications must connect through the alias.
-Schedulers run the routine backups. You run the six workflows below, by hand or through an agent.
-Approvals stay with your own process. The tool's guard is a preview (`--dry-run`, `dry_run=true`) and an explicit confirm.
+- A runner with `neo4j-admin` pulls each backup into object storage. The database servers run only Neo4j.
+- A restore seeds a new database from a backup and moves the tenant's alias to it.
+  The old database stays until cleanup, so applications connect through the alias.
+
+A scheduler (Dagster, Airflow or cron) runs the routine backups. Operators run the workflows by hand or through an agent.
+Every change has a preview (`--dry-run`, `dry_run=true`) and an explicit confirm. Approvals follow your own change process.
 
 ## Workflows
 
-Each workflow page has a tab per path: an agent on the [MCP server](MCP.md), the CLI, Dagster and Airflow.
-The agent path runs the workflow's prompt, which previews every change and waits for your yes.
-Only the restore jobs preview in Dagster and Airflow (`dry_run`), so preview the others with the agent or the CLI.
+Each workflow page has one tab per path: an agent on the [MCP server](MCP.md), the CLI, Dagster and Airflow.
+The agent path follows the workflow's prompt: preview, operator approval, then the change.
+In Dagster and Airflow, only the restore jobs take `dry_run`. Preview the other workflows with the agent or the CLI.
 
 | Workflow | Agent prompt | CLI | Dagster | Airflow |
 |---|---|---|---|---|
@@ -31,4 +32,4 @@ Only the restore jobs preview in Dagster and Airflow (`dry_run`), so preview the
 ## Reference
 
 - Settings and hooks: [ENVIRONMENT.md](ENVIRONMENT.md).
-- CLI output and exit codes: [CLI-CONTRACT.md](CLI-CONTRACT.md). Every command, for an agent without MCP: [AGENTS.md](AGENTS.md#commands).
+- CLI output and exit codes: [CLI-CONTRACT.md](CLI-CONTRACT.md). Every command, for agents on the CLI: [AGENTS.md](AGENTS.md#commands).

@@ -2,13 +2,13 @@
 
 This repo backs up and restores Neo4j Enterprise databases from a policy.
 An agent drives it through the `neo4j-backup` CLI, which follows [CLI-CONTRACT.md](CLI-CONTRACT.md).
-Follow the safety rules below without exception.
+Terms: [GLOSSARY.md](GLOSSARY.md). Follow the safety rules below in every case.
 
 ## Safety rules
 
 - Read-only commands and any `--dry-run` are safe to run on your own.
-- Never pass `--confirm` until a human has approved that exact action.
-  Mutating commands refuse to run without it.
+- Pass `--confirm` only after a human approves that exact action.
+  A mutating command missing it exits `3`.
 - Run a destructive command with `--dry-run` first and show the human the plan. Then propose it with `--confirm`.
 
 ## How to call it
@@ -25,12 +25,13 @@ Parse the envelope on stdout:
 { "ok": true, "op": "verify", "group": "demo", "result": { ... }, "error": null }
 ```
 
-- On `ok: false`, stop and report `error.kind` and `error.msg`. Do not retry blindly.
+- On `ok: false`, stop and report `error.kind` and `error.msg`. Retry only after a fix or a human's request.
 - Exit codes: `0` success, `1` failed, `2` bad arguments, `3` a guard refused.
-- Exit `3` means "get human confirmation" or "fix the precondition". Do not work around it.
+- Exit `3` means "get human confirmation" or "fix the precondition". Those are the only two ways forward.
 - Logs and neo4j-admin output go to stderr.
 
-Configuration comes from the environment and the policy file ([ENVIRONMENT.md](ENVIRONMENT.md)). Do not invent flags for it.
+Configuration comes from the environment and the policy file ([ENVIRONMENT.md](ENVIRONMENT.md)).
+Use only the flags that `--help` lists.
 
 ## Commands
 
@@ -38,15 +39,15 @@ The read commands, `backup` and `aggregate` take `--tenant <t>` in place of a gr
 Commands marked "yes" (and `export`) take `--dry-run`, `--confirm`, `--ticket` and `--reason`.
 Run `neo4j-backup <command> --help` for all flags.
 
-| Command | What it does | Mutates? |
+| Command | Action | Mutates? |
 |---|---|---|
-| `targets [<group>]` | List the policy's groups and members | no |
-| `status [<group>]` | Freshness against `rpo_minutes`; `--stale` exits 1 if any target is stale | no |
-| `restore-points <group>` | What each member can be restored to | no |
-| `policy show <group>` | A group's effective settings and where each came from | no |
-| `policy validate <file>` | Validate a policy file; exit `2` if invalid | no |
+| `targets [<group>]` | List the policy's groups and members | read-only |
+| `status [<group>]` | Freshness against `rpo_minutes`; `--stale` exits 1 if any target is stale | read-only |
+| `restore-points <group>` | Each member's restore windows | read-only |
+| `policy show <group>` | A group's effective settings and where each came from | read-only |
+| `policy validate <file>` | Validate a policy file; exit `2` if invalid | read-only |
 | `policy check` | Probe every store the policy uses | probe only |
-| `verify <group>` | Consistency-check the latest backups | no |
+| `verify <group>` | Consistency-check the latest backups | read-only |
 | `backup <group>` | Back up every database in a group (`--kind AUTO\|FULL\|DIFF`) | adds artifacts |
 | `export <group>` | A `.dump` per member at `--until` or the latest backup | adds artifacts |
 | `metadata export` | Export users, roles and aliases as Cypher | adds artifact |
@@ -62,12 +63,12 @@ Run `neo4j-backup <command> --help` for all flags.
 | `metadata restore` | Replay a metadata export into `system` | yes |
 
 Backup: each entry in `result.backups` has `taken` (`full` or `diff`).
-A `--kind DIFF` for a database with no full yet is skipped and listed in `result.needs_full`.
+A `--kind DIFF` for a database lacking a full is skipped and listed in `result.needs_full`.
 Follow up with `--kind FULL`.
 
 Restore:
 
-- `--until <ISO-8601>` restores to a point in time and needs a diff chain. A time with no offset is UTC.
+- `--until <ISO-8601>` restores to a point in time and needs a diff chain. A time lacking an offset is read as UTC.
 - After a restore the CLI takes a full backup of each restored database (`--no-baseline` skips it).
   If that fails, the restore stays applied with error kind `baseline_failed`. Rerun `backup <group> --kind FULL`.
 - `--replace` (by-name groups only) drops the existing database first. The dry-run lists it under `drops`.
@@ -77,15 +78,15 @@ Restore:
 
 | Operator asks | Command |
 |---|---|
-| "What can I back up here?" | `neo4j-backup --json targets` |
+| "List backup targets." | `neo4j-backup --json targets` |
 | "Is anything stale?" | `neo4j-backup --json status --stale` |
 | "Back up the demo group." | `neo4j-backup --json backup demo` |
 | "Is the latest demo backup restorable?" | `neo4j-backup --json verify demo` |
-| "Restore demo to just before 14:32, show me first." | `neo4j-backup --json restore demo --until 2026-07-11T14:32:00 --dry-run` |
+| "Restore demo to right before 14:32, show me first." | `neo4j-backup --json restore demo --until 2026-07-11T14:32:00 --dry-run` |
 | After approval | `neo4j-backup --json restore demo --until 2026-07-11T14:32:00 --confirm` |
-| "What would pruning delete?" | `neo4j-backup --json prune --dry-run` |
+| "Preview a prune." | `neo4j-backup --json prune --dry-run` |
 
 ## See also
 
 If your agent supports MCP, prefer the [MCP server](MCP.md): typed tools and a prompt per workflow.
-The workflows are in [OPERATOR.md](OPERATOR.md).
+Operator workflows: [OPERATOR.md](OPERATOR.md).
