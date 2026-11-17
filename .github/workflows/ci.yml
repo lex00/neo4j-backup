@@ -29,6 +29,19 @@ jobs:
           NEO4J_PASSWORD: dummy
         run: dagster definitions validate -m neo4j_backup_dagster.definitions
 
+  docs-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: prose lint (sentence length, commas) on the docs site pages
+        working-directory: docs-lint
+        run: |
+          npm ci
+          npx textlint --config .textlintrc.json $(sed 's|^|../|' pages.txt)
+
   airflow-dags:
     runs-on: ubuntu-latest
     steps:

@@ -1,84 +1,64 @@
 # Glossary
 
 Alias
-: The name applications connect to (`CREATE ALIAS orders FOR DATABASE orders-20261116t0200`).
-  A restore points it at a new database, so applications never change their connection.
+: The name applications connect to. A restore points it at a new database.
 
 Group
-: A set of aliases (or databases) in the policy that are backed up on one schedule and restored
-  to one instant. Usually one customer, or one customer's related databases.
+: Aliases in the policy backed up on one schedule and restored to one instant.
 
 Member
-: One alias (or, in `by-name` mode, one database) in a group. A Neo4j machine is a "server",
-  never a member.
+: One alias, or one database in `by-name` mode. A Neo4j machine is a "server", never a member.
 
 Physical database
-: The real database behind an alias. Its name is the alias's slug plus a timestamp, and a
-  restore creates a new one.
+: The real database behind an alias, named slug plus timestamp. Each restore creates a new one.
 
 Slug
-: The alias made safe for database names and bucket paths (`acme.orders` becomes
-  `acme-orders`). It names the member's folder in the bucket.
+: The alias made safe for database names and bucket paths (`acme.orders` becomes `acme-orders`).
 
 Tier
-: A named schedule in the policy: when fulls, differentials, verifies and prunes run. Every
-  group has one.
+: A named schedule in the policy: when fulls, differentials, verifies and prunes run.
 
 Full and differential backup
-: A full is a complete copy of a database. A differential holds only the changes since the
-  previous backup, so it is small and quick.
+: A full is a complete copy. A differential holds the changes since the previous backup.
 
 Chain
-: A full and the differentials taken after it. A restore replays the chain up to the point
-  you ask for; prune deletes whole chains only.
+: A full and the differentials after it. Prune deletes whole chains only.
 
 Lane
-: Full backups and differential backups run with separate concurrency limits, called the
-  full lane and the diff lane, so a long full doesn't hold up the hourly diffs.
+: Fulls and differentials have separate concurrency limits (the full lane and the diff lane).
 
 Runner
-: Where `neo4j-admin` runs: a process on the worker (`RUNNER_MODE=subprocess`) or a Kubernetes
-  pod per command (`RUNNER_MODE=k8s`).
+: Where `neo4j-admin` runs: a local process (`RUNNER_MODE=subprocess`) or a pod per command (`RUNNER_MODE=k8s`).
 
 Seed
-: How a restore creates a database: `CREATE DATABASE … OPTIONS {seedURI: …}` tells the Neo4j
-  servers to fetch a backup from the bucket and start the database from it.
+: How a restore creates a database: the servers fetch a backup from the bucket (`seedURI`).
 
 Cutover
-: The moment a restore points the alias at the new database. Before it, nothing changes for
-  applications; after it, `rollback` points the alias back.
+: The moment a restore points the alias at the new database. `rollback` points it back.
 
 Baseline
-: A full backup taken right after a restore or load, so the next differentials have a full of
-  the new database to build on.
+: A full backup right after a restore or load.
 
 RPO, `rpo_minutes`
-: Recovery point objective: how old the newest backup may get before the database counts as
-  stale and the freshness check fails.
+: How old the newest backup may get before the member is stale.
 
 RTO, `rto_minutes`
-: Recovery time objective: how long a restore waits for a seed to come online before it gives up.
+: How long a restore waits for the new database to come online.
 
 `by_design`
-: The freshness state of a member that is not backed up on purpose (a read-only group rebuilt
-  from source), so it is never reported stale.
+: A member not backed up on purpose, such as a read-only rebuilt group. It is never stale.
 
 Fence
-: A marker in the bucket that a restore of a group is in progress. Backups of that group wait
-  for it, so they don't back up a database that is about to be replaced.
+: A bucket marker for a restore in progress. The group's backups wait for it.
 
 Sidecar
-: A small JSON file next to each backup in the bucket (`.backup.json`) with its kind,
-  database, store id and time, so the tool can build chains without opening backups.
+: The `.backup.json` file next to each backup, describing it.
 
 Lock
-: `_locks/<group>.lock` in the bucket. A group's backup, verify, aggregate and load take it, so
-  they never run at the same time whoever started them.
+: `_locks/<group>.lock`. It stops a group's backup, verify, aggregate and load from overlapping.
 
 Profile
-: A named set of group settings in the policy (`app-live`, `data-interval`) that groups use
-  and override.
+: A named set of group settings that groups use and override.
 
 Tenant
-: A label on groups for selecting a customer's groups at once (`--tenant acme`). It is not
-  access control.
+: A label for selecting a customer's groups (`--tenant acme`). It is not access control.

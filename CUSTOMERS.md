@@ -1,83 +1,55 @@
 # Customer guide
 
-For teams whose Neo4j databases are run by their organization's platform team. The platform team
-backs up your databases and restores them when you ask. This page explains what you get, how to ask
-for a restore, and what to expect while it happens.
-
-Your platform team may have changed some of the defaults described here; their word wins.
+Your platform team backs up your Neo4j databases and restores them when you ask.
+Your platform team may have changed some defaults here. Their word wins.
 
 ## Connect through your alias
 
-Your database has an **alias**, a stable name such as `orders`, and a database behind it with a
-name like `orders-20261115t204747`. Always connect with the alias.
-
-A restore creates a new database from a backup and moves your alias to it, so the database name
-changes every time. Anything that connects with the database name (an application, a BI tool, a
-script) stops working after a restore. The alias keeps working.
+Your database has an alias, a stable name such as `orders`. Always connect with the alias.
+A restore moves it to a new database, so the name behind it (`orders-20261115t204747`) changes.
 
 ## What your backups give you
 
-Each set of your databases belongs to a **group**, and each group has a **tier** that sets the
-backup schedule. The example tiers:
+Your databases belong to a group, and each group has a tier that sets the backup schedule:
 
-| Tier | Full backup | Differential backup | Most you can lose in a restore |
-|---|---|---|---|
-| gold | daily | hourly | about an hour |
-| silver | weekly | every 6 hours | about 6 hours |
-| bronze | weekly | daily | about a day |
+| Tier | Most you can lose in a restore |
+|---|---|
+| gold | about an hour |
+| silver | about 6 hours |
+| bronze | about a day |
 
-You can ask for your databases back as they were at the latest backup, or at any point in time
-covered by backups that are still kept (your group's retention, 7 days unless your platform team
-set otherwise). Any time with a differential backup after it can be restored exactly, to the
-second.
+You can restore to the latest backup or to any moment within your retention period.
+That period is 7 days unless your platform team set another.
 
-All databases in a group are restored together, to the same instant, so data that refers across
-them stays consistent. If you need only one of them back, say so: the platform team can restore
-just that one, and it will then no longer line up in time with the others.
+All databases in a group go back to the same moment, so data that links them stays consistent.
+If you need only one back, say so. It will then no longer line up in time with the others.
 
 ## Ask for a restore
 
 Send your platform team:
 
-- the alias (or group) to restore;
-- the point in time, in UTC (for example `2026-11-15T09:00:00Z`), or "latest";
-- whether every database in the group may go back to that time;
-- why, and any ticket number your organization uses.
+1. the alias or group to restore
+2. the time in UTC (such as `2026-11-15T09:00:00Z`), or "latest"
+3. whether every database in the group may go back to that time
+4. why, and any ticket number
 
-They will tell you what will be lost and when the switch will happen, then confirm when it's done
-with the time restored to and the new database names.
+They will tell you what will be lost and when, then confirm when it's done.
 
 ## During and after a restore
 
-- Your data goes back to the chosen time. Anything written after it is gone. If you need some
-  of those writes, export them before the restore.
-- Queries and writes in flight when the alias moves are rolled back, so make sure your
-  applications retry. On a cluster, servers may briefly disagree about where the alias points.
-- Your users keep their access. Privileges granted on your database (directly or through the
-  alias) are copied to the restored database before the switch. If your users get "Access denied"
-  through the alias after a restore, tell the platform team.
-- The old database is kept for a while, so a restore can be undone by moving the alias back.
-  Ask quickly if the restore wasn't what you needed.
+- Anything written after the chosen time is gone. Export what you need first.
+- Work in progress at the switch is cancelled, so make sure your applications retry.
+- Your users keep their access. If they get "Access denied" through the alias, tell your platform team.
+- The old database is kept for a while, so a restore can be undone. Ask quickly.
 
 ## Scheduled rebuilds
 
-If your graph is rebuilt on a schedule, the platform team can have the tool warn you before each
-rebuild (a webhook or a message): when the switch will happen and what will be lost (your writes
-since the previous load, unless they're kept). Transactions running at the switch are cancelled,
-as for a restore.
+If your data is rebuilt on a schedule, your platform team can warn you before each rebuild.
 
-## If you have credentials on the cluster
+## Please don't change your alias
 
-Some teams can run administration commands on the cluster. Please don't:
+If you can run admin commands on the cluster, don't move, drop or recreate your alias.
+Don't create or drop databases behind it, or change their access mode.
+Backups follow your alias, so ask your platform team instead.
 
-- move, drop or recreate your alias;
-- create databases behind your alias, or drop the ones the platform team manages;
-- change a database's access mode.
-
-Backups follow your alias. If it is moved to a database the platform team doesn't know about,
-backups of it can fail or protect the wrong data. Ask the platform team instead.
-
-## Not available yet
-
-A page where you can see your own backup status without asking. Until then, ask the platform
-team: they can tell you when each database was last backed up and how far back you can restore.
+To see when your databases were last backed up, ask your platform team.
