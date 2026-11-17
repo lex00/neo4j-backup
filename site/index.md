@@ -93,7 +93,7 @@ You need:
 - Applications that connect through aliases, since a restore moves the alias.
 
 The backups are plain `neo4j-admin` artifacts, so you can also [restore by hand](RECOVERY.md).
-What is tested, and on what, is in [what's validated](STACK.md#whats-validated).
+See [what's validated](STACK.md#whats-validated).
 
 Also: the [customer guide](CUSTOMERS.md) to hand to your teams, and the CLI for
 [agents](AGENTS.md), the [MCP server](MCP.md) and [CI](CI.md).

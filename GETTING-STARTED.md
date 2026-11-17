@@ -30,8 +30,7 @@ $ neo4j-backup restore demo --until 2026-11-17T06:45:40.032Z --confirm --ticket 
    orders now: 2
 ```
 
-`just try` prints a short summary of each command. The CLI itself prints JSON with `--json`.
-To run the same loop by hand:
+`just try` summarizes each command. To run the same loop by hand:
 
 1. Start the stack and the demo group from [`policies/demo.yaml`](policies/demo.yaml):
 
