@@ -15,6 +15,10 @@ object under `--json` and a documented exit code; mutating commands require `--c
 
 ## Docs
 
-- [README.md](README.md): what the project is, the environment table, and the local stack.
-- [RECOVERY.md](RECOVERY.md): the human disaster-recovery runbook.
-- [POLICY.md](POLICY.md): the backup policy schema (groups, tiers, restore modes).
+- [README.md](README.md): what the project is and where to start.
+- [OPERATOR.md](OPERATOR.md): the six operator workflows, each on its own page under workflows/.
+- [workflows/restore.md](workflows/restore.md): the restore runbook (restore points, preview, restore, undo).
+- [RECOVERY.md](RECOVERY.md): the recovery modes with the exact Cypher, for restoring by hand.
+- [POLICY.md](POLICY.md): writing the backup policy; [POLICY-FIELDS.md](POLICY-FIELDS.md) lists every field.
+- [ENVIRONMENT.md](ENVIRONMENT.md): every environment variable and its default.
+- [MCP.md](MCP.md): the operator MCP server and its tools.

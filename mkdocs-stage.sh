@@ -7,10 +7,13 @@ cd "$(dirname "$0")"
 command -v dot >/dev/null 2>&1 && ./diagrams/render.sh || echo "!! graphviz not found; SVGs may be stale"
 
 rm -rf docs
-mkdir -p docs/orchestrator/deploy docs/diagrams docs/bootstrap docs/airflow/deploy docs/examples/ci docs/policies docs/docker
+mkdir -p docs/workflows docs/stylesheets docs/orchestrator/deploy docs/diagrams docs/bootstrap docs/airflow/deploy docs/examples/ci docs/policies docs/docker
 
-cp README.md GETTING-STARTED.md OPERATOR.md CUSTOMERS.md POLICY.md RECOVERY.md DESIGN.md STACK.md CLI-CONTRACT.md AGENTS.md CI.md MCP.md IMPORT.md ENVIRONMENT.md GLOSSARY.md docs/
+cp POLICY-FIELDS.md GETTING-STARTED.md OPERATOR.md CUSTOMERS.md POLICY.md RECOVERY.md DESIGN.md STACK.md CLI-CONTRACT.md AGENTS.md CI.md MCP.md IMPORT.md ENVIRONMENT.md GLOSSARY.md docs/
 cp CHANGELOG.md RELEASING.md docs/          # linked from the README doc map
+cp site/index.md docs/                        # the site-only landing page
+cp site/stylesheets/extra.css docs/stylesheets/
+cp workflows/*.md docs/workflows/
 cp orchestrator/README.md docs/orchestrator/
 cp airflow/README.md docs/airflow/
 cp orchestrator/deploy/DEPLOY.md orchestrator/deploy/dagster.yaml orchestrator/deploy/helm-values.yaml \

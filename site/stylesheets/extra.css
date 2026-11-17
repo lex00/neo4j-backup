@@ -1,0 +1,28 @@
+/* Docs site look: a calm palette, a wider reading column, a hero on the home page. */
+:root {
+  --md-primary-fg-color: #0b5c6e;
+  --md-primary-fg-color--light: #2f8193;
+  --md-primary-fg-color--dark: #08414e;
+  --md-accent-fg-color: #e0702b;
+}
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #12809a;
+  --md-default-bg-color: #13171c;
+}
+
+.md-grid { max-width: 68rem; }
+.md-typeset { font-size: 0.82rem; line-height: 1.65; }
+.md-typeset h1 { font-weight: 700; letter-spacing: -0.01em; }
+.md-typeset h2 { font-weight: 600; margin-top: 2em; }
+
+.hero { padding: 1.5rem 0 1rem; }
+.hero h1 { font-size: 2.1rem; margin-bottom: 0.6rem; color: var(--md-default-fg-color); }
+.hero p { font-size: 1rem; max-width: 40rem; color: var(--md-default-fg-color--light); }
+.hero .md-button { margin: 0.4rem 0.6rem 0 0; }
+
+.md-typeset .grid.cards > ul > li { border-radius: 0.5rem; }
+.md-typeset .grid.cards > ul > li:hover { border-color: var(--md-accent-fg-color); }
+.md-typeset .steps > ul > li { background: var(--md-code-bg-color); }
+
+.md-typeset table:not([class]) { font-size: 0.75rem; }
+@media (max-width: 600px) { .hero h1 { font-size: 1.6rem; } }

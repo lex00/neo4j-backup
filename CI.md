@@ -1,96 +1,73 @@
 # Scheduling backups from CI
 
-Many teams have CI (often self-hosted GitLab or Forgejo) or plain cron, but no Dagster/Airflow.
-The [`neo4j-backup` CLI](CLI-CONTRACT.md) runs the same policy-driven backup/restore over the shared
-core, so a CI job is "run the CLI on a schedule." Ready-to-copy templates live in
-[`examples/ci/`](examples/ci/): [GitHub Actions](examples/ci/github-actions.yml),
-[GitLab CI](examples/ci/gitlab-ci.yml), [Forgejo Actions](examples/ci/forgejo-actions.yml).
+Without Dagster or Airflow, a CI job or cron can run the [`neo4j-backup` CLI](CLI-CONTRACT.md) on a schedule.
+Templates: [GitHub Actions](examples/ci/github-actions.yml), [GitLab CI](examples/ci/gitlab-ci.yml) and
+[Forgejo Actions](examples/ci/forgejo-actions.yml).
+This suits a handful of databases. With dozens across tiers, use Dagster or Airflow.
 
-## Who this is for
+## The runner
 
-Teams with a handful of databases and no orchestrator. CI has no concurrency lanes, no
-per-group locks across jobs, best-effort cron and limited disk; with dozens of databases across
-tiers, use Dagster or Airflow. The limits are listed under Caveats below.
+The CI runner takes the backups, so use a self-hosted runner near the database. It needs:
 
-## Execution model: the CI runner *is* the backup runner
+- `neo4j-admin` (Neo4j Enterprise tooling) on `PATH`.
+- Network access to the backup port (`6362`), Bolt (`7687`) and your object store.
+- A scratch volume sized for the largest full backup (`SCRATCH_PATH`).
 
-The job must run somewhere that can actually take a backup — DESIGN.md's central runner. That host
-(a **self-hosted** CI runner) needs:
+GitHub-hosted runners (about 14 GB disk, no `neo4j-admin`) only suit demo databases.
 
-- `neo4j-admin` on `PATH` (the Neo4j Enterprise tooling);
-- network to the database **backup port** (`6362`) and to Bolt (`7687`);
-- egress to your object store;
-- a **scratch disk sized for the largest full backup** (`SCRATCH_PATH`), on its own volume.
+## Environment
 
-GitHub-hosted runners (about 14 GB disk, a 6-hour cap, no `neo4j-admin`) suit only tiny or demo
-databases; use a self-hosted runner placed next to the database.
-
-## Secrets → environment
-
-The CLI reads the same environment as the adapters (see the orchestrator README env table). Put
-credentials in your CI's secret store and the rest in plain variables:
+Keep credentials in CI secrets. All variables are in [ENVIRONMENT.md](ENVIRONMENT.md).
 
 | Variable | Where | Notes |
 |---|---|---|
 | `NEO4J_PASSWORD` | secret | or `NEO4J_PASSWORD_REF` with `SECRET_PROVIDER=aws-sm` |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | secret | or the azure/gcp credentials for `CLOUD` |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | secret | or the Azure or GCP credentials for `CLOUD` |
 | `NEO4J_BOLT_URI` | var | `neo4j://db-host:7687` |
-| `NEO4J_BACKUP_SOURCE` | var | `db-host:6362` (backup port) |
-| `BACKUP_BUCKET`, `AWS_REGION`, `CLOUD` | var | `CLOUD` = `aws` (default) / `azure` / `gcp` |
-| `NEO4J_BACKUP_POLICY` | var | a repo path, or `s3://…` (loaded with TTL cache) |
-| `RUNNER_PAGECACHE` | var | neo4j-admin's page cache (default `512M`); raise it for large databases, within the runner's memory |
-| `SCRATCH_PATH` | var | a sized volume, not the runner's install disk |
+| `NEO4J_BACKUP_SOURCE` | var | `db-host:6362` (the backup port) |
+| `BACKUP_BUCKET`, `AWS_REGION`, `CLOUD` | var | `CLOUD` is `aws` (default), `azure` or `gcp` |
+| `NEO4J_BACKUP_POLICY` | var | a repo path, or `s3://…` (cached with a TTL) |
+| `RUNNER_PAGECACHE` | var | neo4j-admin's page cache (default `512M`). Raise it for large databases. |
+| `SCRATCH_PATH` | var | the sized scratch volume |
 
 ## Install
 
-Not on PyPI — pin a git tag (or vendor the source and `pip install ./orchestrator`):
+The package is not on PyPI. Pin a git tag:
 
 ```
 pip install "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0.7.0#subdirectory=orchestrator"
 ```
 
-Add a cloud extra if you use Azure/GCS — put it on the package name:
-`"neo4j-backup-dagster[azure] @ git+…#subdirectory=orchestrator"` (or `[gcp]`).
+For Azure or GCS, add the extra to the package name: `"neo4j-backup-dagster[azure] @ git+…"` (or `[gcp]`).
 
-## Policy crons → CLI commands
-
-The orchestrators read every schedule from the policy. A cron or CI job runs the matching
-command on the same cron:
+## Policy crons to commands
 
 | Policy cron | Command |
 |---|---|
 | `tiers.<t>.full_cron` | `neo4j-backup backup <group> --kind FULL` for each group on tier `<t>` |
-| `tiers.<t>.diff_cron` | `neo4j-backup backup <group> --kind DIFF` (then `--kind FULL` if `result.needs_full` lists any) |
+| `tiers.<t>.diff_cron` | `neo4j-backup backup <group> --kind DIFF`, then `--kind FULL` for any in `result.needs_full` |
 | `tiers.<t>.verify_cron` | `neo4j-backup verify <group>` |
 | `tiers.<t>.aggregate_cron` | `neo4j-backup aggregate <group> --confirm` |
-| `tiers.<t>.prune_cron` | `neo4j-backup prune --confirm` (all groups and the DBMS sweep; one job is enough) |
-| `tiers.<t>.rebuild_cron` | `neo4j-backup load <group> --confirm` for each `load.mode: rebuild` group on tier `<t>` (never at the same time as that group's backups: one job per group, or a lock in your CI) |
+| `tiers.<t>.prune_cron` | `neo4j-backup prune --confirm` (covers all groups and the DBMS sweep, so one job is enough) |
+| `tiers.<t>.rebuild_cron` | `neo4j-backup load <group> --confirm` for each `load.mode: rebuild` group on tier `<t>` |
 | `dbms.metadata_cron` | `neo4j-backup metadata export` |
 | `dbms.system_backup_cron` | `neo4j-backup system-backup` |
 
+Never run a rebuild at the same time as that group's backups. Use one job per group, or a lock in your CI.
 `neo4j-backup targets --tenant <t>` (or `targets <group>`) lists what a job covers.
 
 ## Gating and lanes
 
-- Exit codes gate the job. The CLI returns non-zero on failure (`1`), bad args (`2`), or a
-  refused guard (`3`); a scheduled job fails loudly on any of these. Use `--json` for
-  machine-readable logs.
-- Serialize a lane. The CLI takes the group's lock in the bucket, so two jobs on one group
-  wait for each other (up to `NEO4J_BACKUP_LOCK_WAIT`), but queue them in CI anyway. GitLab's `resource_group` is the
-  cleanest fit; GitHub and Forgejo use a `concurrency` group (Forgejo supports workflow-level
-  `concurrency` from runner v11.1, late 2025; on an older Forgejo, register the backup runner with
-  `capacity: 1` so its jobs run one at a time). Drive full vs differential from separate
-  schedules (a `LANE`/`kind` variable), the CI analogue of the orchestrators' full/diff pools.
-- Destructive commands in automation. `prune` (and `restore --replace`) require `--confirm`; in
-  a scheduled job you pass it because the schedule is the operator's standing approval. Run
-  `--dry-run` by hand first to see the blast radius.
+- The exit code gates the job: `1` failure, `2` bad arguments, `3` a refused guard. Add `--json` for parseable logs.
+- Jobs on one group wait for its lock (up to `NEO4J_BACKUP_LOCK_WAIT`). Queue them in CI as well.
+  Use GitLab's `resource_group` or a GitHub or Forgejo `concurrency` group.
+  Forgejo runners older than v11.1 need `capacity: 1` instead.
+- Run fulls and diffs from separate schedules, for example with a `LANE` variable.
+- `prune`, `aggregate` and `restore --replace` need `--confirm`. In a scheduled job the schedule is the approval.
+  Run `--dry-run` by hand first to see what it would delete.
 
-## Caveats (read before relying on this)
+## Limits
 
-- Scratch and time limits. Hosted runners cannot stage a multi-TB full; use self-hosted with a
-  sized volume. A full backup can exceed a hosted runner's job timeout.
-- Cron is best-effort. GitHub/Forgejo scheduled crons drift and occasionally skip under load:
-  fine for backups with slack in the RPO, not for tight windows.
-- No orchestration. You get scheduling and serialized lanes, not dynamic partition fan-out,
-  retries with backoff across a fleet, or the run-level observability the Dagster/Airflow adapters
-  give. Verify (`verify`) and prune on their own cadence; watch job outcomes yourself.
+- A multi-TB full can exceed a job timeout.
+- Scheduled crons on GitHub and Forgejo drift and sometimes skip. Leave slack in the RPO.
+- There is no fan-out, retry or run history. Watch job outcomes, and check freshness with `neo4j-backup status --stale` ([workflows/coverage.md](workflows/coverage.md)).

@@ -1,0 +1,13 @@
+{
+  "name": "neo4j-backup-docs-lint",
+  "private": true,
+  "description": "Prose lint for the docs site (just docs-lint)",
+  "scripts": {
+    "lint": "textlint --config .textlintrc.json"
+  },
+  "devDependencies": {
+    "textlint": "^16.1.1",
+    "textlint-rule-max-comma": "^4.0.0",
+    "textlint-rule-sentence-length": "^5.2.1"
+  }
+}

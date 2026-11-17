@@ -196,3 +196,7 @@ release version:
 # validate restore cloud-agnostically via file:// seed (#52) — needs the stack + a backup
 file-restore-smoke:
     AWS_ENDPOINT_URL_S3=http://localhost:9000 orchestrator/.venv/bin/python orchestrator/smoke_file_restore.py
+
+# prose lint for the docs site: sentences up to 120 characters, at most 3 commas (needs node)
+docs-lint:
+    cd docs-lint && npm ci --silent && npx textlint --config .textlintrc.json $(sed 's|^|../|' pages.txt)

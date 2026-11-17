@@ -1,9 +1,9 @@
 # Diagrams
 
 Graphviz (`.dot`) sources, rendered to SVG. Regenerate with `just diagrams` (from the
-repo root) or `./render.sh` here — requires graphviz (`brew install graphviz`).
+repo root) or `./render.sh` here. Both need graphviz (`brew install graphviz`).
 
-## Architecture — execution surface
+## Architecture: execution surface
 
 ![Architecture: execution surface](architecture.svg)
 
@@ -21,21 +21,21 @@ nodes pull seeds themselves. Source: [`architecture.dot`](architecture.dot).
 
 ![Restore cutover](restore-cutover.svg)
 
-Seed a fresh physical → verify → `ALTER ALIAS` → rollback / cleanup. Source:
+Seed a fresh physical, verify, `ALTER ALIAS`, then rollback or cleanup. Source:
 [`restore-cutover.dot`](restore-cutover.dot).
 
 ## Dagster pipeline
 
 ![Dagster pipeline](dagster-pipeline.svg)
 
-The code location: backup / aggregate / verify / prune assets, the restore job, schedules,
-and the reconciliation sensor. Source: [`dagster-pipeline.dot`](dagster-pipeline.dot).
+The code location: the backup, aggregate, verify and prune assets and the restore job.
+It also shows the schedules and the reconciliation sensor. Source: [`dagster-pipeline.dot`](dagster-pipeline.dot).
 
 ## Naming authority
 
 ![Naming authority](naming.svg)
 
-alias → slug → physical, the same contract in `naming.sh` and `naming.py`. Source:
+alias -> slug -> physical, the same contract in `naming.sh` and `naming.py`. Source:
 [`naming.dot`](naming.dot).
 
 ---

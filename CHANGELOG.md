@@ -7,6 +7,16 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Docs site (#260)
+- A site-only landing page with three entry points; a new look with light and dark modes and
+  top tabs (Start, Run it, Reference, Project) (#261, #262).
+- The operator guide is split into six workflow pages under `workflows/` (#263). The policy field
+  reference moved to POLICY-FIELDS.md (#264).
+- Every page cut to about half: the site went from 31.9k to 15.8k words (#265). DESIGN.md is
+  now a short decision record.
+- `just docs-lint`: textlint with sentences of at most 120 characters and 3 commas, run in CI
+  (#266).
+
 ## [0.7.0] — 2026-11-16
 
 Fixes from the novice adoption audits (#244), then from the v0.6.0 operator docs audit (#216).

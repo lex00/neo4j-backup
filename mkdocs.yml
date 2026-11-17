@@ -1,5 +1,5 @@
 site_name: Neo4j Policy-Based Backup / Restore
-site_description: Policy-driven, validated backup/restore for self-hosted Neo4j Enterprise — Dagster and Airflow orchestrators over a shared core
+site_description: Policy-driven backup and restore for self-hosted Neo4j Enterprise, run from Dagster, Airflow or the CLI
 # The markdown lives at the repo root (for GitHub); `mkdocs-stage.sh` copies the curated
 # set into docs/ for the build. Run `just docs` (or the Pages workflow).
 docs_dir: docs
@@ -13,36 +13,83 @@ theme:
   name: material
   icon:
     repo: fontawesome/brands/github
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
   features:
     - content.code.copy
+    - navigation.tabs
     - navigation.sections
     - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - toc.follow
+
+extra_css:
+  - stylesheets/extra.css
 
 nav:
-  - Home: README.md
-  - Getting started: GETTING-STARTED.md
-  - Operator guide: OPERATOR.md
-  - Customer guide: CUSTOMERS.md
-  - Reference:
-    - Policy: POLICY.md
-    - Recovery: RECOVERY.md
-    - Bulk import: IMPORT.md
-    - CLI contract: CLI-CONTRACT.md
-    - CI recipes: CI.md
-    - Operator MCP: MCP.md
-    - Agent guide: AGENTS.md
-    - Environment variables: ENVIRONMENT.md
+  - Home: index.md
+  - Start:
+    - Getting started: GETTING-STARTED.md
+    - Customer guide: CUSTOMERS.md
     - Glossary: GLOSSARY.md
-  - Orchestrators:
+  - Run it:
+    - Operator guide: OPERATOR.md
+    - Onboard a customer: workflows/onboard.md
+    - Check coverage: workflows/coverage.md
+    - Restore on request: workflows/restore.md
+    - Load data in bulk: workflows/load.md
+    - Change or offboard: workflows/change.md
+    - Recover or move: workflows/recover.md
+    - Deploy on Dagster: orchestrator/deploy/DEPLOY.md
     - Dagster: orchestrator/README.md
     - Airflow: airflow/README.md
-    - Deploying on Dagster: orchestrator/deploy/DEPLOY.md
-  - Local stack: STACK.md
-  - Design notes (history): DESIGN.md
-  - Diagrams: diagrams/README.md
+    - CI recipes: CI.md
+  - Reference:
+    - Policy: POLICY.md
+    - Policy fields: POLICY-FIELDS.md
+    - Environment variables: ENVIRONMENT.md
+    - Recovery and Cypher: RECOVERY.md
+    - Bulk import: IMPORT.md
+    - CLI contract: CLI-CONTRACT.md
+    - Agents: AGENTS.md
+    - MCP server: MCP.md
+  - Project:
+    - Local stack: STACK.md
+    - Design notes: DESIGN.md
+    - Diagrams: diagrams/README.md
+    - Changelog: CHANGELOG.md
 
 markdown_extensions:
   - admonition
   - tables
   - def_list
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg

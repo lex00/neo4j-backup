@@ -18,3 +18,4 @@ airflow/.venv/
 
 # Build artifacts of `pip install -e` (#82)
 *.egg-info/
+docs-lint/node_modules/

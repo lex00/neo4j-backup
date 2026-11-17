@@ -1,0 +1,6 @@
+{
+  "rules": {
+    "sentence-length": { "max": 120, "skipPatterns": ["/`[^`]*`/"] },
+    "max-comma": { "max": 3 }
+  }
+}
