@@ -7,6 +7,16 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### MCP built around the operator workflows (#271)
+- A prompt per workflow: `onboard`, `check_coverage`, `restore_request`, `bulk_load`, `offboard`
+  and `recover_cluster` (#272). Each previews before it changes anything and waits for the
+  operator's yes. In read-only scope it hands over the CLI commands instead.
+- New tools for steps the CLI had and MCP lacked: `validate_policy`, `policy_show`,
+  `preview_adopt`, `run_export`, `run_metadata_export`, and `backup_status(group)` (#273).
+- `coverage_report` (members by state, each stale one with a reason and the fix) and
+  `restore_plan` (restore points, preview and a message for the customer) (#274).
+- MCP.md is organized by workflow.
+
 ### Docs site (#260)
 - `just try`: the local loop in one command, as a restore request with a summary per step (#269).
   The home page leads with that restore, then a five-step adoption path (#268).

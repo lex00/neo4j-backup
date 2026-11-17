@@ -1,5 +1,7 @@
 # Change or offboard a customer
 
+An agent on the [MCP server](../MCP.md) runs the offboarding with the `offboard` prompt.
+
 ## Change a tier
 
 Change the group's `tier` in the policy and it moves to that tier's schedules.

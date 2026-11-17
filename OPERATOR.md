@@ -31,4 +31,4 @@ Approvals stay with your own process. The tool's guard is `--dry-run` to preview
 
 - Settings and hooks: [ENVIRONMENT.md](ENVIRONMENT.md).
 - Every command: [AGENTS.md](AGENTS.md#commands). Output and exit codes: [CLI-CONTRACT.md](CLI-CONTRACT.md).
-- The operator MCP server: [MCP.md](MCP.md).
+- The operator MCP server, with a prompt for each workflow above: [MCP.md](MCP.md).

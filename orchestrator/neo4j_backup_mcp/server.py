@@ -18,6 +18,7 @@ boundary is the auth boundary. Do not expose it over an unauthenticated network 
 from __future__ import annotations
 
 import functools
+import inspect
 import logging
 import os
 import sys
@@ -26,7 +27,7 @@ from neo4j_backup_core import ops
 from neo4j_backup_core.policy import SelectionError
 from neo4j_backup_core.record import TicketError
 from neo4j_backup_core.until import UntilError
-from neo4j_backup_mcp import tools
+from neo4j_backup_mcp import prompts, tools
 
 log = logging.getLogger("neo4j_backup_mcp")
 
@@ -66,12 +67,26 @@ def _audited(fn):
     return wrapper
 
 
+def _prompt(fn, writes: bool):
+    """`fn` with the server's scope bound to `writes`; the client sees only the workflow inputs."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, writes=writes, **kwargs)
+    sig = inspect.signature(fn)
+    wrapper.__signature__ = sig.replace(
+        parameters=[p for p in sig.parameters.values() if p.name != "writes"])
+    del wrapper.__wrapped__
+    return wrapper
+
+
 def build_server(mode: str | None = None) -> FastMCP:
     """Construct the server with the read/write scope from `mode` (or NEO4J_BACKUP_MCP_MODE)."""
     mode = mode or os.environ.get("NEO4J_BACKUP_MCP_MODE", "read-only")
     mcp = _import_fastmcp()("neo4j-backup")
     for fn in tools.READ_TOOLS:
         mcp.tool()(_audited(fn))
+    for fn in prompts.PROMPTS:  # one per operator workflow (#272), in both scopes
+        mcp.prompt()(_prompt(fn, writes=mode == "read-write"))
     if mode == "read-write":
         for fn in tools.WRITE_TOOLS:
             mcp.tool()(_audited(fn))
