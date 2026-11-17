@@ -1,9 +1,11 @@
 # Check coverage
 
+An agent on the [MCP server](../MCP.md) runs this page with the `check_coverage` prompt.
+
 ## Status and restore points
 
 - `neo4j-backup status` (or `--tenant <t>`, or one group) gives each member's newest restorable point.
-  The state against `rpo_minutes` is `ok`, `stale`, or `by_design`. MCP: `backup_status`.
+  The state against `rpo_minutes` is `ok`, `stale`, or `by_design`. MCP: `coverage_report`.
 - Dagster's `status_check` schedule and Airflow's `neo4j_status` DAG run it on `dbms.status_cron`
   (default every 15 minutes). They fail when a member is stale.
 - A diff with no full to build on is skipped and the full lane takes over.

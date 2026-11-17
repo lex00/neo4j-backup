@@ -3,10 +3,10 @@
 
 Two tiers:
 
-- **Read-only** (`list_targets`, `latest_artifact`, `show_chain`, `backup_status`, `preview_restore`,
-  `preview_prune`) — safe status/planning over the policy + object store. Most of the operator value.
-- **Mutating** (`run_backup`, `run_verify`, `run_aggregate`, `run_restore`, `run_prune`) — each
-  returns a `needs_confirmation` result (with the blast radius) unless called with `confirm=True`;
+- **Read-only** (`READ_TOOLS`) — status, previews and planning over the policy + object store.
+  `coverage_report` and `restore_plan` (#274) answer the two common questions in one call.
+- **Mutating** (`WRITE_TOOLS`) — `run_backup`, `run_verify` and `run_metadata_export` only add
+  artifacts; the rest return a `needs_confirmation` result (with the blast radius) unless called with `confirm=True`;
   destructive `run_restore(replace=True)` runs **verify-before-drop** first. `server.py` only exposes
   these when the server is started read-write.
 """
@@ -19,7 +19,7 @@ import sys
 import time
 
 from neo4j_backup_core import env, ops, paths, record
-from neo4j_backup_core.policy import load_policy
+from neo4j_backup_core.policy import SelectionError, load_policy
 from neo4j_backup_core.until import parse_until
 
 _UPLOAD = os.environ.get("BACKUP_UPLOAD", "admin")
@@ -111,16 +111,52 @@ def show_chain(group: str, member: str) -> dict:
             "loads": ops.load_artifacts(env.store(), layout, group, member)}
 
 
-def backup_status(tenant: str | None = None) -> dict:
-    """Freshness of every target (or one tenant's, #102): its newest backup and load, how old the
-    newest restorable point is, and its state against the group's `rpo_minutes` (#123): `ok`,
-    `stale`, or `by_design` (not backed up by design, #112). `stale` lists the stale targets."""
+def _status(tenant, group):
     from neo4j_backup_core import freshness
 
     policy = load_policy(env.policy_path())
-    groups = policy.select(tenant=tenant) if tenant else policy.db_groups
+    narrowed = bool(tenant or group)
+    groups = policy.select(group, tenant) if narrowed else policy.db_groups
     return freshness.status(env.store(), _layout(), groups,
-                            policy=None if tenant else policy)
+                            policy=None if narrowed else policy)
+
+
+def backup_status(tenant: str | None = None, group: str | None = None) -> dict:
+    """Freshness of every target (or one tenant's or group's, #102): its newest backup and load,
+    how old the newest restorable point is, and its state against the group's `rpo_minutes`
+    (#123): `ok`, `stale`, or `by_design` (not backed up by design, #112). `stale` lists the
+    stale targets."""
+    return _status(tenant, group)
+
+
+def coverage_report(tenant: str | None = None, group: str | None = None) -> dict:
+    """Is everything backed up (#274)? The status rows grouped by state, with a reason and a
+    next step (a tool call) for every stale member. Read-only."""
+    out = _status(tenant, group)
+    by = {"ok": [], "stale": [], "by_design": [], "retired": []}
+    for r in out["targets"]:
+        gid = r["target"].split("/", 1)[0]
+        if r["state"] == "stale":
+            if r["newest_point"] is None:
+                why = "never backed up"
+                nxt = f"run_backup(group='{gid}', kind='FULL')"
+            else:
+                why = (f"newest restorable point is {r['age_minutes']} minutes old; "
+                       f"rpo_minutes is {r['rpo_minutes']}")
+                nxt = f"run_backup(group='{gid}')"
+            by["stale"].append({"target": r["target"], "why": why, "next": nxt,
+                                "newest_point": r["newest_point"]})
+        elif r["state"] == "by_design":
+            by["by_design"].append({"target": r["target"], "reason": r.get("reason")})
+        elif r["state"] == "retired":
+            by["retired"].append({"target": r["target"], "deletes_on": r.get("deletes_on")})
+        else:
+            by["ok"].append(r["target"])
+    report = {"summary": {k: len(v) for k, v in by.items()}, **by}
+    if "unmanaged" in out:
+        report["unmanaged"] = out["unmanaged"]
+        report["summary"]["unmanaged"] = len(out["unmanaged"])
+    return report
 
 
 @_selectable
@@ -143,6 +179,78 @@ def preview_restore(group: str, replace: bool = False, until: str | None = None)
     g = load_policy(env.policy_path()).group(group)
     return {"group": group, "plan": ops.plan_restore(env.neo4j(), env.store(), g, _layout(),
                                                       replace=replace, until=until)}
+
+
+def restore_plan(group: str, until: str | None = None, ticket: str | None = None) -> dict:
+    """Everything to answer a restore request in one call (#274): what each member can be
+    restored to, the restore preview for `until` (or the newest common point), `warnings` for the
+    operator, and a plain message for the customer. When no backup covers `until`, `covered` is false and `windows` lists what
+    is available. Read-only; never runs neo4j-admin."""
+    pts = restore_points(group=group)
+    windows = {m["member"]: [{"from": c["from"], "to": c["to"]} for c in m["chains"]]
+               for m in pts["members"]}
+    try:
+        preview = preview_restore(group, until=until)
+    except ops.OpError as e:
+        return {"group": group, "until": until, "covered": False, "error": str(e),
+                "windows": windows, "points": pts}
+    plan = preview["plan"]
+    warnings = [plan[k] for k in ("alignment_warning", "warning") if plan.get(k)]
+    return {"group": group, "until": until, "covered": True, "plan": plan, "points": pts,
+            "warnings": warnings,  # for the operator; the message stays plain
+            "message": _customer_message(group, until, plan, ticket)}
+
+
+def _customer_message(group, until, plan, ticket):
+    names = [m.get("alias") or m.get("name") for m in plan["members"]]
+    point = plan.get("point") or {}
+    if until:
+        when = f"{until} (UTC)"
+    elif point.get("aligned"):
+        when = f"{_iso(point['at'])} (UTC), the newest moment all of them have a backup for"
+    else:
+        when = "each one's newest backup, which may not be the same moment for all of them"
+    lines = [f"We will restore {', '.join(names)} ({group}) to {when}.",
+             "Changes made after that time will be lost.",
+             "Applications keep using the same database names. Transactions running at the "
+             "moment of the switch fail and must be retried.",
+             "We keep the current databases for a while, so the restore can be undone."]
+    if ticket:
+        lines.append(f"Ticket: {ticket}.")
+    return " ".join(lines)
+
+
+def validate_policy(file: str) -> dict:
+    """Check a policy file (#273), like `policy validate`: reads only the file, no cluster or
+    store. `valid` false lists every problem in `errors`. The path is read on the
+    server's host and must end in .yaml or .yml."""
+    from neo4j_backup_core import policy as policy_mod
+
+    if not file.endswith((".yaml", ".yml")):  # only policy files, not any path the server can read
+        return {"file": file, "valid": False, "errors": [f"{file}: not a .yaml or .yml file"]}
+    errors = policy_mod.validate_file(file)
+    return {"file": file, "valid": not errors, "errors": errors}
+
+
+def policy_show(group: str) -> dict:
+    """A group's effective settings after profiles and tiers, and where each value came from
+    (#273), like `policy show`."""
+    from neo4j_backup_core import policy as policy_mod
+
+    try:
+        return policy_mod.explain(env.policy_path(), group)
+    except KeyError:
+        raise SelectionError(f"no group {group!r} in the policy")
+
+
+def preview_adopt(group: str, migrate: bool = False, replace: bool = False) -> dict:
+    """What `run_adopt` would do, per member (#273): create, skip, conflict or migrate.
+    Nothing changes."""
+    from neo4j_backup_core import adopt
+
+    g = load_policy(env.policy_path()).group(group)
+    return {"group": group, "plan": adopt.plan_adopt(env.neo4j(), g, migrate=migrate,
+                                                     replace=replace)}
 
 
 def preview_prune() -> dict:
@@ -296,6 +404,33 @@ def run_load(group: str, confirm: bool = False, dry_run: bool = False, replace: 
 
 
 @_recorded
+def run_export(group: str, until: str | None = None, confirm: bool = False,
+               dry_run: bool = False, ticket: str | None = None,
+               reason: str | None = None) -> dict:
+    """A portable dump of each member at `until` or the latest backup (#273), written to the
+    member's `_seed/`. Never touches the cluster. Needs confirm=true; dry_run returns the plan."""
+    until = parse_until(until)
+    g = load_policy(env.policy_path()).group(group)
+    store, layout = env.store(), _layout()
+    seeds = ops.choose_seeds(store, layout, g, until)  # fails before any work
+    plan = {"members": [{"member": n, "from": sd["key"], "until": sd["until"],
+                         "chain": sd.get("chain"), "already_a_dump": bool(sd.get("load"))}
+                        for n, sd in seeds.items()]}
+    if dry_run:
+        return {"group": group, "dry_run": True, "plan": plan}
+    if not confirm:
+        return _needs_confirmation("export", {"plan": plan})
+    runner = env.runner()
+    return ops.export_dumps(_run_admin(runner), runner, store, layout, g, until=until, log=_log)
+
+
+def run_metadata_export(cluster: str = "default") -> dict:
+    """Export a cluster's users, roles, privileges and aliases as replayable Cypher (#273). It
+    only adds an artifact under `_dbms/`, so like run_backup it needs no confirm."""
+    return ops.export_metadata(env.neo4j(), env.store(), _layout(), cluster=cluster)
+
+
+@_recorded
 def run_rollback(group: str, members: list[str] | None = None, confirm: bool = False,
                  dry_run: bool = False, ticket: str | None = None,
                  reason: str | None = None) -> dict:
@@ -377,7 +512,9 @@ def run_restore_to_cluster(to_cluster: str, group: str | None = None,
     return out
 
 
-READ_TOOLS = [list_targets, latest_artifact, show_chain, backup_status, restore_points,
-              preview_restore, preview_prune]
+READ_TOOLS = [list_targets, latest_artifact, show_chain, backup_status, coverage_report,
+              restore_points, restore_plan, preview_restore, preview_prune, preview_adopt,
+              validate_policy, policy_show]
 WRITE_TOOLS = [run_backup, run_verify, run_aggregate, run_restore, run_prune, run_load,
-               run_rollback, run_cleanup, run_restore_to_cluster, run_adopt]
+               run_rollback, run_cleanup, run_restore_to_cluster, run_adopt, run_export,
+               run_metadata_export]

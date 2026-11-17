@@ -1,5 +1,7 @@
 # Onboard a customer
 
+An agent on the [MCP server](../MCP.md) runs this page with the `onboard` prompt.
+
 ## Add a group
 
 1. Pick a tier. In the example policy, `gold` takes a daily full and hourly diffs.

@@ -1,5 +1,7 @@
 # Load data in bulk
 
+An agent on the [MCP server](../MCP.md) runs this page with the `bulk_load` prompt.
+
 Give the group a `load:` block ([POLICY.md](../POLICY.md)) with `mode` (`once` or `rebuild`) and `writes`.
 Its `build` of `kind: import` names the input files in `args`.
 Put the files in `load.source` (default `<group>/_source/`, a `<slug>/` folder per member). Then:

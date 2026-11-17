@@ -1,5 +1,7 @@
 # Restore on request
 
+An agent on the [MCP server](../MCP.md) runs this page with the `restore_request` prompt.
+
 ## Runbook
 
 1. Get the group or alias, the time in UTC (or "latest") and a ticket. A restore moves every database in

@@ -21,4 +21,4 @@ object under `--json` and a documented exit code; mutating commands require `--c
 - [RECOVERY.md](RECOVERY.md): the recovery modes with the exact Cypher, for restoring by hand.
 - [POLICY.md](POLICY.md): writing the backup policy; [POLICY-FIELDS.md](POLICY-FIELDS.md) lists every field.
 - [ENVIRONMENT.md](ENVIRONMENT.md): every environment variable and its default.
-- [MCP.md](MCP.md): the operator MCP server and its tools.
+- [MCP.md](MCP.md): the operator MCP server, its tools, and a prompt per operator workflow.

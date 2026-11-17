@@ -1,5 +1,7 @@
 # Recover or move a group
 
+An agent on the [MCP server](../MCP.md) runs this page with the `recover_cluster` prompt.
+
 With both clusters in the policy's `clusters:`, `restore --to-cluster` restores into another cluster:
 
 ```bash
