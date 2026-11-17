@@ -17,6 +17,10 @@ Documentation: <https://lex00.github.io/neo4j-backup/>
 Backups land under `<group>/<slug>/<database>/` in S3-compatible storage, Azure Blob or GCS.
 They are plain `neo4j-admin` artifacts, so you can restore without this tool ([RECOVERY.md](RECOVERY.md)).
 
+## Try it
+
+With Docker, `just` and Python 3.10+: `just try`. It backs up a demo group, deletes data, and restores to just before the delete.
+
 ## Start here
 
 | You are | Read |

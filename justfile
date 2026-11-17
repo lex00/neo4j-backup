@@ -28,6 +28,10 @@ bootstrap:
 # up + bootstrap (full from-scratch local environment)
 fresh: up bootstrap
 
+# the whole loop in one command: reset the stack, back up, a bad delete, restore to before it
+try:
+    ./bootstrap/try.sh
+
 # policy-driven backup of a group to object storage
 backup group="demo":
     ./bootstrap/backup.sh {{group}}

@@ -26,3 +26,4 @@
 
 .md-typeset table:not([class]) { font-size: 0.75rem; }
 @media (max-width: 600px) { .hero h1 { font-size: 1.6rem; } }
+.md-typeset .grid.cards.steps { grid-template-columns: repeat(auto-fit, minmax(min(100%, 11.5rem), 1fr)); }

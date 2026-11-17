@@ -8,6 +8,8 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 ## [Unreleased]
 
 ### Docs site (#260)
+- `just try`: the local loop in one command, as a restore request with a summary per step (#269).
+  The home page leads with that restore, then a five-step adoption path (#268).
 - A site-only landing page with three entry points; a new look with light and dark modes and
   top tabs (Start, Run it, Reference, Project) (#261, #262).
 - The operator guide is split into six workflow pages under `workflows/` (#263). The policy field
