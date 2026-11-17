@@ -8,20 +8,35 @@ Terms such as group and seed are in the [glossary](GLOSSARY.md).
 You need Docker with Docker Compose, [`just`](https://github.com/casey/just) and Python 3.10 or newer.
 The [local stack](STACK.md) runs Neo4j Enterprise, an S3 emulator and a runner with `neo4j-admin`.
 
-1. Start the stack and the demo group:
+Run the whole loop with one command:
+
+```bash
+git clone https://github.com/lex00/neo4j-backup && cd neo4j-backup
+just try
+```
+
+It resets the local stack and installs the CLI. Then it plays a restore request on the demo group,
+three databases behind aliases. A customer deletes the orders in `acme-orders` between two backups.
+You restore the group to just before the delete, then preview the undo:
+
+```text
+== 6/7 The customer asks: put it back to just before the delete
+$ neo4j-backup restore-points demo
+   acme-orders  any time from 06:45:04 to 06:45:55 (2 backups)
+$ neo4j-backup restore demo --until 2026-11-17T06:45:40.032Z --dry-run
+   acme-orders  replay to 06:45:40; seed a new database, then move the alias
+$ neo4j-backup restore demo --until 2026-11-17T06:45:40.032Z --confirm --ticket TRY-1 ...
+   acme-orders  alias moved: acme-orders-20261117t064432 -> acme-orders-20261117t064630
+   orders now: 2
+```
+
+`just try` prints a short summary of each command. The CLI itself prints JSON with `--json`.
+To run the same loop by hand:
+
+1. Start the stack and the demo group from [`policies/demo.yaml`](policies/demo.yaml):
 
      ```bash
-     git clone https://github.com/lex00/neo4j-backup && cd neo4j-backup
      just fresh
-     ```
-
-     This creates the `demo` group from [`policies/demo.yaml`](policies/demo.yaml): three databases behind aliases.
-
-     ```text
-     >>   alias acme-orders -> acme-orders-20261115t204010
-     >>   alias acme-graph -> acme-graph-20261115t204010
-     >>   alias acme-audit -> acme-audit-20261115t204010
-     >> bootstrap complete. Try: just backup demo
      ```
 
 2. Install the CLI and point it at the stack:
