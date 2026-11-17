@@ -39,7 +39,7 @@ def _import_fastmcp():
     except ImportError:
         sys.exit("neo4j-backup-mcp needs the MCP SDK — install the extra: "
                  "pip install 'neo4j-backup-dagster[mcp] @ git+https://github.com/lex00/neo4j-backup"
-                 "@v0.6.0#subdirectory=orchestrator'")
+                 "@v0.7.0#subdirectory=orchestrator'")
     return FastMCP
 
 

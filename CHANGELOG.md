@@ -7,6 +7,8 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-16
+
 Fixes from the novice adoption audits (#244), then from the v0.6.0 operator docs audit (#216).
 
 ### Adoption (#244)
@@ -551,7 +553,8 @@ First tagged release. Validated end to end against a real Neo4j Enterprise + obj
 - Dagster `prune` `list_text_keys` delegation; `RUNNER_NEO4J_ADMIN` wiring.
 - Pinned `grpcio-health-checking<1.82` (protobuf gencode/runtime drift).
 
-[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/lex00/neo4j-backup/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/lex00/neo4j-backup/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/lex00/neo4j-backup/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/lex00/neo4j-backup/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lex00/neo4j-backup/compare/v0.3.0...v0.4.0
