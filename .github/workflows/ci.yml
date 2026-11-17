@@ -40,7 +40,7 @@ jobs:
         working-directory: docs-lint
         run: |
           npm ci
-          npx textlint --config .textlintrc.json $(sed 's|^|../|' pages.txt)
+          sed 's|^|../|' pages.txt | xargs npx textlint --config .textlintrc.json
 
   airflow-dags:
     runs-on: ubuntu-latest
