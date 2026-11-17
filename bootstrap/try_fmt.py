@@ -32,19 +32,20 @@ def main():
     elif kind == "restore-points":
         for m in r["members"]:
             for c in m["chains"]:
-                out.append(f"{m['member']:12} any time from {short(c['from'])} to {short(c['to'])}"
+                out.append(f"{m['member']:12} restorable from {short(c['from'])} to {short(c['to'])}"
                            f" ({c['artifacts']} backups)")
     elif kind == "preview":
         for m in r["plan"]["members"]:
             s = m["seed"]
-            what = f"replay to {short(s['until'])}" if s.get("until") else "no change after that time"
-            out.append(f"{m['alias']:12} {what}; seed a new database, then move the alias")
+            what = (f"replay to {short(s['until'])}" if s.get("until")
+                    else "seed from its last backup (unchanged since)")
+            out.append(f"{m['alias']:12} {what}, then swap the alias from {m['old']}")
     elif kind == "restore":
         for m in r["members"]:
-            out.append(f"{m['alias']:12} alias moved: {m['old']} -> {m['newdb']}")
+            out.append(f"{m['alias']:12} alias {m['old']} -> {m['newdb']}")
     elif kind == "rollback":
         for m in r["plan"]["members"]:
-            out.append(f"{m['alias']:12} would point back at {m['newdb']}")
+            out.append(f"{m['alias']:12} rollback target {m['newdb']}")
     print("\n".join("   " + line for line in out))
 
 

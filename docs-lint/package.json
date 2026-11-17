@@ -8,6 +8,7 @@
   "devDependencies": {
     "textlint": "^16.1.1",
     "textlint-rule-max-comma": "^4.0.0",
-    "textlint-rule-sentence-length": "^5.2.1"
+    "textlint-rule-sentence-length": "^5.2.1",
+    "textlint-rule-plain-positive": "file:./rules/textlint-rule-plain-positive"
   }
 }

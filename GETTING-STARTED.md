@@ -1,40 +1,37 @@
 # Getting started
 
-Part 1 runs the backup, check and restore loop on your laptop. Part 2 is the checklist for your own clusters.
+Part 1 runs backup, verify and restore on a laptop in about 15 minutes. Part 2 is the production checklist.
 Terms such as group and seed are in the [glossary](GLOSSARY.md).
 
-## Part 1: try it in 15 minutes
+## Part 1: local stack
 
-You need Docker with Docker Compose, [`just`](https://github.com/casey/just) and Python 3.10 or newer.
+Requirements: Docker with Docker Compose, [`just`](https://github.com/casey/just) and Python 3.10 or newer.
 The [local stack](STACK.md) runs Neo4j Enterprise, an S3 emulator and a runner with `neo4j-admin`.
 
-Run the whole loop with one command:
+One command runs the full loop:
 
 ```bash
 git clone https://github.com/lex00/neo4j-backup && cd neo4j-backup
 just try
 ```
 
-It resets the local stack and installs the CLI. Then it plays a restore request on the demo group,
-three databases behind aliases. A customer deletes the orders in `acme-orders` between two backups.
-You restore the group to just before the delete, then preview the undo:
+It resets the local stack, installs the CLI and backs up the demo group: three databases behind aliases.
+Then it deletes every `Order` in `acme-orders`, backs up again, and restores the group to the moment before the delete.
+Step 6:
 
 ```text
-== 6/7 The customer asks: put it back to just before the delete
+== 6/7 Restore the group to the moment before the delete
 $ neo4j-backup restore-points demo
-   acme-orders  any time from 06:45:04 to 06:45:55 (2 backups)
-$ neo4j-backup restore demo --until 2026-11-17T06:45:40.032Z --dry-run
-   acme-orders  replay to 06:45:40; seed a new database, then move the alias
-$ neo4j-backup restore demo --until 2026-11-17T06:45:40.032Z --confirm --ticket TRY-1 ...
-   acme-orders  alias moved: acme-orders-20261117t064432 -> acme-orders-20261117t064630
+   acme-orders  restorable from 21:08:04 to 21:08:49 (2 backups)
+$ neo4j-backup restore demo --until 2026-11-17T21:08:37.244Z --dry-run
+   acme-orders  replay to 21:08:37, then swap the alias from acme-orders-20261117t210732
+$ neo4j-backup restore demo --until 2026-11-17T21:08:37.244Z --confirm --ticket TRY-1 ...
+   acme-orders  alias acme-orders-20261117t210732 -> acme-orders-20261117t210921
    orders now: 2
 ```
 
-`just try` summarizes each command.
-
-To watch an agent do the restore, run `just try-mcp`. Step 6 then goes through the MCP server.
-It makes the `restore_request` prompt's tool calls, with a stop for your yes before `run_restore`.
-To connect your own agent, see [Connect an agent](MCP.md).
+`just try-mcp` runs step 6 through the MCP server, with the `restore_request` prompt's tool calls.
+The operator approves before `run_restore`. [Connect an agent](MCP.md) sets up your own MCP client.
 
 To run the same loop by hand, start the stack from [`policies/demo.yaml`](policies/demo.yaml) and install the CLI:
 
@@ -73,7 +70,7 @@ One policy file says what to back up and when. A scheduler runs it, and a runner
 |---|---|
 | [Dagster](orchestrator/README.md) | you run Dagster; you get backup lanes, retries and run history |
 | [Airflow](airflow/README.md) | you run Airflow; the same work as a set of DAGs |
-| [CLI](CLI-CONTRACT.md) with [CI or cron](CI.md) | a few databases and no orchestrator |
+| [CLI](CLI-CONTRACT.md) with [CI or cron](CI.md) | a few databases, run from cron or CI |
 | [An agent](MCP.md) | an operator runs the workflows through an agent; pair it with a scheduler for backups |
 
 All read the same policy and write the same backups, so you can switch later. On Kubernetes, see [Deploying on Dagster](orchestrator/deploy/DEPLOY.md) or the Airflow page's
@@ -104,7 +101,7 @@ The demo's [`docker/compose.yaml`](docker/compose.yaml) sets the same things.
 ### Checklist
 
 1. Put applications behind aliases. `neo4j-backup adopt` does this for existing databases
-    without disruption ([Onboard a customer](workflows/onboard.md)).
+    while they keep serving ([Onboard a customer](workflows/onboard.md)).
 
 2. Write the policy from [`policies/example.yaml`](policies/example.yaml) and [POLICY.md](POLICY.md).
     Check it with `neo4j-backup policy validate <file>`.

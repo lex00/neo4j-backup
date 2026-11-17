@@ -38,37 +38,37 @@ nb() { local fmt="$1"; shift
   orchestrator/.venv/bin/neo4j-backup --json "$@" 2>>"$LOG" | orchestrator/.venv/bin/python bootstrap/try_fmt.py "$fmt"; }
 say "neo4j-backup $(orchestrator/.venv/bin/python -c 'import neo4j_backup_core as c; print(c.__version__)')"
 
-step "3/7 What the policy covers: group demo, three databases behind aliases"
+step "3/7 Policy targets: group demo, three databases behind aliases"
 nb targets targets
 
-step "4/7 The nightly backup (the scheduler does this; here we run it by hand)"
+step "4/7 Nightly backup (a scheduler runs this in production)"
 nb backup backup demo
 
-step "5/7 A customer deletes every order in acme-orders by mistake"
+step "5/7 Delete every Order in acme-orders (the bad change)"
 GOOD="$(server_now)"
 wait_until_after "$GOOD"
 say "orders before: $(orders)    last good moment: $GOOD"
 cyp -d acme-orders "MATCH (o:Order) DETACH DELETE o;" >/dev/null
 say "orders after the delete: $(orders)"
-say "The next scheduled backup runs and captures the delete:"
+say "The next scheduled backup captures the delete:"
 nb backup backup demo
 
 if [ "$MODE" = mcp ]; then
-  step "6/7 The customer asks an operator, who asks their agent (MCP server, read-write)"
+  step "6/7 Restore request through the MCP server (read-write), as an agent runs it"
   orchestrator/.venv/bin/python bootstrap/try_mcp.py demo "$GOOD" TRY-1
   say "orders now: $(orders)    (the alias points at a new database seeded from the backup)"
-  step "7/7 Connect your own agent"
-  say "Point an MCP client at the server with the same environment as above:"
-  say "  command: orchestrator/.venv/bin/neo4j-backup-mcp   (MCP.md has the config)"
-  say "  then ask it: \"what can demo be restored to?\" or run the restore_request prompt"
+  step "7/7 Connect an MCP client"
+  say "MCP client config: the environment above, plus"
+  say "  command: orchestrator/.venv/bin/neo4j-backup-mcp   (details in MCP.md)"
+  say "  prompts: restore_request, check_coverage, onboard, bulk_load, offboard, recover_cluster"
 else
-  step "6/7 The customer asks: put it back to just before the delete"
+  step "6/7 Restore the group to the moment before the delete"
   nb restore-points restore-points demo
   nb preview restore demo --until "$GOOD" --dry-run
   nb restore restore demo --until "$GOOD" --confirm --ticket TRY-1 --reason "orders deleted by mistake"
   say "orders now: $(orders)    (the alias points at a new database seeded from the backup)"
 
-  step "7/7 The old databases are kept, so the restore can be undone"
+  step "7/7 Rollback preview: the previous databases stay available"
   nb rollback rollback demo --dry-run
 fi
 

@@ -1,9 +1,9 @@
 # Design notes and history
 
-These notes record design decisions from 2026-06 on: the context, the choice, why, and what changed later.
-What the tool does today is on the reference pages: [POLICY.md](POLICY.md), [OPERATOR.md](OPERATOR.md),
+These notes record design decisions from 2026-06 on: the context, the choice, the reasons and later changes.
+Current behavior is on the reference pages: [POLICY.md](POLICY.md), [OPERATOR.md](OPERATOR.md),
 [RECOVERY.md](RECOVERY.md), [ENVIRONMENT.md](ENVIRONMENT.md) and the [Dagster](orchestrator/README.md)
-and [Airflow](airflow/README.md) pages.
+and [Airflow](airflow/README.md) pages. Terms: [GLOSSARY.md](GLOSSARY.md).
 Diagrams are Graphviz sources in [`diagrams/`](diagrams/README.md). Render them with `just diagrams`.
 
 ## Starting assumptions
@@ -15,21 +15,21 @@ Teams already run Dagster or Airflow and object storage. A policy drives schedul
 
 A customer can own databases that reference each other and must come back to one point.
 So the `db_group` carries cadence, retention, RPO/RTO and point-in-time alignment.
-A database is the unit of work, since `neo4j-admin` acts on one database, and the customer is an optional tag.
-Grouping lives in the policy, never parsed out of database names.
+A database is the unit of work, since `neo4j-admin` acts on one database. The customer is an optional tag.
+Group membership comes from the policy alone.
 
-## Nothing runs on the database nodes
+## Agentless: one central runner
 
 One central runner runs `neo4j-admin database backup` against the backup port (6362).
-It opens a Bolt connection (7687) for restore Cypher. The database nodes host no scripts or agents.
-Neo4j has no Cypher API for online backup and recommends backing up from a separate machine.
+It opens a Bolt connection (7687) for restore Cypher. Database nodes run only Neo4j.
+Neo4j offers online backup through `neo4j-admin` alone and recommends a separate backup machine.
 Back up from secondaries (`--from` takes a failover list), and add a non-serving one at hundreds of backups per tick.
 
 ## Restore with Cypher seed-from-URI
 
-Restore uses `CREATE DATABASE ... OPTIONS { seedURI: ... }`, and every cluster member pulls the seed itself.
+Restore uses `CREATE DATABASE ... OPTIONS { seedURI: ... }`, and every cluster server pulls the seed itself.
 This keeps the loop agentless. The seed can be a full or a diff, and Neo4j resolves the chain.
-Node-local `neo4j-admin database restore` stays a fallback for `system` and for seeds the server cannot read.
+Node-local `neo4j-admin database restore` stays a fallback for `system` and for seeds outside the server's read access.
 
 ```
 CREATE DATABASE foo OPTIONS {
@@ -41,13 +41,13 @@ CREATE DATABASE foo OPTIONS {
 Validation found:
 
 - `seedRestoreUntil` (Neo4j 2025.01+) needs a full plus diffs covering the time. A lone full errors.
-- The cloud seed provider takes no `seedConfig`. Region and endpoint come from the server's env.
+- The cloud seed provider takes region and endpoint from the server's env, outside `seedConfig`.
 - `existingData: 'use'` is required in Cypher 5 and deprecated in Cypher 25.
   `SEED_CYPHER_VERSION=5` emits it, and the default omits it.
 
 ## Alias-swap cutover and naming
 
-You cannot reseed an existing database, and an in-place restore takes it down.
+Neo4j seeds only new databases, and an in-place restore takes the database down.
 So applications connect to an alias, and a restore seeds a new database `<slug>-<ts>` next to the live one.
 Once it is online on every member, `ALTER ALIAS` moves the alias. Rollback moves it back.
 `cleanup` drops the superseded database later.
@@ -57,7 +57,7 @@ Naming has one owner (`bootstrap/naming.sh`, mirrored by `naming.py`):
 
 | Identifier | Rule |
 |---|---|
-| Alias | The app-facing name, checked against Neo4j's alias rules and never renamed |
+| Alias | The app-facing name, checked against Neo4j's alias rules and fixed for good |
 | Slug | A path-safe id from the alias, with an 8-character hash for messy aliases |
 | Physical | `<slug>-<ts>`, always a legal database name |
 
@@ -71,17 +71,17 @@ Checks before the swap became opt-in (`restore --check`).
 A backup chain belongs to one physical store, and a restore starts a new store.
 So the layout is `<group>/<slug>/<physical>/<artifact>.backup`, one chain per `<physical>/` folder.
 The latest backup for an alias is the newest artifact across its `<slug>/` folder.
-Load artifacts (#156) live in `<group>/<slug>/_seed/` and never become a chain head.
+Load artifacts (#156) live in `<group>/<slug>/_seed/`, and the chain-head lookup skips them.
 Since #118, each backup and aggregate writes `neo4j-admin backup inspect` output to `<artifact>.meta.json`.
 Chains and restore windows are read from these sidecars.
 
 ## Runner resources: scratch and memory
 
 `neo4j-admin` stages each backup on local scratch before upload, and some databases are several TB.
-Scratch is its own sized volume (`SCRATCH_PATH`), never the orchestrator's disk.
+Scratch is its own sized volume (`SCRATCH_PATH`), separate from the orchestrator's disk.
 A full lane runs with low concurrency (scratch size / largest full) and a diff lane with more.
 Periodic `aggregate` keeps chains short.
-Without `--pagecache` the backup takes the server's page cache size and can OOM the runner.
+By default the backup takes the server's page cache size and can OOM the runner, so set `--pagecache`.
 
 | Resource | Knob | Start |
 |---|---|---|
@@ -101,26 +101,27 @@ So `verify` aggregates a copy under `_verify/`, and `aggregate` runs on its own 
 
 ## Encryption at rest: SSE-KMS
 
-`neo4j-admin` does not encrypt artifacts at rest. Client-side encryption is stronger,
-but the server could not seed from ciphertext it cannot read. So the choice is SSE-KMS at the object store.
+`neo4j-admin` writes artifacts unencrypted. Client-side encryption is stronger,
+but seeding needs objects the server can read. So the choice is SSE-KMS at the object store.
 A per-group key means a bucket or key per group, and database nodes need KMS decrypt on those keys.
-`neo4j-admin` cannot send an SSE header, so a bucket that requires one rejects its uploads.
+`neo4j-admin` omits the SSE header on upload, so a bucket that requires one rejects its uploads.
 `BACKUP_UPLOAD=pipeline` keeps neo4j-admin on local disk while boto3 does every S3 write with `S3_SSE`.
-Per-group `encryption` policy keys were planned and not built.
+Per-group `encryption` policy keys remain a design plan.
 
 ## One core, several front-ends
 
 The operations live once in `neo4j_backup_core.ops` and take a `run_admin` callable.
 Each front-end is a thin adapter. Dagster and Airflow add lanes and run history.
 The `neo4j-backup` CLI is for CI and cron ([CLI-CONTRACT.md](CLI-CONTRACT.md), [CI.md](CI.md)).
-The MCP server is for agents ([MCP.md](MCP.md), or [AGENTS.md](AGENTS.md) without MCP).
+The MCP server is for agents ([MCP.md](MCP.md)). Agents on the plain CLI follow [AGENTS.md](AGENTS.md).
 On Dagster the tool is its own code location, and `neo4j-admin` runs through Pipes to report the real exit code.
 
 ## Bolt access and retries
 
 All Bolt access goes through `Neo4jClient`. Only known-transient errors retry, with bounded backoff (`NEO4J_RETRY_*`).
 Each attempt rebuilds the driver to pick up rotated secrets.
-Errors are classified by exception type and status code, never by message text. Waits are bounded polls or `WAIT`.
+Errors are classified by exception type and status code, ignoring message text.
+Waits are bounded polls or `WAIT`.
 
 ## Configurable seams
 
@@ -133,23 +134,23 @@ Third-party SDKs import lazily. The full list is in [ENVIRONMENT.md](ENVIRONMENT
 One DBMS becomes memory- and checkpoint-bound well before a thousand databases.
 So `clusters:` names each DBMS (#106), and a group says `cluster:`.
 Every operation resolves its client, runner and store from the group, which also spreads backup load.
-Group ids are unique, so the storage layout needs no cluster level.
+Group ids are unique, so storage paths omit the cluster.
 DBMS jobs write under `_dbms/` for the default cluster and `_dbms/<cluster>/` for a named one.
 
 ## Other choices
 
-Neo4j Ops Manager (checked through 1.15.2 in 2026-05) had no released backup feature and no public API.
+Neo4j Ops Manager (checked through 1.15.2 in 2026-05) lacked a released backup feature and a public API.
 It also puts an agent on every node, so it fits only as a monitoring tool.
 
-`system` (users, roles, privileges, aliases) cannot be restored by seed-from-URI.
-The default path is a logical export as Cypher, which cannot carry native passwords.
+`system` holds users, roles, privileges and aliases, and seed-from-URI covers user databases only.
+The default path is a logical export as Cypher, which drops native passwords.
 A binary `system` backup with an offline node-local restore keeps them. See [RECOVERY.md](RECOVERY.md).
 
 ## Status and open risks
 
-What has been validated is in [STACK.md](STACK.md#whats-validated). Open risks:
+Validated features: [STACK.md](STACK.md#validation-status). Open risks:
 
-- A lone full cannot be restored to a point in time.
-- A group gets no transactional consistency across its databases, only bounded clock skew.
+- Point-in-time restore needs a full plus diffs. A lone full restores whole only.
+- A group's databases line up within bounded clock skew, short of transactional consistency.
 - Pin the orchestrator host and the code location or worker to close versions.
-- SSE-KMS reads through seed-from-URI were validated on MinIO, not yet on AWS S3 with KMS.
+- SSE-KMS reads through seed-from-URI were validated on MinIO. AWS S3 with KMS is still pending.

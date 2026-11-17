@@ -1,6 +1,6 @@
 # Scheduling backups from CI
 
-Without Dagster or Airflow, a CI job or cron can run the [`neo4j-backup` CLI](CLI-CONTRACT.md) on a schedule.
+A CI job or cron can run the [`neo4j-backup` CLI](CLI-CONTRACT.md) on a schedule in place of Dagster or Airflow.
 Templates: [GitHub Actions](examples/ci/github-actions.yml), [GitLab CI](examples/ci/gitlab-ci.yml) and
 [Forgejo Actions](examples/ci/forgejo-actions.yml).
 This suits a handful of databases. With dozens across tiers, use Dagster or Airflow.
@@ -13,7 +13,7 @@ The CI runner takes the backups, so use a self-hosted runner near the database. 
 - Network access to the backup port (`6362`), Bolt (`7687`) and your object store.
 - A scratch volume sized for the largest full backup (`SCRATCH_PATH`).
 
-GitHub-hosted runners (about 14 GB disk, no `neo4j-admin`) only suit demo databases.
+GitHub-hosted runners (about 14 GB disk) suit demo databases. Production needs a runner with `neo4j-admin` installed.
 
 ## Environment
 
@@ -32,7 +32,7 @@ Keep credentials in CI secrets. All variables are in [ENVIRONMENT.md](ENVIRONMEN
 
 ## Install
 
-The package is not on PyPI. Pin a git tag:
+Install from a pinned git tag (the package lives on GitHub only):
 
 ```
 pip install "neo4j-backup-dagster @ git+https://github.com/lex00/neo4j-backup@v0.7.0#subdirectory=orchestrator"
@@ -53,7 +53,7 @@ For Azure or GCS, add the extra to the package name: `"neo4j-backup-dagster[azur
 | `dbms.metadata_cron` | `neo4j-backup metadata export` |
 | `dbms.system_backup_cron` | `neo4j-backup system-backup` |
 
-Never run a rebuild at the same time as that group's backups. Use one job per group, or a lock in your CI.
+Run a group's rebuild and backups at separate times: one job per group, or a lock in your CI.
 `neo4j-backup targets --tenant <t>` (or `targets <group>`) lists what a job covers.
 
 ## Gating and lanes
@@ -70,4 +70,4 @@ Never run a rebuild at the same time as that group's backups. Use one job per gr
 
 - A multi-TB full can exceed a job timeout.
 - Scheduled crons on GitHub and Forgejo drift and sometimes skip. Leave slack in the RPO.
-- There is no fan-out, retry or run history. Watch job outcomes, and check freshness with `neo4j-backup status --stale` ([workflows/coverage.md](workflows/coverage.md)).
+- Fan-out, retries and run history are orchestrator features. Watch job outcomes, and check freshness with `neo4j-backup status --stale` ([workflows/coverage.md](workflows/coverage.md)).

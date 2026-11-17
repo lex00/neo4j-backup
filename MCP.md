@@ -2,7 +2,7 @@
 
 The `neo4j-backup-mcp` server lets an agent run the [operator workflows](OPERATOR.md).
 Ask "restore demo to just before 09:00, ticket CHG-1234" and the agent follows the restore prompt.
-It previews the change and waits for your yes. Results match the CLI's. It does not schedule anything.
+It previews each change and waits for operator approval. Results match the CLI's. Schedules stay with Dagster, Airflow or cron.
 
 To see it on your laptop first, run `just try-mcp` ([Getting started](GETTING-STARTED.md)).
 
@@ -57,36 +57,35 @@ Ask in plain words, or run a prompt by name (Claude Code: `/mcp__neo4j-backup__r
 
 ## An example run
 
-From `just try-mcp`, after a customer deleted the orders in `acme-orders` (shortened):
+From `just try-mcp`, after every `Order` in `acme-orders` was deleted (shortened):
 
 ```text
-operator: "put demo back to just before the delete, TRY-1"
-agent -> restore_plan(group='demo', until='2026-11-17T20:39:09.312Z', ticket='TRY-1')
-   acme-orders  can go back to any time from 20:38:46 to 20:39:22
-   message for the customer: We will restore acme-orders, acme-graph, acme-audit (demo) to
-   2026-11-17T20:39:09.312Z (UTC). Changes made after that time will be lost. ...
-agent -> preview_restore(group='demo', until='2026-11-17T20:39:09.312Z')
-   acme-orders  replay to 20:39:09; then move the alias off acme-orders-20261117t203819
-agent: "This restores 3 databases to 20:39:09. Go ahead?"
-operator: "yes"
-agent -> run_restore(group='demo', until='2026-11-17T20:39:09.312Z', confirm=True, ticket='TRY-1', ...)
-   acme-orders  alias moved: acme-orders-20261117t203819 -> acme-orders-20261117t203957
+prompt restore_request(demo, 2026-11-17T21:05:31.163Z, TRY-1): 5 steps, operator approval before run_restore
+mcp> restore_plan(group='demo', until='2026-11-17T21:05:31.163Z', ticket='TRY-1')
+   acme-orders  restorable from 21:04:58 to 21:05:43
+   customer message: We will restore acme-orders, acme-graph, acme-audit (demo) to
+   2026-11-17T21:05:31.163Z (UTC). Changes made after that time will be lost. ...
+mcp> preview_restore(group='demo', until='2026-11-17T21:05:31.163Z')
+   acme-orders  replay to 21:05:31, then swap the alias from acme-orders-20261117t210424
+   approved by operator: restore 3 databases to 21:05:31
+mcp> run_restore(group='demo', until='2026-11-17T21:05:31.163Z', confirm=True, ticket='TRY-1', ...)
+   acme-orders  alias acme-orders-20261117t210424 -> acme-orders-20261117t210618
    baseline full backups: 3
 ```
 
 ## Safety model
 
-1. Read-only scope exposes no write tools. Only the server's environment can turn on read-write, not the agent.
-2. A write tool returns `needs_confirmation` and the blast radius unless called with `confirm=true`.
-    It also takes `dry_run`, `ticket` and `reason`. `run_backup`, `run_verify` and `run_metadata_export` only add artifacts and need no confirm.
+1. Read-only scope exposes the read tools only. Read-write is a server setting, outside the agent's reach.
+2. A write tool applies its change only when called with `confirm=true`. Otherwise it returns `needs_confirmation` and the blast radius.
+    Write tools also take `dry_run`, `ticket` and `reason`. `run_backup`, `run_verify` and `run_metadata_export` add artifacts and run directly.
 
 3. `run_restore(replace=true)` verifies each backup before dropping anything.
 
-Every call is logged to stderr with its arguments and outcome. Credentials come from the environment, never from tool inputs.
+Every call is logged to stderr with its arguments and outcome. Credentials come from the server's environment only.
 The transport is stdio, so the agent's local subprocess is the trust boundary.
 
 !!! warning
-    Do not put the server on an unauthenticated network transport with `read-write` enabled.
+    Run a `read-write` server over stdio, or behind an authenticated transport.
 
 ## Tools
 
@@ -105,7 +104,7 @@ Write tools appear only in read-write scope.
 
 | Tool | Scope | Does |
 |---|---|---|
-| `validate_policy(file)` | read | Check a `.yaml` policy file on the server's host, with no cluster |
+| `validate_policy(file)` | read | Check a `.yaml` policy file on the server's host; reads the file only |
 | `preview_adopt(group, migrate, replace)` | read | Per member: create, skip, conflict or migrate |
 | `run_adopt(group, migrate, replace)` | write | Put existing databases behind aliases from `overrides.<alias>.adopt_from` |
 | `run_backup(group, kind, tenant)` | write | Back up a group, or every group of a tenant |
@@ -125,10 +124,10 @@ Write tools appear only in read-write scope.
 
 | Tool | Scope | Does |
 |---|---|---|
-| `restore_plan(group, until, ticket)` | read | Restore points, the preview, `warnings` and a message for the customer; the nearest windows if `until` isn't covered |
+| `restore_plan(group, until, ticket)` | read | Restore points, the preview, `warnings` and a message for the customer; the nearest windows when backups miss `until` |
 | `restore_points(group, tenant)` | read | Per member: the current database, restore windows, loads, gaps and restore commands |
 | `preview_restore(group, replace, until)` | read | The restore plan and blast radius |
-| `run_restore(group, until, replace, verify_first, baseline, from_load, from_dump, members)` | write | Restore, then take a full backup unless `baseline=false` |
+| `run_restore(group, until, replace, verify_first, baseline, from_load, from_dump, members)` | write | Restore, then take a full backup (skip with `baseline=false`) |
 | `run_rollback(group, members)` | write | Point each alias back at its previous database |
 | `run_cleanup(group, keep, older_than_days)` | write | Drop superseded databases the tool created, keeping `keep` |
 
@@ -137,11 +136,11 @@ Write tools appear only in read-write scope.
 | Tool | Scope | Does |
 |---|---|---|
 | `run_load(group, replace, keep_failed, baseline, reapply_access)` | write | Load or rebuild a group from its policy build |
-| `run_export(group, until)` | write | A portable dump per member in its `_seed/` folder; never touches the cluster |
+| `run_export(group, until)` | write | A portable dump per member in its `_seed/` folder; reads backups only |
 | `run_metadata_export(cluster)` | write | Export users, roles, privileges and aliases as replayable Cypher |
 | `run_restore_to_cluster(to_cluster, group, from_cluster, until, fence_source, skip_metadata, baseline)` | write | Restore into another cluster |
 
-## Agents without MCP
+## Agents on the CLI
 
 An agent that can run shell commands can drive the CLI with `--json` instead.
 [AGENTS.md](AGENTS.md) is its instruction file: the safety rules, the JSON envelope and every command.

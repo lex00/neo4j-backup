@@ -1,18 +1,19 @@
 # Airflow
 
-Airflow 3 DAGs for the policy's jobs, validated with Airflow 3.2.2. They share `neo4j_backup_core`
+Airflow 3 DAGs run the policy's jobs (validated with Airflow 3.2.2). They share `neo4j_backup_core`
 with the CLI, the MCP server and the [Dagster code location](../orchestrator/README.md).
+Glossary: [group, tier, chain, full and diff](../GLOSSARY.md).
 
 ## The DAGs
 
-DAG files are in `airflow/dags/` and import `orchestrator/neo4j_backup_airflow/`. Scheduled DAGs are
-built from the policy when the file is parsed. A tier with no groups still gets its DAGs.
+DAG files in `airflow/dags/` import `orchestrator/neo4j_backup_airflow/`. Scheduled DAGs come
+from the policy at parse time: one set per tier (empty tiers included).
 
-| DAG | Schedule | What it does |
+| DAG | Schedule | Action |
 |---|---|---|
-| `neo4j_backup_<tier>_full`, `neo4j_backup_<tier>_diff` | `full_cron`, `diff_cron` | Back up the tier, or one group with Param `group_id`. Diff takes a full where none exists. |
+| `neo4j_backup_<tier>_full`, `neo4j_backup_<tier>_diff` | `full_cron`, `diff_cron` | Back up the tier, or one group with Param `group_id`. Diff starts each member's first chain with a full. |
 | `neo4j_verify_<tier>` | `verify_cron` (default daily 06:00) | Aggregate a copy of the newest chain and run `neo4j-admin database check` on it. |
-| `neo4j_aggregate_<tier>` | `aggregate_cron` (no default) | Collapse each chain into one full in place. |
+| `neo4j_aggregate_<tier>` | `aggregate_cron` (default: unset) | Collapse each chain into one full in place. |
 | `neo4j_prune_<tier>` | `prune_cron` (default Sundays 07:00) | Delete whole chains past `retention_days`. |
 | `neo4j_cleanup_<tier>` | `cleanup_cron` | Drop superseded databases (keeps `cleanup_keep` and `cleanup_older_than_days`). |
 | `neo4j_rebuild_<tier>` | `rebuild_cron` | Load each `load.mode: rebuild` group. |
@@ -25,7 +26,7 @@ built from the policy when the file is parsed. A tier with no groups still gets 
 | `neo4j_metadata_restore` | manual | Replay a metadata export. Params: `cluster`, `key`. |
 | `neo4j_backup_scaffold` | manual | Print the policy's targets. |
 
-The DBMS DAGs exist per cluster a group uses (`default` too when the policy has no `clusters:`).
+The DBMS DAGs exist per cluster a group uses (`default` when the policy omits `clusters:`).
 
 `neo4j_restore` Params:
 
@@ -33,7 +34,7 @@ The DBMS DAGs exist per cluster a group uses (`default` too when the policy has 
 |---|---|---|
 | `group_id` | required | the group |
 | `dry_run` | `false` | log the plan in the `plan` task and stop |
-| `restore_until` | none | ISO-8601 time (UTC if no offset). Default: the newest instant all members cover. |
+| `restore_until` | unset | ISO-8601 time (UTC by default). Unset: the newest instant all members cover. |
 | `members` | `[]` | only these members |
 | `check` | `false` | run the group's `load.checks` before the swap |
 | `keep_failed` | `false` | with `check`: keep databases that fail a check |
@@ -41,7 +42,7 @@ The DBMS DAGs exist per cluster a group uses (`default` too when the policy has 
 | `from_load` | `false` | seed each member from its newest load |
 | `from_dump` | `{}` | `{member: key or URI}` |
 | `baseline` | `true` | take a full backup of each new database |
-| `ticket`, `reason` | none | recorded with the result |
+| `ticket`, `reason` | unset | recorded with the result |
 
 Run it with `dry_run: true` first. `restore_until` is `until` on `neo4j_restore_to_cluster`.
 
@@ -88,13 +89,13 @@ See [Choosing a runner mode](../ENVIRONMENT.md#choosing-a-runner-mode) and [Perm
 
 ### Turn it on
 
-1. Trigger `neo4j_backup_scaffold`. It prints the policy's targets.
+1. Trigger `neo4j_backup_scaffold` to print the policy's targets.
 2. Set `NEO4J_BACKUP_ALERT_WEBHOOK`. Each DAG posts failed tasks to it.
 3. Try one group: trigger `neo4j_backup_<tier>_full` with `{"group_id": "<group>"}`, then
     `neo4j_verify_<tier>`, then `neo4j_restore` with `dry_run` ([Try a test group](../workflows/onboard.md#try-a-test-group)).
 
 4. Unpause the scheduled DAGs you use and `neo4j_status`.
-5. Unpause the manual DAGs (`neo4j_restore`, `neo4j_rollback`, `neo4j_load`, ...). A run of a paused DAG waits.
+5. Unpause the manual DAGs (`neo4j_restore`, `neo4j_rollback`, `neo4j_load`, ...). Runs on a paused DAG wait.
 6. Add an independent check that alerts when Airflow is down ([Alerts](../workflows/coverage.md#alerts)).
 
 ??? note "Use Airflow notifiers in place of the webhook"
@@ -112,7 +113,7 @@ See [Choosing a runner mode](../ENVIRONMENT.md#choosing-a-runner-mode) and [Perm
 
 ### The CLI on Kubernetes
 
-`restore-points`, `status`, `targets` and `policy show` have no DAG. Run the CLI from a pod:
+`restore-points`, `status`, `targets` and `policy show` run from the CLI only. Run it from a pod:
 
 ```bash
 kubectl -n airflow run neo4j-backup-ops --rm -it --image=<registry>/airflow-neo4j-backup:0.7.0 \
@@ -134,7 +135,7 @@ just airflow-k8s-smoke    # KubernetesPodOperator mode against k3d (needs `just 
 just airflow-standalone   # scheduler and UI on :8080
 ```
 
-Check that every DAG parses (no stack needed):
+Check that every DAG parses (the stack can stay down):
 
 ```bash
 AIRFLOW_HOME=/tmp/af NEO4J_BACKUP_POLICY=policies/demo.yaml \

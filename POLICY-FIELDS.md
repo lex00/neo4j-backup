@@ -1,8 +1,8 @@
 # Policy fields
 
-Every field the policy accepts. Examples and advice are in [POLICY.md](POLICY.md).
+Every policy field. Examples and advice: [POLICY.md](POLICY.md). Terms: [GLOSSARY.md](GLOSSARY.md).
 
-Top level: `db_groups` and `tiers` are required. The other sections are optional.
+Top level: `db_groups` and `tiers` are required; other sections are optional.
 `schedules: running` starts the Dagster schedules on (default `stopped`). Airflow uses its own pause setting.
 Crons are UTC in Dagster and Airflow's `default_timezone` in Airflow.
 
@@ -13,25 +13,25 @@ Crons are UTC in Dagster and Airflow's `default_timezone` in Airflow.
 | `id` | required | part of the storage path |
 | `tier` | required | a key under `tiers:` |
 | `aliases` | required | one member per alias |
-| `restore_mode` | `alias-swap` | `by-name`: no alias. List `databases` instead of `aliases` |
-| `profile`, `cluster`, `storage` | none | names under `profiles:`, `clusters:`, `storage:` |
+| `restore_mode` | `alias-swap` | `by-name`: restores recreate the named database. List `databases` in place of `aliases` |
+| `profile`, `cluster`, `storage` | unset | names under `profiles:`, `clusters:`, `storage:` |
 | `retention_days` | `7` | prune deletes whole chains older than this |
 | `rpo_minutes` | the tier's, else `60` | the newest backup's age before the member is `stale` |
 | `rto_minutes` | `120` | how long a restore or load waits for the new database |
-| `topology` | none | `primaries` (1) and `secondaries` (0). Omit on standalone |
+| `topology` | unset | `primaries` (1) and `secondaries` (0). Omit on standalone |
 | `overrides` | `{}` | per alias: `topology`, `prefix`, `physical_base`, `adopt_from` |
-| `naming` | none | `physical_template`, `ts_format`, `slug_style` |
-| `tenant` | none | a label for `--tenant`. It is not access control |
+| `naming` | unset | `physical_template`, `ts_format`, `slug_style` |
+| `tenant` | unset | a `--tenant` filter label, separate from access control |
 | `load` | `{mode: live}` | how data arrives (below) |
 | `state` | `active` | `retired` removes the group's schedules |
 | `retired_on` | | required when retired: the day retention starts |
 | `retire_after_days` | `retention_days` | then prune deletes a retired group's artifacts |
-| `encryption`, `s3_prefix` | | not read. Use a store's `sse_kms_key_id` |
+| `encryption`, `s3_prefix` | | ignored. Use a store's `sse_kms_key_id` |
 | `owner` | | old name for `tenant`. Logs a warning |
 
 Prune keeps each member's newest chain and the chains that cover the window.
 The policy load warns when the tier's fulls are further apart than `retention_days`.
-An override `prefix` must end in `/`, can't start with `_`, and can't overlap another member's.
+An override `prefix` ends in `/`, avoids a leading `_` and stays apart from other members' prefixes.
 
 ## db_groups[].load
 
@@ -52,9 +52,9 @@ An override `prefix` must end in `/`, can't start with `_`, and can't overlap an
 | `keep_loads` | `14` | load dumps kept per member |
 | `baseline` | `true` | full backup right after a restore or load |
 | `source` | the group's store, `<group>/_source/` | `{storage, prefix}` of rebuild input files |
-| `build` | none | required for `rebuild` (below) |
+| `build` | unset | required for `rebuild` (below) |
 | `checks` | `[]` | `{query, expect, name}`: Cypher returning one number, checked before the swap |
-| `notice` | none | `{hook, before, required}`: warn the customer before a load |
+| `notice` | unset | `{hook, before, required}`: warn the customer before a load |
 
 `expect` is `== n`, `>= n`, `<= n` or `between a b`. Checks also run on `restore --check`.
 
@@ -69,20 +69,20 @@ The load waits `before` (default `0m`) after it. A failed hook stops the load on
 | `input_type` | | `csv` or `parquet`. Required for `import` |
 | `args` | `[]` | passed through. An import gets the database name first |
 | `command` | `[]` | runs in the runner |
-| `image` | none | runs as its own pod. It needs `bash`, `tee` and `base64` |
+| `image` | unset | runs as its own pod. It needs `bash`, `tee` and `base64` |
 | `env` | `{}` | a value `secret:<ref>` is resolved |
 | `output` | `import` | `dump`: the command leaves `<work>/<database>.dump` |
 | `import_args` | `[]` | `--nodes` and `--relationships` for `output: import` |
-| `timeout` | `2h` | for example `90m` or `3600s` |
+| `timeout` | `2h` | such as `90m` or `3600s` |
 
-The load fails, naming the group, on any of these:
+Each of these fails the load, naming the group:
 
 - `live` with `read-only` or with `protect_writes: false`
 - `read-only` with `protect_writes: true`
-- `rebuild` without `build`, or on a tier without `rebuild_cron`
-- `import` without `input_type`
-- `command` with neither `command` nor `image`, or with `output: import` and no `import_args`
-- a group that backs up writes on a tier without `full_cron` and `diff_cron`
+- `rebuild` missing `build`, or on a tier missing `rebuild_cron`
+- `import` missing `input_type`
+- `command` missing both `command` and `image`, or with `output: import` and empty `import_args`
+- a group that backs up writes on a tier missing `full_cron` or `diff_cron`
 
 ## tiers{}
 
@@ -95,8 +95,8 @@ A tier needs at least one of `full_cron`, `diff_cron` and `rebuild_cron`.
 | `rpo_minutes` | | default for the tier's groups |
 | `verify_cron` | `0 6 * * *` with `full_cron` | `verify` |
 | `prune_cron` | `0 7 * * 0` with `full_cron` | `prune` |
-| `aggregate_cron` | none | `aggregate`. It ends point-in-time restore inside each chain |
-| `cleanup_cron` | none | drops superseded databases |
+| `aggregate_cron` | off | `aggregate`. It ends point-in-time restore inside each chain |
+| `cleanup_cron` | off | drops superseded databases |
 | `cleanup_keep` | `1` | databases kept before the current one |
 | `cleanup_older_than_days` | `7` | younger databases are kept |
 
@@ -120,10 +120,10 @@ Jobs are `<tier>_<job>` in Dagster and `neo4j_<job>_<tier>` in Airflow.
 | `password_ref` | `SECRET_PROVIDER`'s default | a secret reference |
 | `backup_source` | `neo4j:6362` | one address or a list |
 | `storage` | `default` | the cluster's store |
-| `topology` | none | default for its groups |
-| `cypher_version` | none | `"5"` on a Cypher 5 cluster |
-| `cutover` | none | `strategy: alias-swap`, or `external` with a `hook` |
-| `backup_upload` | none | `admin` or `pipeline`, as `BACKUP_UPLOAD` |
+| `topology` | unset | default for its groups |
+| `cypher_version` | unset | `"5"` on a Cypher 5 cluster |
+| `cutover` | unset | `strategy: alias-swap`, or `external` with a `hook` |
+| `backup_upload` | unset | `admin` or `pipeline`, as `BACKUP_UPLOAD` |
 
 ## storage{}
 

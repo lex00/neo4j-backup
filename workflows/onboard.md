@@ -1,13 +1,13 @@
 # Onboard a customer
 
-A team wants their databases backed up. You need the databases, the team's role, and a tier.
-You add a group to the policy, put the databases behind aliases, and take the first backup.
+Onboarding needs the customer's databases, their Neo4j role and a [tier](../GLOSSARY.md).
+Add a [group](../GLOSSARY.md) to the policy, put the databases behind [aliases](../GLOSSARY.md), and take the first backup.
 
 ## Add the group to the policy
 
 1. Pick a tier. In the example policy, `gold` takes a daily full and hourly diffs.
     `silver` takes a weekly full and 6-hourly diffs, `bronze` a weekly full and daily diffs.
-    The diff interval is what a restore can lose.
+    The diff interval is the most data a restore can lose.
 
 2. Grant the customer's role on the database. A restore copies these grants to the new database.
 3. Add a group:
@@ -21,8 +21,8 @@ You add a group to the policy, put the databases behind aliases, and take the fi
     Override profile values on the group (`retention_days: 30`).
 
 4. Ship the policy. Dagster's `reconcile_registry` sensor adds the targets within five minutes.
-    Airflow picks them up at the next DAG parse. For a new tier, switch on its schedules:
-    Dagster creates them stopped unless the policy says `schedules: running`.
+    Airflow picks them up at the next DAG parse. A new tier's schedules start stopped in Dagster;
+    switch them on, or set `schedules: running` in the policy.
 
 ## Check, alias and take the first backup
 
@@ -33,7 +33,7 @@ You add a group to the policy, put the databases behind aliases, and take the fi
 
     1. Checks the file with `validate_policy` and shows the group's tier and retention with `policy_show`.
     2. Previews aliases with `preview_adopt` and stops on a `conflict` or `migrate`.
-        After your yes it runs `run_adopt`.
+        After the operator approves, it runs `run_adopt`.
 
     3. Takes a full with `run_backup(kind="FULL")`, then `run_verify`.
     4. Confirms every member is `ok` in `coverage_report`.
@@ -56,10 +56,10 @@ You add a group to the policy, put the databases behind aliases, and take the fi
 
     Trigger `neo4j_backup_<tier>_full` with `{"group_id": "<group>"}`, then `neo4j_verify_<tier>`.
 
-Then tell the customer their tier and `retention_days`, and send them the [Customer guide](../CUSTOMERS.md).
+Then send the customer their tier, their `retention_days` and the [Customer guide](../CUSTOMERS.md).
 
 A `tenant:` label on a customer's groups selects them all: `backup --tenant acme`, `verify --tenant acme`.
-It is a label, not access control.
+It selects only; Neo4j roles control access.
 
 ## Adopt existing databases
 
@@ -78,7 +78,7 @@ neo4j-backup --json adopt shop --dry-run      # per member: create, skip, confli
 neo4j-backup --json adopt shop --confirm      # CREATE ALIAS shop FOR DATABASE legacy-shop
 ```
 
-Nothing is copied or dropped. A `conflict` (alias points elsewhere) stops it.
+Adopt only creates aliases. A `conflict` (alias points elsewhere) stops it.
 MCP: `preview_adopt`, then `run_adopt`.
 
 A database that already has the alias's name shows as `migrate`, since names and aliases share one namespace.
@@ -94,7 +94,7 @@ A database that already has the alias's name shows as `migrate`, since names and
 
 ## Try a test group
 
-Run the whole loop on a database nobody uses first:
+Run the whole loop first on an unused database:
 
 ```cypher
 CREATE DATABASE `try-1` WAIT;

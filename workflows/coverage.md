@@ -1,11 +1,11 @@
 # Check coverage
 
-Is every customer database backed up recently enough to restore?
-Each member's state is `ok`, `stale` (older than the group's `rpo_minutes`), `by_design` or `retired`.
+Coverage shows whether each customer database has a recent enough backup.
+Each [member](../GLOSSARY.md) has a state: `ok`, `stale` (older than the group's `rpo_minutes`), `by_design` or `retired`.
 
 === "Agent (MCP)"
 
-    Run the `check_coverage` prompt, with a tenant or without (Claude Code: `/mcp__neo4j-backup__check_coverage`).
+    Run the `check_coverage` prompt, optionally with a tenant (Claude Code: `/mcp__neo4j-backup__check_coverage`).
     It calls `coverage_report`, which groups members by state.
     Each stale member comes with a reason ("never backed up", or how far past `rpo_minutes`) and the tool call that fixes it.
     On a read-write server the agent runs those backups and checks again.
@@ -15,7 +15,7 @@ Each member's state is `ok`, `stale` (older than the group's `rpo_minutes`), `by
     ```bash
     neo4j-backup status                       # or --tenant <t>, or one group
     neo4j-backup status --stale               # exit 1 when any member is stale
-    neo4j-backup restore-points <group>       # what each member can be restored to, and gaps
+    neo4j-backup restore-points <group>       # restore windows and gaps per member
     neo4j-backup verify <group>               # restore the latest backups aside and check them
     ```
 
@@ -29,15 +29,15 @@ Each member's state is `ok`, `stale` (older than the group's `rpo_minutes`), `by
     The `neo4j_status` DAG runs on `dbms.status_cron` and fails when a member is stale.
     `neo4j_verify_<tier>` runs on `verify_cron`.
 
-A diff with no full to build on is skipped and the full lane takes over.
+A diff for a member with a missing full is skipped, and the full lane takes over.
 It shows as a warning on Dagster's `backup_taken` check and a skipped Airflow task.
-Aggregate runs only on tiers that set `aggregate_cron`, since it removes point-in-time restore inside chains.
+Aggregate runs only on tiers that set `aggregate_cron`, since it removes point-in-time restore inside [chains](../GLOSSARY.md).
 
 ## Alerts
 
 Set `NEO4J_BACKUP_ALERT_WEBHOOK` to a chat webhook and every failed run posts one line.
-That is Dagster's `alert_on_failure` sensor and every Airflow DAG's failure callback.
-Without it nothing is sent (see the Airflow page's [Turn it on](../airflow/README.md#turn-it-on)).
+Dagster's `alert_on_failure` sensor and every Airflow DAG's failure callback send it.
+Alerts stay off while the variable is unset (see the Airflow page's [Turn it on](../airflow/README.md#turn-it-on)).
 
 These alerts need the scheduler. Add one check outside it, from cron, CI or a Kubernetes CronJob:
 
@@ -51,5 +51,5 @@ These alerts need the scheduler. Add one check outside it, from cron, CI or a Ku
 ## Changes customers make directly
 
 A customer with cluster credentials can move an alias. Backups then follow the alias
-to a database with no full, so its diffs are skipped until the next full.
+to the other database, and its diffs are skipped until its first full.
 When a group's backups start failing, compare `SHOW ALIASES` with your last restore result.
