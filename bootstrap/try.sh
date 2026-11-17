@@ -2,7 +2,10 @@
 # `just try` (#269): the local loop in one command. Resets the local Compose stack, installs the
 # CLI, then plays a restore request on the demo group: back up, a customer deletes their orders,
 # back up again, restore to just before the delete, and show the undo.
+# `just try-mcp` (#280) runs the same story, but the restore goes through the MCP server: the
+# restore_request prompt played by bootstrap/try_mcp.py over a real MCP session.
 set -euo pipefail
+MODE="${1:-cli}"
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source bootstrap/lib.sh
 
@@ -20,6 +23,9 @@ step "2/7 Install the CLI"
 if [ ! -x orchestrator/.venv/bin/neo4j-backup ]; then
   python3 -m venv orchestrator/.venv
   orchestrator/.venv/bin/pip install -q -e 'orchestrator[dev]'
+fi
+if [ "$MODE" = mcp ] && ! orchestrator/.venv/bin/python -c 'import mcp' 2>/dev/null; then
+  orchestrator/.venv/bin/pip install -q -e 'orchestrator[dev,mcp]'
 fi
 set -a; . ./.env; set +a
 export NEO4J_BOLT_URI=neo4j://localhost:7687 AWS_ENDPOINT_URL_S3=http://localhost:9000 \
@@ -47,16 +53,27 @@ say "orders after the delete: $(orders)"
 say "The next scheduled backup runs and captures the delete:"
 nb backup backup demo
 
-step "6/7 The customer asks: put it back to just before the delete"
-nb restore-points restore-points demo
-nb preview restore demo --until "$GOOD" --dry-run
-nb restore restore demo --until "$GOOD" --confirm --ticket TRY-1 --reason "orders deleted by mistake"
-say "orders now: $(orders)    (the alias points at a new database seeded from the backup)"
+if [ "$MODE" = mcp ]; then
+  step "6/7 The customer asks an operator, who asks their agent (MCP server, read-write)"
+  orchestrator/.venv/bin/python bootstrap/try_mcp.py demo "$GOOD" TRY-1
+  say "orders now: $(orders)    (the alias points at a new database seeded from the backup)"
+  step "7/7 Connect your own agent"
+  say "Point an MCP client at the server with the same environment as above:"
+  say "  command: orchestrator/.venv/bin/neo4j-backup-mcp   (MCP.md has the config)"
+  say "  then ask it: \"what can demo be restored to?\" or run the restore_request prompt"
+else
+  step "6/7 The customer asks: put it back to just before the delete"
+  nb restore-points restore-points demo
+  nb preview restore demo --until "$GOOD" --dry-run
+  nb restore restore demo --until "$GOOD" --confirm --ticket TRY-1 --reason "orders deleted by mistake"
+  say "orders now: $(orders)    (the alias points at a new database seeded from the backup)"
 
-step "7/7 The old databases are kept, so the restore can be undone"
-nb rollback rollback demo --dry-run
+  step "7/7 The old databases are kept, so the restore can be undone"
+  nb rollback rollback demo --dry-run
+fi
 
 printf '\n%sDone.%s Next:\n' "$B" "$N"
 say "Look at the backups:        just artifacts      (neo4j-admin output: $LOG)"
 say "Write your own policy:      policies/example.yaml and POLICY.md"
 say "Run it for real:            GETTING-STARTED.md, part 2"
+[ "$MODE" = mcp ] || say "The same restore by agent:  just try-mcp"

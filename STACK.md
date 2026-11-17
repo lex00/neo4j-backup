@@ -12,6 +12,7 @@ driven by `just`. It needs Docker with Docker Compose.
 | `bootstrap` | create the demo group's databases and load demo data |
 | `fresh` | `up` + `bootstrap` |
 | `try` | reset the stack, then back up, delete data and restore to before the delete, with a summary per step |
+| `try-mcp` | the same, with the restore run through the MCP server as an agent runs it |
 | `backup [group]` | online backup of each database in the group to the bucket |
 | `restore [group] [until]` | seed a new database per alias from its newest backup (or to `until`), then swap aliases |
 | `demo-pitr` | build a full, change, differential chain and restore to before the change |

@@ -20,16 +20,17 @@ They are plain `neo4j-admin` artifacts, so you can restore without this tool ([R
 ## Try it
 
 With Docker, `just` and Python 3.10+: `just try`. It backs up a demo group, deletes data, and restores to just before the delete.
+`just try-mcp` does the restore through the MCP server, the way an agent runs it.
 
 ## Start here
 
 | You are | Read |
 |---|---|
 | Trying it for the first time | [Getting started](GETTING-STARTED.md): the whole loop on your laptop |
-| The platform team running it | [Operator guide](OPERATOR.md): the six workflows |
+| The platform team running it | [Operator workflows](OPERATOR.md): six jobs, each by agent, CLI, Dagster or Airflow |
 | A team whose database is run for you | [Customer guide](CUSTOMERS.md) |
 | Writing the policy | [Policy](POLICY.md) and [every field](POLICY-FIELDS.md) |
-| Driving it from an agent or CI | [Agents](AGENTS.md), [MCP server](MCP.md), [CI recipes](CI.md) |
+| Running it through an agent | [Connect an agent](MCP.md) (MCP), or [AGENTS.md](AGENTS.md) for the CLI |
 
 ## Is it a fit?
 

@@ -33,6 +33,7 @@ theme:
         name: Light mode
   features:
     - content.code.copy
+    - content.tabs.link
     - navigation.tabs
     - navigation.sections
     - navigation.top
@@ -49,20 +50,22 @@ nav:
   - Home: index.md
   - Start:
     - Getting started: GETTING-STARTED.md
+    - Connect an agent: MCP.md
+    - Set up:
+      - Deploy on Dagster: orchestrator/deploy/DEPLOY.md
+      - Dagster: orchestrator/README.md
+      - Airflow: airflow/README.md
+      - CI and cron: CI.md
     - Customer guide: CUSTOMERS.md
     - Glossary: GLOSSARY.md
-  - Run it:
-    - Operator guide: OPERATOR.md
+  - Workflows:
+    - Overview: OPERATOR.md
     - Onboard a customer: workflows/onboard.md
     - Check coverage: workflows/coverage.md
     - Restore on request: workflows/restore.md
     - Load data in bulk: workflows/load.md
     - Change or offboard: workflows/change.md
     - Recover or move: workflows/recover.md
-    - Deploy on Dagster: orchestrator/deploy/DEPLOY.md
-    - Dagster: orchestrator/README.md
-    - Airflow: airflow/README.md
-    - CI recipes: CI.md
   - Reference:
     - Policy: POLICY.md
     - Policy fields: POLICY-FIELDS.md
@@ -70,8 +73,6 @@ nav:
     - Recovery and Cypher: RECOVERY.md
     - Bulk import: IMPORT.md
     - CLI contract: CLI-CONTRACT.md
-    - Agents: AGENTS.md
-    - MCP server: MCP.md
   - Project:
     - Local stack: STACK.md
     - Design notes: DESIGN.md

@@ -1,19 +1,36 @@
 # Check coverage
 
-An agent on the [MCP server](../MCP.md) runs this page with the `check_coverage` prompt.
+Is every customer database backed up recently enough to restore?
+Each member's state is `ok`, `stale` (older than the group's `rpo_minutes`), `by_design` or `retired`.
 
-## Status and restore points
+=== "Agent (MCP)"
 
-- `neo4j-backup status` (or `--tenant <t>`, or one group) gives each member's newest restorable point.
-  The state against `rpo_minutes` is `ok`, `stale`, or `by_design`. MCP: `coverage_report`.
-- Dagster's `status_check` schedule and Airflow's `neo4j_status` DAG run it on `dbms.status_cron`
-  (default every 15 minutes). They fail when a member is stale.
-- A diff with no full to build on is skipped and the full lane takes over.
-  It shows as a warning on Dagster's `backup_taken` check and a skipped Airflow task.
-- `neo4j-backup verify <group>` combines the latest backups aside and runs a consistency check.
-  It runs on each tier's `verify_cron` (default daily 06:00).
-- `neo4j-backup restore-points <group>` shows what each member can be restored to, and gaps.
+    Run the `check_coverage` prompt, with a tenant or without (Claude Code: `/mcp__neo4j-backup__check_coverage`).
+    It calls `coverage_report`, which groups members by state.
+    Each stale member comes with a reason ("never backed up", or how far past `rpo_minutes`) and the tool call that fixes it.
+    On a read-write server the agent runs those backups and checks again.
 
+=== "CLI"
+
+    ```bash
+    neo4j-backup status                       # or --tenant <t>, or one group
+    neo4j-backup status --stale               # exit 1 when any member is stale
+    neo4j-backup restore-points <group>       # what each member can be restored to, and gaps
+    neo4j-backup verify <group>               # restore the latest backups aside and check them
+    ```
+
+=== "Dagster"
+
+    The `status_check` schedule runs `status_job` on `dbms.status_cron` (default every 15 minutes) and fails when a member is stale.
+    `<tier>_verify` runs verify on `verify_cron` (default daily 06:00).
+
+=== "Airflow"
+
+    The `neo4j_status` DAG runs on `dbms.status_cron` and fails when a member is stale.
+    `neo4j_verify_<tier>` runs on `verify_cron`.
+
+A diff with no full to build on is skipped and the full lane takes over.
+It shows as a warning on Dagster's `backup_taken` check and a skipped Airflow task.
 Aggregate runs only on tiers that set `aggregate_cron`, since it removes point-in-time restore inside chains.
 
 ## Alerts

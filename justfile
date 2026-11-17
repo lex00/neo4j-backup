@@ -32,6 +32,10 @@ fresh: up bootstrap
 try:
     ./bootstrap/try.sh
 
+# the same restore request, through the MCP server as an agent would run it
+try-mcp:
+    ./bootstrap/try.sh mcp
+
 # policy-driven backup of a group to object storage
 backup group="demo":
     ./bootstrap/backup.sh {{group}}

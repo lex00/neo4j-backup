@@ -87,4 +87,5 @@ Restore:
 
 ## See also
 
-The [MCP server](MCP.md) offers the same operations as typed tools. Operator tasks are in [OPERATOR.md](OPERATOR.md).
+If your agent supports MCP, prefer the [MCP server](MCP.md): typed tools and a prompt per workflow.
+The workflows are in [OPERATOR.md](OPERATOR.md).

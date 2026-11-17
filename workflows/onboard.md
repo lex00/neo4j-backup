@@ -1,16 +1,16 @@
 # Onboard a customer
 
-An agent on the [MCP server](../MCP.md) runs this page with the `onboard` prompt.
+A team wants their databases backed up. You need the databases, the team's role, and a tier.
+You add a group to the policy, put the databases behind aliases, and take the first backup.
 
-## Add a group
+## Add the group to the policy
 
 1. Pick a tier. In the example policy, `gold` takes a daily full and hourly diffs.
     `silver` takes a weekly full and 6-hourly diffs, `bronze` a weekly full and daily diffs.
     The diff interval is what a restore can lose.
 
-2. Put the database behind an alias (`CREATE ALIAS <alias> FOR DATABASE <database>`), or [adopt](#adopt-existing-databases) it.
-3. Grant the customer's role on the database. A restore copies these grants to the new database.
-4. Add a group to the policy:
+2. Grant the customer's role on the database. A restore copies these grants to the new database.
+3. Add a group:
 
     ```yaml
     - id: shop
@@ -18,19 +18,45 @@ An agent on the [MCP server](../MCP.md) runs this page with the `onboard` prompt
       aliases: [shop]
     ```
 
-    Override profile values on the group (`retention_days: 30`). `policy show shop` shows the result.
-    `policy validate <file>` checks the file (exit 0 valid, 2 invalid) with no cluster.
+    Override profile values on the group (`retention_days: 30`).
 
-5. Ship the policy. Dagster's `reconcile_registry` sensor adds the targets within five minutes.
-    Airflow picks them up at the next DAG parse.
+4. Ship the policy. Dagster's `reconcile_registry` sensor adds the targets within five minutes.
+    Airflow picks them up at the next DAG parse. For a new tier, switch on its schedules:
+    Dagster creates them stopped unless the policy says `schedules: running`.
 
-6. For a new tier, switch on its schedules. Dagster creates them stopped unless the policy says `schedules: running`.
-7. Take the first backup now and verify it:
-    - CLI: `neo4j-backup backup <group> --kind FULL`, then `neo4j-backup verify <group>`.
-    - Dagster: materialize the group's `backup` partitions with kind `FULL`, then `verify`.
-    - Airflow: trigger `neo4j_backup_<tier>_full` with `{"group_id": "<group>"}`, then `neo4j_verify_<tier>`.
+## Check, alias and take the first backup
 
-8. Tell the customer their tier and `retention_days`, and send them the [Customer guide](../CUSTOMERS.md).
+=== "Agent (MCP)"
+
+    Run the `onboard` prompt with the group and the policy file
+    (Claude Code: `/mcp__neo4j-backup__onboard shop policies/prod.yaml`). The agent:
+
+    1. Checks the file with `validate_policy` and shows the group's tier and retention with `policy_show`.
+    2. Previews aliases with `preview_adopt` and stops on a `conflict` or `migrate`.
+        After your yes it runs `run_adopt`.
+
+    3. Takes a full with `run_backup(kind="FULL")`, then `run_verify`.
+    4. Confirms every member is `ok` in `coverage_report`.
+
+=== "CLI"
+
+    ```bash
+    neo4j-backup policy validate policies/prod.yaml   # exit 0 valid, 2 invalid; no cluster needed
+    neo4j-backup policy show shop                     # effective settings and where each came from
+    neo4j-backup --json adopt shop --dry-run          # then --confirm, if a member needs an alias
+    neo4j-backup backup shop --kind FULL
+    neo4j-backup verify shop
+    ```
+
+=== "Dagster"
+
+    Materialize the group's `backup` partitions with kind `FULL`, then `verify`.
+
+=== "Airflow"
+
+    Trigger `neo4j_backup_<tier>_full` with `{"group_id": "<group>"}`, then `neo4j_verify_<tier>`.
+
+Then tell the customer their tier and `retention_days`, and send them the [Customer guide](../CUSTOMERS.md).
 
 A `tenant:` label on a customer's groups selects them all: `backup --tenant acme`, `verify --tenant acme`.
 It is a label, not access control.
@@ -52,7 +78,8 @@ neo4j-backup --json adopt shop --dry-run      # per member: create, skip, confli
 neo4j-backup --json adopt shop --confirm      # CREATE ALIAS shop FOR DATABASE legacy-shop
 ```
 
-Nothing is copied or dropped. A `conflict` (alias points elsewhere) stops it. MCP has `run_adopt`.
+Nothing is copied or dropped. A `conflict` (alias points elsewhere) stops it.
+MCP: `preview_adopt`, then `run_adopt`.
 
 A database that already has the alias's name shows as `migrate`, since names and aliases share one namespace.
 `--migrate --replace` moves it:
@@ -80,5 +107,5 @@ CREATE ALIAS `try` FOR DATABASE `try-1`;
   aliases: [try]
 ```
 
-Back it up and verify it (step 7), then preview a restore, restore it, and `rollback`.
+Back it up and verify it, then [restore it](restore.md) and roll it back.
 Remove the group and drop the databases afterwards.
