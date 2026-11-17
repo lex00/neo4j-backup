@@ -1,43 +1,57 @@
 # Restore on request
 
-An agent on the [MCP server](../MCP.md) runs this page with the `restore_request` prompt.
+A customer wants their data back as it was at some moment. You need the group or alias,
+the time in UTC (or "latest") and a ticket.
+A restore moves every database in the group to the same instant, so tell the customer that writes after it are lost.
 
-## Runbook
+=== "Agent (MCP)"
 
-1. Get the group or alias, the time in UTC (or "latest") and a ticket. A restore moves every database in
-    the group to the same instant. `--member <alias>` (repeatable) restores some only, and the dry-run warns.
+    Ask your agent: "restore demo to 09:00 UTC, ticket CHG-1234". Or run the prompt
+    (Claude Code: `/mcp__neo4j-backup__restore_request demo 2026-11-15T09:00:00Z CHG-1234`).
 
-2. List what can be restored:
+    1. `restore_plan` shows each member's restore window, the plan and a message for the customer.
+        If no backup covers the time, it lists the nearest windows instead.
 
-    ```bash
-    neo4j-backup --json restore-points <group>      # or --tenant <t>
-    ```
+    2. `preview_restore` shows the plan again. The agent stops and asks you.
+    3. After your yes, `run_restore` with `confirm=true`, the ticket and a reason.
+    4. The agent checks the baseline backup and gives you `old` and `newdb` per member.
 
-    Per member: each chain's window (`from` to `to`), load artifacts and gaps. Read-only credentials are enough.
+    The restore needs a read-write server. On a read-only one the agent hands you the CLI command.
 
-3. Tell the customer: writes after that time are gone, and transactions running at the switch must retry.
-4. Preview:
-
-    ```bash
-    neo4j-backup restore <group> --dry-run                                   # latest
-    neo4j-backup restore <group> --until 2026-11-15T09:00:00Z --dry-run      # point in time
-    ```
-
-5. Restore:
+=== "CLI"
 
     ```bash
+    neo4j-backup --json restore-points <group>          # windows, loads, gaps per member
+    neo4j-backup restore <group> --until 2026-11-15T09:00:00Z --dry-run
     neo4j-backup --json restore <group> --until 2026-11-15T09:00:00Z --confirm \
       --ticket CHG-1234 --reason "customer request: bad import at 09:05" > restore.json
     ```
 
-    Dagster: the `restore_group` job with config
-    `{ops: {restore_group_op: {config: {group_id: <group>, restore_until: "2026-11-15T09:00:00Z", ticket: CHG-1234, reason: "…"}}}}`.
-    Airflow: `airflow dags trigger neo4j_restore -c '{"group_id": "<group>", "restore_until": "2026-11-15T09:00:00Z", "ticket": "CHG-1234", "reason": "…"}'`.
+    Leave out `--until` for the latest. `--member <alias>` (repeatable) restores some members only.
+    `restore-points` works with read-only credentials.
 
-6. Check the baseline (below). Send the customer the restore point and `old` and `newdb` from the result.
+=== "Dagster"
 
-Every mutating command and job records `--ticket` and `--reason`.
-`NEO4J_BACKUP_REQUIRE_TICKET=true` refuses an applied change without one (exit 3, `ticket_required`).
+    Launch the `restore_group` job with `dry_run: true`, read the plan, then launch it again without:
+
+    ```yaml
+    ops:
+      restore_group_op:
+        config: {group_id: <group>, restore_until: "2026-11-15T09:00:00Z", ticket: CHG-1234, reason: "…"}
+    ```
+
+=== "Airflow"
+
+    ```bash
+    airflow dags trigger neo4j_restore -c '{"group_id": "<group>", "restore_until": "2026-11-15T09:00:00Z", "dry_run": true}'
+    airflow dags trigger neo4j_restore -c '{"group_id": "<group>", "restore_until": "2026-11-15T09:00:00Z", "ticket": "CHG-1234", "reason": "…"}'
+    ```
+
+    Other Params are in the [Airflow page](../airflow/README.md#the-dags).
+
+Afterwards, check the [baseline](#baseline-backup) and send the customer the restore point and the new database names.
+Every path records the ticket and reason.
+`NEO4J_BACKUP_REQUIRE_TICKET=true` refuses an applied change without a ticket (exit 3, `ticket_required`).
 
 ## How the restore chooses and switches
 
@@ -65,24 +79,51 @@ Run `neo4j-backup backup <group> --kind FULL`. Until then, diffs report those me
 
 ## Undo a restore
 
-```bash
-neo4j-backup --json rollback <group> --dry-run          # [--member <alias>]
-neo4j-backup --json rollback <group> --confirm --ticket CHG-1234
-```
-
 Each swap is recorded in `_state/<group>.json`, and rollback reverts the latest one.
 It refuses if the previous database is gone. Privileges granted since the swap are copied back.
-Running it again goes forward again. Dagster: `rollback_job`. Airflow: `neo4j_rollback`. MCP: `run_rollback`.
+Running it again goes forward again.
+
+=== "Agent (MCP)"
+
+    `run_rollback(group, dry_run=true)`, then with `confirm=true` after your yes. The `restore_request` prompt offers it.
+
+=== "CLI"
+
+    ```bash
+    neo4j-backup --json rollback <group> --dry-run          # [--member <alias>]
+    neo4j-backup --json rollback <group> --confirm --ticket CHG-1234
+    ```
+
+=== "Dagster"
+
+    The `rollback_job`, with `group_id` and optional `members`.
+
+=== "Airflow"
+
+    The `neo4j_rollback` DAG, with Params `group_id` and `members`.
 
 ## Clean up later
 
-After a soak period, drop the superseded databases:
-
-```bash
-neo4j-backup --json cleanup <group> --dry-run                 # the exact DROP set
-neo4j-backup --json cleanup <group> --keep 1 --older-than 7 --confirm --ticket CHG-1234
-```
-
+After a soak period, drop the superseded databases.
 Cleanup drops only databases the tool created for a member that no alias targets.
-It keeps the current target and the `--keep` newest before it, and revokes copied privileges first.
+It keeps the current target and the newest `keep` before it, and revokes copied privileges first.
 It also runs on the tier's `cleanup_cron`.
+
+=== "Agent (MCP)"
+
+    `run_cleanup(group, keep, older_than_days, dry_run=true)` lists the exact DROP set. Apply with `confirm=true`.
+
+=== "CLI"
+
+    ```bash
+    neo4j-backup --json cleanup <group> --dry-run                 # the exact DROP set
+    neo4j-backup --json cleanup <group> --keep 1 --older-than 7 --confirm --ticket CHG-1234
+    ```
+
+=== "Dagster"
+
+    The `cleanup_job`, with `group_id`, `keep` and `older_than_days`.
+
+=== "Airflow"
+
+    `neo4j_cleanup_<tier>` runs it for the whole tier.

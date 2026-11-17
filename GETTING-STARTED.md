@@ -30,71 +30,38 @@ $ neo4j-backup restore demo --until 2026-11-17T06:45:40.032Z --confirm --ticket 
    orders now: 2
 ```
 
-`just try` summarizes each command. To run the same loop by hand:
+`just try` summarizes each command.
 
-1. Start the stack and the demo group from [`policies/demo.yaml`](policies/demo.yaml):
+To watch an agent do the restore, run `just try-mcp`. Step 6 then goes through the MCP server.
+It makes the `restore_request` prompt's tool calls, with a stop for your yes before `run_restore`.
+To connect your own agent, see [Connect an agent](MCP.md).
 
-     ```bash
-     just fresh
-     ```
+To run the same loop by hand, start the stack from [`policies/demo.yaml`](policies/demo.yaml) and install the CLI:
 
-2. Install the CLI and point it at the stack:
+```bash
+just fresh
+python3 -m venv orchestrator/.venv
+orchestrator/.venv/bin/pip install -e 'orchestrator[dev]'
+set -a; . ./.env; set +a
+export NEO4J_BOLT_URI=neo4j://localhost:7687 \
+       AWS_ENDPOINT_URL_S3=http://localhost:9000 \
+       NEO4J_BACKUP_POLICY=policies/demo.yaml \
+       BACKUP_UPLOAD=admin \
+       RUNNER_EXEC_PREFIX='["docker","compose","--env-file",".env","-f","docker/compose.yaml","exec","-T","runner"]'
+alias neo4j-backup=orchestrator/.venv/bin/neo4j-backup
+```
 
-     ```bash
-     python3 -m venv orchestrator/.venv
-     orchestrator/.venv/bin/pip install -e 'orchestrator[dev]'
+`RUNNER_EXEC_PREFIX` runs `neo4j-admin` inside the runner container. Then:
 
-     set -a; . ./.env; set +a
-     export NEO4J_BOLT_URI=neo4j://localhost:7687 \
-            AWS_ENDPOINT_URL_S3=http://localhost:9000 \
-            NEO4J_BACKUP_POLICY=policies/demo.yaml \
-            BACKUP_UPLOAD=admin \
-            RUNNER_EXEC_PREFIX='["docker","compose","--env-file",".env","-f","docker/compose.yaml","exec","-T","runner"]'
-     alias neo4j-backup=orchestrator/.venv/bin/neo4j-backup
-     ```
-
-     `RUNNER_EXEC_PREFIX` runs `neo4j-admin` inside the runner container.
-
-3. Back up and check:
-
-     ```bash
-     neo4j-backup targets          # what the policy covers
-     neo4j-backup backup demo      # back up every database in the group
-     neo4j-backup verify demo      # prove the latest backups restore and are consistent
-     ```
-
-4. Restore. `--dry-run` shows which backup each database comes from, and `--confirm` does it:
-
-     ```bash
-     neo4j-backup restore demo --dry-run
-     neo4j-backup restore demo --confirm
-     ```
-
-     ```text
-     cutover acme-orders: acme-orders-20261115t204341 -> acme-orders-20261115t204747
-     cutover acme-graph: acme-graph-20261115t204341 -> acme-graph-20261115t204747
-     cutover acme-audit: acme-audit-20261115t204341 -> acme-audit-20261115t204747
-     ```
-
-     Each alias now points at a new database seeded from the backup, with privileges copied.
-     The old databases stay, so you can undo ([Restore on request](workflows/restore.md)).
-
-5. Restore to a point in time:
-
-     ```bash
-     just demo-pitr
-     ```
-
-     This takes a full, changes data, takes a differential, and restores to before and after the change.
-     With the CLI it is `neo4j-backup restore demo --until 2026-11-15T20:41:54Z --confirm`.
-
-6. Look around, then clean up:
-
-     ```bash
-     just artifacts    # the backup files in the bucket
-     just urls         # Neo4j Browser and the S3 endpoint
-     just down         # stop everything and delete the volumes
-     ```
+```bash
+neo4j-backup targets                    # what the policy covers
+neo4j-backup backup demo                # back up every database in the group
+neo4j-backup verify demo                # prove the latest backups restore and are consistent
+neo4j-backup restore demo --dry-run     # which backup each database comes from
+neo4j-backup restore demo --confirm     # seed new databases and move the aliases
+just demo-pitr                          # a full, a change, a diff, then restores either side of it
+just down                               # stop everything and delete the volumes
+```
 
 ## Part 2: set up for production
 
@@ -107,7 +74,7 @@ One policy file says what to back up and when. A scheduler runs it, and a runner
 | [Dagster](orchestrator/README.md) | you run Dagster; you get backup lanes, retries and run history |
 | [Airflow](airflow/README.md) | you run Airflow; the same work as a set of DAGs |
 | [CLI](CLI-CONTRACT.md) with [CI or cron](CI.md) | a few databases and no orchestrator |
-| [MCP server](MCP.md) | an operator drives status and restores through an agent; no schedules |
+| [An agent](MCP.md) | an operator runs the workflows through an agent; pair it with a scheduler for backups |
 
 All read the same policy and write the same backups, so you can switch later. On Kubernetes, see [Deploying on Dagster](orchestrator/deploy/DEPLOY.md) or the Airflow page's
 [Deploying in production](airflow/README.md#deploying-in-production).
@@ -160,4 +127,4 @@ The demo's [`docker/compose.yaml`](docker/compose.yaml) sets the same things.
 8. Set `NEO4J_BACKUP_ALERT_WEBHOOK` for failed runs and freshness alerts.
     Add a check that works when the scheduler is down ([Check coverage](workflows/coverage.md)).
 
-Day-to-day work is in the [Operator guide](OPERATOR.md). Give your customers the [Customer guide](CUSTOMERS.md).
+Day-to-day work is in the [operator workflows](OPERATOR.md). Give your customers the [Customer guide](CUSTOMERS.md).

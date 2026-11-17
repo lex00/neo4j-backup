@@ -7,6 +7,15 @@ a patch for fixes). See [RELEASING.md](RELEASING.md).
 
 ## [Unreleased]
 
+### Docs centered on the operator workflows (#276)
+- Each workflow page has a tab per path: Agent (MCP), CLI, Dagster and Airflow (#277).
+- A Workflows tab in the site nav. Dagster, Airflow and CI setup moved under Start (#278).
+  The workflows overview has a table of the prompt, CLI command, Dagster job and Airflow DAG for each.
+- MCP.md is now "Connect an agent", with an example run. AGENTS.md left the nav; it stays as the
+  instruction file for agents that drive the CLI (#279).
+- `just try-mcp`: the same restore request as `just try`, run through the MCP server. The home
+  page shows the restore both ways, and the adoption path has a "Connect an agent" step (#280).
+
 ### MCP built around the operator workflows (#271)
 - A prompt per workflow: `onboard`, `check_coverage`, `restore_request`, `bulk_load`, `offboard`
   and `recover_cluster` (#272). Each previews before it changes anything and waits for the

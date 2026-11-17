@@ -1,27 +1,44 @@
 # Load data in bulk
 
-An agent on the [MCP server](../MCP.md) runs this page with the `bulk_load` prompt.
+A group's data comes from files, not from an application: a nightly rebuild, or a one-time import.
+The tool builds new databases from the files, checks them, and moves the aliases.
 
 Give the group a `load:` block ([POLICY.md](../POLICY.md)) with `mode` (`once` or `rebuild`) and `writes`.
 Its `build` of `kind: import` names the input files in `args`.
 Put the files in `load.source` (default `<group>/_source/`, a `<slug>/` folder per member). Then:
 
-```bash
-neo4j-backup --json load <group> --dry-run        # source objects, build argv, target, what is lost
-neo4j-backup --json load <group> --confirm --ticket CHG-1234
-```
+=== "Agent (MCP)"
+
+    Run the `bulk_load` prompt with the group and a ticket (Claude Code: `/mcp__neo4j-backup__bulk_load shop CHG-1234`).
+    The agent shows the `load` settings with `policy_show` and the plan with `run_load(dry_run=true)`.
+    After your yes it calls `run_load` with `confirm=true`.
+
+=== "CLI"
+
+    ```bash
+    neo4j-backup --json load <group> --dry-run        # source objects, build argv, target, what is lost
+    neo4j-backup --json load <group> --confirm --ticket CHG-1234
+    ```
+
+=== "Dagster"
+
+    `load_job` on demand, with `group_id`. Rebuilds run on the `<tier>_rebuild` schedule (`rebuild_cron`).
+   
+
+=== "Airflow"
+
+    `neo4j_load` on demand, with Param `group_id`. Rebuilds run in `neo4j_rebuild_<tier>`.
+   
 
 The runner imports and dumps each member to `_seed/`, and the cluster seeds new databases.
 Once every member passes its checks (online, counts, `load.checks`), privileges copy and aliases move together.
-A failure drops the new databases (`--keep-failed` keeps them). By-name groups need `--replace`.
+A failure drops the new databases (`keep_failed` keeps them). By-name groups need `replace`.
+A rebuild never overlaps the group's backups, and a failed rebuild leaves the previous load serving.
 
-A switch to `writes: read-only` applies at the next load. For `mode: once`, run
-`neo4j-backup load <group> --reapply-access --confirm`.
+A switch to `writes: read-only` applies at the next load. For `mode: once`, apply it now:
+`run_load(reapply_access=true)` or `neo4j-backup load <group> --reapply-access --confirm`.
 
-Scheduled rebuilds run on the tier's `rebuild_cron` (Dagster `<tier>_rebuild`, Airflow `neo4j_rebuild_<tier>`).
-On demand: Dagster's `load_job`, Airflow's `neo4j_load`. A rebuild never overlaps the group's backups.
-A failed rebuild leaves the previous load serving.
-
+A portable copy of a group's data goes out with `run_export` or `neo4j-backup export <group>`.
 For builds the tool doesn't run, see [IMPORT.md](../IMPORT.md).
 
 ## Custom builds

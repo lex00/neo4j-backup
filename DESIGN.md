@@ -147,11 +147,7 @@ A binary `system` backup with an offline node-local restore keeps them. See [REC
 
 ## Status and open risks
 
-Validated locally: both adapters, backup through point-in-time restore, and k8s mode on k3d.
-A three-server cluster (`just cluster-smoke`) covered the alias swap.
-Cloud provisioning is out of scope (see [`orchestrator/deploy/DEPLOY.md`](orchestrator/deploy/DEPLOY.md)).
-
-Open risks:
+What has been validated is in [STACK.md](STACK.md#whats-validated). Open risks:
 
 - A lone full cannot be restored to a point in time.
 - A group gets no transactional consistency across its databases, only bounded clock skew.
